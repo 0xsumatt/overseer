@@ -17,7 +17,7 @@ import logging
 
 from data_collection.http import HttpClient
 
-log = logging.getLogger("cryptodash.scheduler")
+log = logging.getLogger("overseer.scheduler")
 
 _DISCORD_LIMIT = 2000          # hard max on message content
 _TRUNCATE = 1900               # leave room for our wrapping/formatting

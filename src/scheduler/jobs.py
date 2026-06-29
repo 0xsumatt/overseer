@@ -19,9 +19,9 @@ from datetime import datetime, timedelta, timezone
 from data_collection.base import BaseExchangeScraper
 from scheduler.notify import DiscordNotifier
 from scheduler.targets import FillsTarget, ScrapeTarget
-from storage.writers import Storage
+from src.storage.writers import Storage
 
-log = logging.getLogger("cryptodash.scheduler")
+log = logging.getLogger("overseer.scheduler")
 
 
 @dataclass(frozen=True)

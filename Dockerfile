@@ -15,4 +15,4 @@ RUN useradd --create-home app
 USER app
 
 # The scheduler is the long-running service. Supervised via compose restart.
-CMD ["cryptodash-scheduler"]
+CMD ["overseer-scheduler"]

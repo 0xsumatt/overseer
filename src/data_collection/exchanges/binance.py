@@ -40,7 +40,7 @@ class BinanceSpotScraper(BaseExchangeScraper):
     def _build_http(self) -> HttpClient:
         return HttpClient(
             limiter=RateLimiter.per_minute(6000, burst=120),   # 6000 weight/min/IP
-            default_headers={"User-Agent": "cryptodash/0.1"},
+            default_headers={"User-Agent": "overseer/0.1"},
         )
 
     # -- symbols ------------------------------------------------------------------
@@ -102,5 +102,5 @@ class BinanceFuturesScraper(BinanceSpotScraper):
     def _build_http(self) -> HttpClient:
         return HttpClient(
             limiter=RateLimiter.per_minute(2400, burst=60),    # 2400 weight/min/IP (fapi)
-            default_headers={"User-Agent": "cryptodash/0.1"},
+            default_headers={"User-Agent": "overseer/0.1"},
         )
