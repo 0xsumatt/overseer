@@ -3,7 +3,7 @@
 
 [binance_spot]
 intervals = ["1m"]
-symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "AAVE/USDT", "HYPE/USDT"]
+symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "AAVE/USDT",]
 
 [binance_perp]
 intervals = ["1m"]
