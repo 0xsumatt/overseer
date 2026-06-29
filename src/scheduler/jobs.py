@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from data_collection.base import BaseExchangeScraper
 from scheduler.notify import DiscordNotifier
 from scheduler.targets import FillsTarget, ScrapeTarget
-from src.storage.writers import Storage
+from storage.writers import Storage
 
 log = logging.getLogger("overseer.scheduler")
 
