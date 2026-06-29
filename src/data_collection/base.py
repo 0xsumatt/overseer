@@ -1,28 +1,4 @@
-"""The contract every exchange adapter implements.
 
-The base owns everything that is the *same* across venues so that a concrete
-adapter is just: identity + symbol convention + the per-endpoint normalization.
-Specifically the base provides:
-
-  * a place to declare venue identity and config (``exchange``, ``base_url``,
-    ``market_type``, ``capabilities``) as class attributes;
-  * construction of the venue's :class:`HttpClient` (rate limiter + headers
-    baked in) — overridable per venue;
-  * the canonical data methods (:meth:`fetch_ohlcv`, :meth:`fetch_fills`) which
-    default to "unsupported" so a venue only implements what it actually serves
-    over REST. Public trades are a *stream* concern, not a REST scraper method —
-    they live on the future websocket layer, uniform across venues;
-  * shared millisecond/Decimal helpers, since every venue we target speaks
-    epoch-millis timestamps and stringified numbers.
-
-What a concrete adapter must supply: :meth:`_build_http`, :meth:`to_symbol`,
-:meth:`to_native`, and whichever ``fetch_*`` methods its ``capabilities`` claim.
-
-Cross-*venue* symbol reconciliation (so Binance ``BTC`` and Hyperliquid ``BTC``
-join up) is deliberately NOT here — that's the job of a future ``symbols.py``.
-Each adapter just produces a canonical symbol that is sensible *within* the
-venue; ``market_type`` disambiguates spot vs perp.
-"""
 
 from __future__ import annotations
 
@@ -77,6 +53,12 @@ class BaseExchangeScraper(ABC):
     def to_native(self, symbol: str) -> str:
         """Canonical symbol -> native venue symbol for building requests."""
 
+    def market_type_for(self, symbol: str) -> MarketType:
+        """Market type for a canonical symbol — needed before a fetch to look up
+        the right resume point. Fixed per adapter by default; venues that mix
+        markets through one endpoint (Hyperliquid) override to derive it."""
+        return self.market_type
+
     # -- data methods: default to "unsupported"; venues override what they serve --
 
     async def fetch_ohlcv(
@@ -99,7 +81,7 @@ class BaseExchangeScraper(ABC):
     async def __aexit__(self, *exc) -> None:
         await self.aclose()
 
-    # -- shared normalization helpers ---------------------------------------------
+
 
     @staticmethod
     def _to_ms(dt: datetime) -> int:

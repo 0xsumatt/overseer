@@ -12,7 +12,7 @@ symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "AAVE/USDT", "HYPE/USDT"]
 # Hyperliquid: bare coin = perp, "X/USDC" = spot. Majors have no HL spot market.
 [hyperliquid]
 intervals = ["1m"]
-symbols = ["BTC", "ETH", "SOL", "AAVE", "HYPE", "HYPE/USDC"]
+symbols = ["BTC", "ETH", "SOL", "AAVE", "HYPE",]
 
 # Addresses whose fills we log (HLP = Hyperliquid's market-maker vault).
 [[fills]]
