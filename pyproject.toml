@@ -1,0 +1,40 @@
+[project]
+name = "overseer"
+version = "0.1.0"
+description = "DATA Dashboard"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "aiosonic>=0.31.1",
+    "apscheduler>=3.11.3",
+    "asyncpg>=0.31.0",
+    "orjson>=3.11.9",
+    "polars>=1.41.2",
+]
+
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project.optional-dependencies]
+
+
+web = [
+    "flask>=3.0",
+    "flask-login>=0.6",
+    "psycopg[binary]>=3.1",
+    "polars>=1.0",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.5",
+]
+ 
+[project.scripts]
+overseer-scheduler = "scheduler.main:cli"
+
+
+[tool.setuptools.packages.find]
+where = ["src"]

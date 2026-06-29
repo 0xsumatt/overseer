@@ -1,0 +1,36 @@
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: cryptodash
+    ports:
+      # localhost-only: reachable for psql on the server, NOT exposed publicly.
+      # The scheduler reaches the DB over the compose network regardless.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - tsdata:/var/lib/postgresql/data
+      # Migrations run automatically on FIRST init (empty data dir), in
+      # filename order, with the timescaledb extension available — so the
+      # hypertables, compression, and continuous aggregate all apply for real.
+      # Later migrations need a manual: psql "$DATABASE_URL" -f migrations/00N.sql
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d cryptodash"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  scheduler:
+    build: .
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@timescaledb:5432/cryptodash
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+    restart: unless-stopped       # the supervision the scheduler needs for a multi-day soak
+
+volumes:
+  tsdata:

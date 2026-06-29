@@ -1,0 +1,21 @@
+# symbols.toml — what the scheduler scrapes.
+# Section names are venue-ids mapped to adapters in the registry.
+
+[binance_spot]
+intervals = ["1m"]
+symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "AAVE/USDT", "HYPE/USDT"]
+
+[binance_perp]
+intervals = ["1m"]
+symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "AAVE/USDT", "HYPE/USDT"]
+
+# Hyperliquid: bare coin = perp, "X/USDC" = spot. Majors have no HL spot market.
+[hyperliquid]
+intervals = ["1m"]
+symbols = ["BTC", "ETH", "SOL", "AAVE", "HYPE", "HYPE/USDC"]
+
+# Addresses whose fills we log (HLP = Hyperliquid's market-maker vault).
+[[fills]]
+venue = "hyperliquid"
+address = "0xdfc24b077bc1425ad1dea75bcb6f8158e10df303"
+label = "hlp"
