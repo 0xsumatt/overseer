@@ -1,3 +1,22 @@
+"""Thin async HTTP client for exchange REST endpoints.
+
+Wraps aiosonic and folds in the three things every scraper needs but should
+never re-implement per venue:
+
+  * **proactive rate limiting** — a :class:`RateLimiter` is applied to every
+    request, so a call can't accidentally skip it;
+  * **retries with exponential backoff + full jitter** on transient failures
+    (timeouts, dropped connections, 5xx, 429);
+  * **reactive backoff** — a 429 honours ``Retry-After`` *and* pushes that pause
+    back into the limiter, so the whole client slows down, not just this call.
+
+Non-retryable responses (4xx other than 429) raise immediately — retrying a
+400/401/404 only wastes your rate budget and the venue's patience.
+
+This module is the single place that knows about aiosonic. Swap the HTTP
+library and this is the only file that changes.
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -76,6 +95,13 @@ class HttpClient:
         self._backoff_max = backoff_max
         self._timeouts = Timeouts(sock_connect=connect_timeout, sock_read=read_timeout)
         self._client = HTTPClient(connector=TCPConnector(timeouts=self._timeouts))
+
+    def pause(self, seconds: float) -> None:
+        """Push an application-level backoff (e.g. a venue's in-envelope rate
+        limit code) into the limiter — same effect as an HTTP 429 Retry-After:
+        the WHOLE client slows down, not just the failing call."""
+        if self._limiter is not None:
+            self._limiter.pause(seconds)
 
     def _backoff(self, attempt: int) -> float:
         # exponential with full jitter: uniform in [0, min(cap, base * 2**attempt)]
@@ -214,7 +240,7 @@ class HttpClient:
 
     async def aclose(self) -> None:
         """Best-effort connection-pool teardown."""
-        connector = getattr(self._client, "connector", None)
+        connector = getattr(getattr(self, "_client", None), "connector", None)
         cleanup = getattr(connector, "cleanup", None)
         if cleanup is not None:
             result = cleanup()

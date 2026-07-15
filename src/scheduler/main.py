@@ -18,6 +18,9 @@ from storage.writers import Storage
 
 log = logging.getLogger("overseer.scheduler")
 
+def _jitter(poll_seconds: int) -> int:
+
+    return max(2, min(15, poll_seconds // 6))
 
 def build_scheduler(
     scrapers, storage, notifier, state,

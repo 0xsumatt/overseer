@@ -1,3 +1,23 @@
+"""Bybit adapters — v5 unified REST (GET), spot + USDT linear perps.
+
+One API serves both markets via a ``category`` parameter, so the perp class is
+classvar overrides on the spot one (the Binance pattern). All v5 responses ride
+a ``{retCode, retMsg, result}`` envelope — retCode != 0 is an API-level error
+even when HTTP is 200, so the unwrap helper raises on it.
+
+Shapes (verified against bybit-exchange.github.io/docs/v5):
+  * kline:   GET /v5/market/kline?category&symbol&interval&start&limit
+             -> result.list = [[startMs, o, h, l, c, volume(base), turnover]]
+             in DESCENDING time order — reversed on normalize.
+  * funding: GET /v5/market/funding/history (category=linear, limit<=200)
+             -> [{symbol, fundingRate, fundingRateTimestamp}] DESC.
+             Interval varies per symbol: /v5/market/instruments-info carries
+             fundingInterval in MINUTES (480 = 8h default); cached per symbol.
+  * tickers: GET /v5/market/tickers (category=linear) -> openInterest (base),
+             turnover24h (quote), markPrice — the whole liquidity snapshot in
+             one call per symbol.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -39,11 +59,11 @@ def _window_ms(since: datetime, max_lookback_days: int = 60) -> tuple[int, int]:
     return start_ms, end_ms
 
 
-def _unwrap(payload: Any) -> Any:
-    """v5 envelope: HTTP 200 with retCode != 0 is still an error."""
-    if payload.get("retCode") != 0:
-        raise RuntimeError(f"bybit error {payload.get('retCode')}: {payload.get('retMsg')}")
-    return payload["result"]
+_RATE_LIMIT_CODES = {10006, 10018}     # too many visits / IP rate limit
+_RATE_LIMIT_BACKOFF = 30.0             # seconds to stall the bucket when bybit says stop
+
+
+
 
 
 class BybitSpotScraper(BaseExchangeScraper):
@@ -55,11 +75,23 @@ class BybitSpotScraper(BaseExchangeScraper):
 
     def _build_http(self) -> HttpClient:
         return HttpClient(
-            limiter=RateLimiter.per_second(20, burst=40),
-            default_headers={"User-Agent": "cryptodash/0.1"},
+            limiter=RateLimiter.per_second(5, burst=10),
+            default_headers={"User-Agent": "overseer/0.1"},
         )
 
     # -- symbols (BTCUSDT concatenated, like Binance) ------------------------------
+
+    def _unwrap(self, payload: Any) -> Any:
+        """v5 envelope: HTTP 200 with retCode != 0 is still an error — and
+        retCode 10006/10018 is bybit's rate limit arriving OUTSIDE HTTP 429,
+        so push the backoff into the limiter before raising (otherwise the
+        bucket keeps firing into the same limited window)."""
+        code = payload.get("retCode")
+        if code == 0:
+            return payload["result"]
+        if code in _RATE_LIMIT_CODES:
+            self.http.pause(_RATE_LIMIT_BACKOFF)
+        raise RuntimeError(f"bybit error {code}: {payload.get('retMsg')}")
 
     def to_symbol(self, native: str) -> str:
         native = native.upper()
@@ -88,7 +120,7 @@ class BybitSpotScraper(BaseExchangeScraper):
                 "limit": str(limit),
             },
         )
-        rows = _unwrap(payload)["list"]
+        rows = self._unwrap(payload)["list"]
         canonical = self.to_symbol(self.to_native(symbol))
         out = [
             OHLCV(
@@ -127,7 +159,7 @@ class BybitPerpScraper(BybitSpotScraper):
                 f"{self.base_url}/v5/market/instruments-info",
                 params={"category": "linear", "symbol": native},
             )
-            items = _unwrap(payload)["list"]
+            items = self._unwrap(payload)["list"]
             minutes = int(items[0]["fundingInterval"]) if items else 480
             self._funding_intervals[native] = max(1, minutes // 60)
         return self._funding_intervals[native]
@@ -147,7 +179,7 @@ class BybitPerpScraper(BybitSpotScraper):
                 "limit": str(limit),               # bybit caps this at 200
             },
         )
-        rows = _unwrap(payload)["list"]
+        rows = self._unwrap(payload)["list"]
         hours = await self._funding_interval(native)
         canonical = self.to_symbol(native)
         out = [
@@ -173,7 +205,7 @@ class BybitPerpScraper(BybitSpotScraper):
                 f"{self.base_url}/v5/market/tickers",
                 params={"category": "linear", "symbol": self.to_native(symbol)},
             )
-            items = _unwrap(payload)["list"]
+            items = self._unwrap(payload)["list"]
             if not items:
                 continue
             t = items[0]
