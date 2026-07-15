@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}charts · overseer{% endblock %}
+{% block content %}
+<div class="mb-4 flex items-center gap-3">
+  <select id="series" class="rounded bg-slate-900 border border-slate-700 px-3 py-1.5 text-sm">
+    {% for s in series %}
+    <option value="{{ s.exchange }}|{{ s.market_type }}|{{ s.symbol }}|{{ s.interval }}">
+      {{ s.exchange }} {{ s.market_type }} · {{ s.symbol }} · {{ s.interval }}
+    </option>
+    {% endfor %}
+  </select>
+  <select id="hours" class="rounded bg-slate-900 border border-slate-700 px-3 py-1.5 text-sm">
+    <option value="24">24h</option>
+    <option value="48" selected>48h</option>
+    <option value="168">7d</option>
+  </select>
+</div>
+<div id="chart" class="h-[520px] w-full rounded border border-slate-800"></div>
+
+<script src="https://unpkg.com/lightweight-charts@4/dist/lightweight-charts.standalone.production.js"></script>
+<script>
+const el = document.getElementById('chart');
+const chart = LightweightCharts.createChart(el, {
+  layout: { background: { color: 'transparent' }, textColor: '#94a3b8' },
+  grid: { vertLines: { color: '#1e293b' }, horzLines: { color: '#1e293b' } },
+  timeScale: { timeVisible: true, secondsVisible: false },
+  autoSize: true,
+});
+const candles = chart.addCandlestickSeries();
+
+async function load() {
+  const [exchange, market_type, symbol, interval] =
+      document.getElementById('series').value.split('|');
+  const hours = document.getElementById('hours').value;
+  const qs = new URLSearchParams({ exchange, market_type, symbol, interval, hours, limit: 5000 });
+  const data = await (await fetch(`/api/candles?${qs}`)).json();
+  candles.setData(data);
+  chart.timeScale().fitContent();
+}
+document.getElementById('series').addEventListener('change', load);
+document.getElementById('hours').addEventListener('change', load);
+load();
+</script>
+{% endblock %}

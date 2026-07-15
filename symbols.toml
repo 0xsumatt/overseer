@@ -1,21 +1,100 @@
-# symbols.toml — what the scheduler scrapes.
-# Section names are venue-ids mapped to adapters in the registry.
-
-[binance_spot]
+[venues.binance_spot]
 intervals = ["1m"]
-symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "AAVE/USDT",]
 
-[binance_perp]
+[venues.binance_perp]
 intervals = ["1m"]
-symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "AAVE/USDT", "HYPE/USDT"]
+funding = true
+liquidity = true
 
-# Hyperliquid: bare coin = perp, "X/USDC" = spot. Majors have no HL spot market.
-[hyperliquid]
+[venues.hyperliquid]
 intervals = ["1m"]
-symbols = ["BTC", "ETH", "SOL", "AAVE", "HYPE",]
+funding = true
+liquidity = true
 
-# Addresses whose fills we log (HLP = Hyperliquid's market-maker vault).
+[venues.bybit_spot]
+intervals = ["1m"]
+
+[venues.bybit_perp]
+intervals = ["1m"]
+funding = true
+liquidity = true
+
+[venues.lighter]
+intervals = ["1m"]
+funding = true
+liquidity = true
+
+[venues.extended]
+intervals = ["1m"]
+funding = true
+liquidity = true
+
+# [venues.bulk]
+# intervals = ["1m"]
+# funding = true
+# liquidity = true
+
+# -- assets --------------------------------------------------------------------
+
+[assets.BTC]
+binance_spot = "BTC/USDT"
+binance_perp = "BTC/USDT"
+hyperliquid  = "BTC"
+bybit_spot = "BTC/USDT"
+bybit_perp = "BTC/USDT"
+lighter = "BTC"
+extended = "BTC-USD"
+# bulk         = "BTC-USD"
+
+[assets.ETH]
+binance_spot = "ETH/USDT"
+binance_perp = "ETH/USDT"
+hyperliquid  = "ETH"
+bybit_spot = "ETH/USDT"
+bybit_perp = "ETH/USDT"
+lighter = "ETH"
+extended = "ETH-USD"
+# bulk         = "ETH-USD"
+
+[assets.SOL]
+binance_spot = "SOL/USDT"
+binance_perp = "SOL/USDT"
+hyperliquid  = "SOL"
+bybit_spot = "SOL/USDT"
+bybit_perp = "SOL/USDT"
+lighter = "SOL"
+extended = "SOL-USD"
+# bulk         = "SOL-USD"
+
+[assets.AAVE]
+binance_spot = "AAVE/USDT"
+binance_perp = "AAVE/USDT"
+hyperliquid  = "AAVE"
+bybit_spot = "AAVE/USDT"
+bybit_perp = "AAVE/USDT"
+lighter = "AAVE"
+extended = "AAVE-USD"
+# bulk         = "AAVE-USD"
+
+[assets.HYPE]
+binance_spot = "HYPE/USDT"
+binance_perp = "HYPE/USDT"
+hyperliquid  = "HYPE"
+bybit_spot = "HYPE/USDT"
+bybit_perp = "HYPE/USDT"
+lighter = "HYPE"
+extended = "HYPE-USD"
+# bulk         = "HYPE-USD"
+
+# -- tracked addresses -----------------------------------------------------------
+
 [[fills]]
-venue = "hyperliquid"
-address = "0xdfc24b077bc1425ad1dea75bcb6f8158e10df303"
-label = "hlp"
+venue   = "hyperliquid"
+address = "0x677d831aef5328190852e24f13c46cac05f984e7"
+label   = "hlp"
+
+# LLP — Lighter's protocol market-maker / insurance pool (public pool, no auth).
+[[fills]]
+venue   = "lighter"
+address = "281474976710654"
+label   = "llp"

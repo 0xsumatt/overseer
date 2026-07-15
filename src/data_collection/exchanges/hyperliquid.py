@@ -1,21 +1,3 @@
-"""Hyperliquid adapter — a POST-only venue, and the on-chain/perps source.
-
-Everything goes through one endpoint: ``POST /info`` with a JSON body whose
-``type`` selects the query. It's a perps DEX, so the public trade tape — and,
-because the book is on-chain, the per-trade counterparty addresses — comes from
-the websocket layer later, not REST. The only *scheduled* REST feed here is
-candles (``candleSnapshot``).
-
-``fetch_fills`` (``userFillsByTime``) is kept as an on-demand, per-address
-utility (e.g. analysing one wallet's PnL). It is account-scoped, so it can never
-be the market-wide tape; it is deliberately NOT in ``capabilities`` and is never
-scheduled as market-data ingest.
-
-Coin format encodes the market: a bare name ("BTC") or dex-prefixed name
-("xyz:XYZ100") is a perp; "X/USDC" or "@{index}" is spot. So market_type is
-derived per record rather than fixed for the whole adapter.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -23,26 +5,26 @@ from datetime import datetime
 from typing import ClassVar
 
 from core.enums import Exchange, MarketType, Side, Timeframe
-from core.models import OHLCV, Trade
+from core.models import OHLCV, FundingRate, LiquiditySnapshot, Trade
 from data_collection.base import BaseExchangeScraper, Capability
 from data_collection.http import HttpClient
 from data_collection.ratelimit import RateLimiter
 
 
 class HyperliquidScraper(BaseExchangeScraper):
-    exchange: ClassVar[Exchange] = Exchange.Hyperliquid
+    exchange: ClassVar[Exchange] = Exchange.HYPERLIQUID
     base_url: ClassVar[str] = "https://api.hyperliquid.xyz"
     market_type: ClassVar[MarketType] = MarketType.PERP        # default/primary
     # FILLS is scheduled for specific known addresses (e.g. the HLP vault), not
     # as a market-wide tape — that's still WS's job. See scheduler/targets.py.
     capabilities: ClassVar[frozenset[Capability]] = frozenset(
-        {Capability.OHLCV, Capability.FILLS}
+        {Capability.OHLCV, Capability.FILLS, Capability.FUNDING, Capability.LIQUIDITY}
     )
 
     def _build_http(self) -> HttpClient:
         return HttpClient(
             limiter=RateLimiter.per_minute(1200, burst=60),    # conservative; tune
-            default_headers={"User-Agent": "overseer/0.1"},
+            default_headers={"User-Agent": "cryptodash/0.1"},
         )
 
     # -- symbols ------------------------------------------------------------------
@@ -66,8 +48,9 @@ class HyperliquidScraper(BaseExchangeScraper):
     def to_native(self, symbol: str) -> str:
         return symbol
 
-    def market_type_for(self, symbol: str) -> MarketType:
-        return self._market_for_coin(symbol)
+    @classmethod
+    def market_type_for(cls, symbol: str) -> MarketType:
+        return cls._market_for_coin(symbol)
 
     # -- OHLCV: POST /info candleSnapshot -----------------------------------------
 
@@ -106,7 +89,16 @@ class HyperliquidScraper(BaseExchangeScraper):
             )
         return out
 
-   
+    # -- fills: POST /info userFillsByTime — per-address utility, NOT scheduled ---
+    #    Account-scoped, so it can't be the market-wide tape (that's WS later).
+    #    Handy for "analyse this one wallet's fills/PnL" on demand.
+
+    @classmethod
+    def is_fill_ref(cls, ref: object) -> bool:
+        return (
+            isinstance(ref, str) and ref.startswith("0x") and len(ref) == 42
+            and all(c in "0123456789abcdefABCDEF" for c in ref[2:])
+        )
 
     async def fetch_fills(self, address: str, since: datetime) -> Sequence[Trade]:
         fills = await self.http.post_json(
@@ -130,6 +122,57 @@ class HyperliquidScraper(BaseExchangeScraper):
                     side=Side.BUY if f["side"] == "B" else Side.SELL,
                     ts=self._from_ms(f["time"]),
                     wallet_address=address,         # the on-chain payoff
+                )
+            )
+        return out
+
+    # -- funding: POST /info fundingHistory (hourly settlements) ------------------
+
+    async def fetch_funding(self, symbol: str, since: datetime) -> Sequence[FundingRate]:
+        rows = await self.http.post_json(
+            f"{self.base_url}/info",
+            json={
+                "type": "fundingHistory",
+                "coin": self.to_native(symbol),
+                "startTime": self._to_ms(since),
+            },
+        )
+        return [
+            FundingRate(
+                exchange=self.exchange,
+                symbol=self.to_symbol(r["coin"]),
+                ts=self._from_ms(r["time"]),
+                rate=self._dec(r["fundingRate"]),
+                interval_hours=1,          # HL settles hourly
+            )
+            for r in rows
+        ]
+
+    # -- liquidity: POST /info metaAndAssetCtxs — ALL coins in one call -----------
+    #    universe[i] (names) aligns index-wise with ctxs[i] (market data).
+
+    async def fetch_liquidity(
+        self, symbols: Sequence[str]
+    ) -> Sequence[LiquiditySnapshot]:
+        from datetime import datetime as _dt, timezone as _tz
+        meta, ctxs = await self.http.post_json(
+            f"{self.base_url}/info", json={"type": "metaAndAssetCtxs"}
+        )
+        wanted = {self.to_native(s) for s in symbols}
+        now = _dt.now(_tz.utc)
+        out: list[LiquiditySnapshot] = []
+        for asset, ctx in zip(meta["universe"], ctxs):
+            if asset["name"] not in wanted:
+                continue
+            mark = ctx.get("markPx") or ctx.get("oraclePx")
+            out.append(
+                LiquiditySnapshot(
+                    exchange=self.exchange,
+                    symbol=self.to_symbol(asset["name"]),
+                    ts=now,
+                    open_interest=self._dec(ctx["openInterest"]),
+                    volume_24h=self._dec(ctx["dayNtlVlm"]),
+                    mark_price=self._dec(mark),
                 )
             )
         return out

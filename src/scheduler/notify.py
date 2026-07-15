@@ -1,16 +1,3 @@
-"""Discord notifications via webhook — best effort, never blocking a scrape.
-
-Reserved for things you need to *react* to: a job entering a failed state, a job
-recovering, and a once-a-day digest. Routine successes do NOT come here — they
-go to the job_runs table and show green on the health page. Per-run success
-pings would bury real failures under thousands of "ok" lines.
-
-A webhook needs no bot or gateway: POST {"content": "..."} to the URL. Discord
-replies 204 (empty body), so we use HttpClient.request (raw response), not
-post_json. Any delivery failure is logged and swallowed — alerting must never
-take down ingestion.
-"""
-
 from __future__ import annotations
 
 import logging

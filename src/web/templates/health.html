@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}health · overseer{% endblock %}
+{% block content %}
+<h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-400">job heartbeat</h2>
+<table class="mb-8 w-full text-sm">
+  <thead class="text-left text-slate-500">
+    <tr><th class="py-1 pr-4">job</th><th class="pr-4">status</th>
+        <th class="pr-4">last success</th><th class="pr-4">fetched</th>
+        <th class="pr-4">new</th><th>last error</th></tr>
+  </thead>
+  <tbody>
+    {% for j in jobs %}
+    <tr class="border-t border-slate-800 {{ 'bg-red-950/40' if j.last_status == 'fail' }}">
+      <td class="py-1.5 pr-4 font-mono text-xs">{{ j.job_id }}</td>
+      <td class="pr-4">
+        <span class="{{ 'text-red-400' if j.last_status == 'fail' else 'text-emerald-400' }}">
+          {{ j.last_status }}</span>
+      </td>
+      <td class="pr-4 text-slate-400">{{ j.last_success_at }}</td>
+      <td class="pr-4">{{ j.fetched }}</td>
+      <td class="pr-4">{{ j.new_rows }}</td>
+      <td class="max-w-md truncate text-xs text-slate-500">{{ j.last_error or '' }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-400">series freshness</h2>
+<table class="w-full text-sm">
+  <thead class="text-left text-slate-500">
+    <tr><th class="py-1 pr-4">series</th><th class="pr-4">last bar</th>
+        <th class="pr-4">age</th><th>stale ×interval</th></tr>
+  </thead>
+  <tbody>
+    {% for f in freshness %}
+    <tr class="border-t border-slate-800 {{ 'bg-red-950/40' if f.stale_factor > 3 }}">
+      <td class="py-1.5 pr-4 font-mono text-xs">
+        {{ f.exchange }} {{ f.market_type }} {{ f.symbol }} {{ f.interval }}</td>
+      <td class="pr-4 text-slate-400">{{ f.last_ts }}</td>
+      <td class="pr-4">{{ f.age }}</td>
+      <td class="{{ 'text-red-400' if f.stale_factor > 3 else 'text-emerald-400' }}">
+        {{ '%.1f' % f.stale_factor }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

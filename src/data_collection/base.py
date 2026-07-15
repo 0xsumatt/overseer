@@ -1,5 +1,3 @@
-
-
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -10,12 +8,14 @@ from enum import StrEnum
 from typing import ClassVar
 
 from core.enums import Exchange, MarketType, Timeframe
-from core.models import OHLCV, Trade
+from core.models import OHLCV, FundingRate, LiquiditySnapshot, Trade
 from data_collection.http import HttpClient
 
 
 class Capability(StrEnum):
     OHLCV = "ohlcv"
+    FUNDING = "funding"    # settled funding-rate history (perps)
+    LIQUIDITY = "liquidity"  # OI / 24h volume / mark snapshots (perps)
     TRADES = "trades"      # public tape — a STREAM (websocket) capability, not REST
     FILLS = "fills"        # per-address fills; on-demand utility, not scheduled
 
@@ -53,11 +53,14 @@ class BaseExchangeScraper(ABC):
     def to_native(self, symbol: str) -> str:
         """Canonical symbol -> native venue symbol for building requests."""
 
-    def market_type_for(self, symbol: str) -> MarketType:
+    @classmethod
+    def market_type_for(cls, symbol: str) -> MarketType:
         """Market type for a canonical symbol — needed before a fetch to look up
-        the right resume point. Fixed per adapter by default; venues that mix
-        markets through one endpoint (Hyperliquid) override to derive it."""
-        return self.market_type
+        the right resume point, and by the config loader to filter perp-only
+        feeds (funding/OI). Classmethod so callers never need an instance.
+        Fixed per adapter by default; venues that mix markets through one
+        endpoint (Hyperliquid) override to derive it."""
+        return cls.market_type
 
     # -- data methods: default to "unsupported"; venues override what they serve --
 
@@ -65,6 +68,27 @@ class BaseExchangeScraper(ABC):
         self, symbol: str, interval: Timeframe, since: datetime
     ) -> Sequence[OHLCV]:
         raise UnsupportedCapability(self.exchange, "fetch_ohlcv")
+
+    async def fetch_funding(
+        self, symbol: str, since: datetime
+    ) -> Sequence[FundingRate]:
+        raise UnsupportedCapability(self.exchange, "fetch_funding")
+
+    async def fetch_liquidity(
+        self, symbols: Sequence[str]
+    ) -> Sequence[LiquiditySnapshot]:
+        """Point-in-time liquidity for the given perp symbols. Batched: venues
+        that serve all coins in one call (Hyperliquid) filter; per-symbol venues
+        (Binance) loop internally."""
+        raise UnsupportedCapability(self.exchange, "fetch_liquidity")
+
+    @classmethod
+    def is_fill_ref(cls, ref: object) -> bool:
+        """Is this a plausible account reference for a fills target on this
+        venue? Formats differ: Hyperliquid uses 0x addresses, Lighter uses
+        integer account indices. Default: any non-empty string. The config
+        loader calls this so a malformed ref fails at startup, not at runtime."""
+        return isinstance(ref, str) and bool(ref.strip())
 
     async def fetch_fills(self, address: str, since: datetime) -> Sequence[Trade]:
         """Per-address fills — the path that carries a wallet_address."""
@@ -81,7 +105,7 @@ class BaseExchangeScraper(ABC):
     async def __aexit__(self, *exc) -> None:
         await self.aclose()
 
-
+    # -- shared normalization helpers ---------------------------------------------
 
     @staticmethod
     def _to_ms(dt: datetime) -> int:

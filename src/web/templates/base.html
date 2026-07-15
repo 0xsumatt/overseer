@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}overseer{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="h-full bg-slate-950 text-slate-200">
+  {% if current_user.is_authenticated %}
+  <nav class="border-b border-slate-800 px-6 py-3 flex items-center gap-6">
+    <span class="font-semibold tracking-wide text-slate-100">overseer</span>
+    <a href="{{ url_for('pages.dashboard') }}" class="text-sm hover:text-white">charts</a>
+    <a href="{{ url_for('pages.basis') }}" class="text-sm hover:text-white">basis</a>
+    {% if current_user.can_view_internal %}
+      <a href="{{ url_for('pages.health') }}" class="text-sm hover:text-white">health</a>
+    {% endif %}
+    <div class="ml-auto flex items-center gap-4 text-sm text-slate-400">
+      <span>{{ current_user.email }}</span>
+      <a href="{{ url_for('pages.logout') }}" class="hover:text-white">logout</a>
+    </div>
+  </nav>
+  {% endif %}
+  <main class="p-6">
+    {% with messages = get_flashed_messages() %}
+      {% for m in messages %}
+        <div class="mb-4 rounded border border-red-800 bg-red-950 px-4 py-2 text-sm text-red-200">{{ m }}</div>
+      {% endfor %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

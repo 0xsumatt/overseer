@@ -1,18 +1,3 @@
-"""Persistence layer — the only code that writes to Timescale.
-
-Async (asyncpg) because the ingest/scheduler side runs on an event loop. The
-Flask read side will use a separate sync connection (psycopg) against the same
-database; they share Timescale, never a connection.
-
-Writes are idempotent: every insert is ``ON CONFLICT (natural key) DO NOTHING``,
-so overlapping resume windows and post-crash re-runs can't double-insert. Each
-writer returns the number of rows *actually* inserted (new), which is what the
-scheduler logs and uses to reason about progress.
-
-Both tables ride one bulk-upsert path driven by a small column spec, so adding a
-table later is a spec, not a new code path.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
@@ -22,7 +7,7 @@ from typing import Any
 import asyncpg
 
 from core.enums import Exchange, MarketType, Timeframe
-from core.models import OHLCV, Trade
+from core.models import OHLCV, FundingRate, LiquiditySnapshot, Trade
 
 # (db column, postgres array cast, value extractor)
 _Col = tuple[str, str, Callable[[Any], Any]]
@@ -55,6 +40,27 @@ _TRADE_COLS: tuple[_Col, ...] = (
 # ts joins the conflict key because a hypertable's unique index must contain the
 # partitioning column; dedup-safe since a trade_id maps to exactly one ts.
 _TRADE_CONFLICT = ("exchange", "market_type", "symbol", "trade_id", "ts")
+
+
+
+_FUNDING_COLS: tuple[_Col, ...] = (
+    ("exchange",       "text",        lambda r: r.exchange.value),
+    ("symbol",         "text",        lambda r: r.symbol),
+    ("ts",             "timestamptz", lambda r: r.ts),
+    ("rate",           "numeric",     lambda r: r.rate),
+    ("interval_hours", "int4",        lambda r: r.interval_hours),
+)
+_FUNDING_CONFLICT = ("exchange", "symbol", "ts")
+
+_LIQ_COLS: tuple[_Col, ...] = (
+    ("exchange",      "text",        lambda r: r.exchange.value),
+    ("symbol",        "text",        lambda r: r.symbol),
+    ("ts",            "timestamptz", lambda r: r.ts),
+    ("open_interest", "numeric",     lambda r: r.open_interest),
+    ("volume_24h",    "numeric",     lambda r: r.volume_24h),
+    ("mark_price",    "numeric",     lambda r: r.mark_price),
+)
+_LIQ_CONFLICT = ("exchange", "symbol", "ts")
 
 
 class Storage:
@@ -90,7 +96,9 @@ class Storage:
     # -- writes -------------------------------------------------------------------
 
     async def write_ohlcv(self, records: Sequence[OHLCV]) -> int:
-        return await self._bulk_upsert("ohlcv", _OHLCV_COLS, _OHLCV_CONFLICT, records)
+        return await self._bulk_upsert(
+            "ohlcv", _OHLCV_COLS, _OHLCV_CONFLICT, records, update=True
+        )
 
     async def write_trades(self, records: Sequence[Trade]) -> int:
         return await self._bulk_upsert("trades", _TRADE_COLS, _TRADE_CONFLICT, records)
@@ -101,22 +109,32 @@ class Storage:
         cols: tuple[_Col, ...],
         conflict: tuple[str, ...],
         records: Sequence[Any],
+        *,
+        update: bool = False,
     ) -> int:
         if not records:
             return 0
         col_names = ", ".join(c[0] for c in cols)
         unnest = ", ".join(f"${i + 1}::{c[1]}[]" for i, c in enumerate(cols))
         on_conflict = ", ".join(conflict)
+        if update:
+            sets = ", ".join(
+                f"{c[0]} = EXCLUDED.{c[0]}" for c in cols if c[0] not in conflict
+            )
+            # xmax = 0 only on freshly inserted rows, so "new" still means new
+            # even though conflicting rows are rewritten.
+            action = f"DO UPDATE SET {sets} RETURNING (xmax = 0) AS is_new"
+        else:
+            action = "DO NOTHING RETURNING TRUE AS is_new"
         sql = (
             f"INSERT INTO {table} ({col_names}) "
             f"SELECT * FROM unnest({unnest}) "
-            f"ON CONFLICT ({on_conflict}) DO NOTHING "
-            f"RETURNING 1"
+            f"ON CONFLICT ({on_conflict}) {action}"
         )
         # one parallel array per column, expanded row-wise by unnest()
         arrays = [[extract(r) for r in records] for _, _, extract in cols]
         rows = await self.pool.fetch(sql, *arrays)
-        return len(rows)            # rows actually inserted (i.e. new)
+        return sum(1 for r in rows if r["is_new"])
 
     # -- resume points (the scheduler's "where did I leave off") ------------------
 
@@ -150,6 +168,19 @@ class Storage:
         return await self.pool.fetchval(
             "SELECT max(ts) FROM trades WHERE exchange=$1 AND wallet_address=$2",
             exchange.value, wallet_address,
+        )
+
+
+    async def write_funding(self, records: Sequence[FundingRate]) -> int:
+        return await self._bulk_upsert("funding_rates", _FUNDING_COLS, _FUNDING_CONFLICT, records)
+
+    async def write_liquidity(self, records: Sequence[LiquiditySnapshot]) -> int:
+        return await self._bulk_upsert("liquidity", _LIQ_COLS, _LIQ_CONFLICT, records)
+
+    async def latest_funding_ts(self, exchange: Exchange, symbol: str) -> datetime | None:
+        return await self.pool.fetchval(
+            "SELECT max(ts) FROM funding_rates WHERE exchange=$1 AND symbol=$2",
+            exchange.value, symbol,
         )
 
     # -- heartbeat (job health) ---------------------------------------------------

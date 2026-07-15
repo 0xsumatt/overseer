@@ -1,15 +1,3 @@
-"""Binance adapters — GET / weighted REST.
-
-Two venues share one implementation:
-  * BinanceSpotScraper    — spot, api.binance.com /api/v3/klines  (6000 wt/min/IP)
-  * BinanceFuturesScraper — USDT-M perps, fapi.binance.com /fapi/v1/klines (2400 wt/min/IP)
-
-Same symbol concatenation ("BTC/USDT" <-> "BTCUSDT") and the same klines array
-shape on both, so the futures adapter is just classvar overrides. The stored
-`exchange` is BINANCE for both; market_type (SPOT vs PERP) distinguishes them —
-which is exactly why market_type is a column, not part of the symbol.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -30,7 +18,7 @@ _QUOTES: tuple[str, ...] = (
 
 
 class BinanceSpotScraper(BaseExchangeScraper):
-    exchange: ClassVar[Exchange] = Exchange.Binance
+    exchange: ClassVar[Exchange] = Exchange.BINANCE
     base_url: ClassVar[str] = "https://api.binance.com"
     market_type: ClassVar[MarketType] = MarketType.SPOT
     capabilities: ClassVar[frozenset[Capability]] = frozenset({Capability.OHLCV})

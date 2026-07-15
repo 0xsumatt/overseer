@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}basis · overseer{% endblock %}
+{% block content %}
+<div class="mb-4 flex flex-wrap items-center gap-3 text-sm">
+  <label class="text-slate-400">spot</label>
+  <select id="spot" class="rounded bg-slate-900 border border-slate-700 px-3 py-1.5">
+    {% for s in series if s.market_type == 'spot' %}
+    <option value="{{ s.exchange }}|{{ s.symbol }}">{{ s.exchange }} · {{ s.symbol }}</option>
+    {% endfor %}
+  </select>
+  <label class="text-slate-400">perp</label>
+  <select id="perp" class="rounded bg-slate-900 border border-slate-700 px-3 py-1.5">
+    {% for s in series if s.market_type == 'perp' %}
+    <option value="{{ s.exchange }}|{{ s.symbol }}">{{ s.exchange }} · {{ s.symbol }}</option>
+    {% endfor %}
+  </select>
+  <select id="hours" class="rounded bg-slate-900 border border-slate-700 px-3 py-1.5">
+    <option value="24">24h</option>
+    <option value="48" selected>48h</option>
+    <option value="168">7d</option>
+  </select>
+</div>
+<div id="chart" class="h-[480px] w-full rounded border border-slate-800"></div>
+<p class="mt-2 text-xs text-slate-500">basis % = (perp close − spot close) / spot close × 100, joined on bar time</p>
+
+<script src="https://unpkg.com/lightweight-charts@4/dist/lightweight-charts.standalone.production.js"></script>
+<script>
+const chart = LightweightCharts.createChart(document.getElementById('chart'), {
+  layout: { background: { color: 'transparent' }, textColor: '#94a3b8' },
+  grid: { vertLines: { color: '#1e293b' }, horzLines: { color: '#1e293b' } },
+  timeScale: { timeVisible: true, secondsVisible: false },
+  autoSize: true,
+});
+const line = chart.addLineSeries({ priceFormat: { type: 'custom', formatter: v => v.toFixed(4) + '%' } });
+
+async function load() {
+  const [se, ss] = document.getElementById('spot').value.split('|');
+  const [pe, ps] = document.getElementById('perp').value.split('|');
+  const hours = document.getElementById('hours').value;
+  const qs = new URLSearchParams({
+    spot_exchange: se, spot_symbol: ss, perp_exchange: pe, perp_symbol: ps,
+    interval: '1m', hours, limit: 10000,
+  });
+  const data = await (await fetch(`/api/basis?${qs}`)).json();
+  line.setData(data.map(d => ({ time: d.time, value: d.basis_pct })));
+  chart.timeScale().fitContent();
+}
+for (const id of ['spot', 'perp', 'hours'])
+  document.getElementById(id).addEventListener('change', load);
+load();
+</script>
+{% endblock %}

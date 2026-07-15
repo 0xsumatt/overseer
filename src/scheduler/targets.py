@@ -1,26 +1,11 @@
-"""Scrape targets, loaded from a TOML config (symbols.toml).
-
-Config (which coins) is data, not code: add a coin by editing symbols.toml, with
-no .py change and no risk of a syntax error taking down the scheduler. load_targets
-validates the whole file and raises with ALL problems collected, so the scheduler
-fails fast and loud at startup rather than silently scraping nothing.
-
-A target belongs to a *venue-id* (the symbols.toml section name) which maps to a
-scraper via the registry — e.g. "binance_spot", "binance_perp", "hyperliquid".
-Symbols are in each venue's canonical form; market_type is derived by the adapter.
-
-A single cross-venue identifier (write "SOL" once, expand per venue) is a future
-symbols.py layer — deliberately not here, since it needs declared per-venue
-quote/market rules, not a string transform.
-"""
-
 from __future__ import annotations
 
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from core.enums import Timeframe
+from core.enums import MarketType, Timeframe
+from core.symbols import SymbolConfigError, SymbolRegistry
 from data_collection.exchanges.registry import REGISTRY
 
 
@@ -35,6 +20,33 @@ class ScrapeTarget:
     @property
     def job_id(self) -> str:
         return f"ohlcv:{self.venue}:{self.symbol}:{self.interval}"
+
+
+@dataclass(frozen=True)
+class FundingTarget:
+    """Settled funding history for one perp symbol. Resume-based, so polling
+    more often than settlements just returns nothing new — cheap."""
+    venue: str
+    symbol: str
+    poll_seconds: int = 900
+    backfill_days: int = 14
+
+    @property
+    def job_id(self) -> str:
+        return f"funding:{self.venue}:{self.symbol}"
+
+
+@dataclass(frozen=True)
+class LiquidityTarget:
+    """Point-in-time OI/volume snapshots for a batch of perp symbols on one
+    venue. Batched because HL serves all coins in one call."""
+    venue: str
+    symbols: tuple[str, ...]
+    poll_seconds: int = 300
+
+    @property
+    def job_id(self) -> str:
+        return f"liquidity:{self.venue}"
 
 
 @dataclass(frozen=True)
@@ -58,72 +70,99 @@ class FillsTarget:
         return f"fills:{self.venue}:{self.label}"
 
 
-def _is_eth_address(a: object) -> bool:
-    return (
-        isinstance(a, str)
-        and a.startswith("0x")
-        and len(a) == 42
-        and all(c in "0123456789abcdefABCDEF" for c in a[2:])
-    )
+def load_targets(path: str | Path) -> tuple[
+    list[ScrapeTarget], list[FillsTarget], list[FundingTarget], list[LiquidityTarget]
+]:
+    """Parse + validate symbols.toml ([venues] + [assets] format) into target
+    lists. Raises with ALL problems collected, so the scheduler fails fast and
+    loud at startup rather than silently scraping nothing.
 
-
-def load_targets(path: str | Path) -> tuple[list[ScrapeTarget], list[FillsTarget]]:
-    """Parse + validate symbols.toml into target lists. Raises on any problem."""
+    Targets are the cross product of [assets.*] listings and [venues.*]
+    settings: an asset listed on a venue gets an OHLCV target per interval;
+    venues flagged funding/liquidity get those jobs for their PERP listings
+    only (spot symbols are filtered via the adapter's market_type_for).
+    """
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(f"symbols config not found: {p}")
     with p.open("rb") as f:
         data = tomllib.load(f)
 
-    valid = set(REGISTRY)
-    ohlcv: list[ScrapeTarget] = []
-    fills: list[FillsTarget] = []
     errors: list[str] = []
 
-    for key, section in data.items():
-        if key == "fills":
-            continue                       # handled separately below
-        if key not in valid:
-            errors.append(f"unknown venue section [{key}] (known: {sorted(valid)})")
+    # -- the asset map (cross-venue symbol registry) ---------------------------
+    try:
+        registry = SymbolRegistry.from_config(data)
+    except SymbolConfigError as exc:
+        raise ValueError(str(exc)) from exc
+
+    # -- venue settings ---------------------------------------------------------
+    venues_cfg = data.get("venues", {})
+    known = set(REGISTRY)
+    for venue in venues_cfg:
+        if venue not in known:
+            errors.append(f"unknown venue [venues.{venue}] (known: {sorted(known)})")
+    # assets may only reference declared venues
+    for asset in registry.assets():
+        for venue in registry.listings(asset):
+            if venue not in venues_cfg:
+                errors.append(
+                    f"[assets.{asset}] references venue {venue!r} "
+                    "with no [venues.{0}] section".format(venue)
+                )
+
+    ohlcv: list[ScrapeTarget] = []
+    funding: list[FundingTarget] = []
+    liquidity: list[LiquidityTarget] = []
+
+    for venue, section in venues_cfg.items():
+        if venue not in known:
             continue
-        symbols = section.get("symbols", [])
-        intervals = section.get("intervals", ["1m"])
-        poll = int(section.get("poll_seconds", 60))
+        symbols = registry.venue_symbols(venue)
         if not symbols:
-            errors.append(f"[{key}] has no symbols")
+            errors.append(f"[venues.{venue}] has no assets listing it")
+            continue
+        poll = int(section.get("poll_seconds", 60))
         tfs: list[Timeframe] = []
-        for iv in intervals:
+        for iv in section.get("intervals", ["1m"]):
             try:
                 tfs.append(Timeframe(iv))
             except ValueError:
-                errors.append(f"[{key}] invalid interval {iv!r}")
+                errors.append(f"[venues.{venue}] invalid interval {iv!r}")
         for sym in symbols:
-            if not isinstance(sym, str) or not sym:
-                errors.append(f"[{key}] invalid symbol {sym!r}")
-                continue
             for tf in tfs:
-                ohlcv.append(ScrapeTarget(key, sym, tf, poll_seconds=poll))
+                ohlcv.append(ScrapeTarget(venue, sym, tf, poll_seconds=poll))
 
+        # funding / OI are PERP-domain; filter via the adapter so a spot
+        # listing can never spawn a funding job.
+        perp_syms = [
+            sym for sym in symbols
+            if REGISTRY[venue].market_type_for(sym) == MarketType.PERP
+        ]
+        if section.get("funding"):
+            for sym in perp_syms:
+                funding.append(FundingTarget(venue, sym))
+        if section.get("liquidity") and perp_syms:
+            liquidity.append(LiquidityTarget(venue, tuple(perp_syms)))
+
+    # -- tracked addresses -------------------------------------------------------
+    fills: list[FillsTarget] = []
     for i, entry in enumerate(data.get("fills", [])):
         venue, addr, label = entry.get("venue"), entry.get("address"), entry.get("label")
         ok = True
-        if venue not in valid:
+        if venue not in known:
             errors.append(f"fills[{i}]: unknown venue {venue!r}"); ok = False
-        if not _is_eth_address(addr):
-            errors.append(f"fills[{i}]: invalid address {addr!r}"); ok = False
+        elif not REGISTRY[venue].is_fill_ref(addr):
+            errors.append(f"fills[{i}]: invalid account ref {addr!r} for venue {venue}"); ok = False
         if not (isinstance(label, str) and label):
             errors.append(f"fills[{i}]: missing/invalid label"); ok = False
         if ok:
-            fills.append(
-                FillsTarget(venue, addr, label,
-                            poll_seconds=int(entry.get("poll_seconds", 30)))
-            )
+            fills.append(FillsTarget(venue, addr, label,
+                                     poll_seconds=int(entry.get("poll_seconds", 30))))
 
     if errors:
-        raise ValueError(
-            f"invalid symbols config ({p}):\n  - " + "\n  - ".join(errors)
-        )
+        raise ValueError(f"invalid symbols config ({p}):\n  - " + "\n  - ".join(errors))
     if not ohlcv and not fills:
         raise ValueError(f"symbols config {p} produced no targets")
 
-    return ohlcv, fills
+    return ohlcv, fills, funding, liquidity

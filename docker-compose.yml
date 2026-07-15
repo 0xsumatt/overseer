@@ -16,7 +16,7 @@ services:
       # Later migrations need a manual: psql "$DATABASE_URL" -f migrations/00N.sql
       - ./migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d cryptodash"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d overseer"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -28,7 +28,7 @@ services:
       timescaledb:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@timescaledb:5432/cryptodash
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@timescaledb:5432/overseer
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
     restart: unless-stopped       # the supervision the scheduler needs for a multi-day soak
 

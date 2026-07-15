@@ -1,9 +1,3 @@
-"""Runtime settings, env-driven.
-
-Kept dependency-free for now; swap to pydantic-settings later if you want
-validation and typed env parsing.
-"""
-
 from __future__ import annotations
 
 import os
@@ -24,6 +18,10 @@ class Settings:
   
     symbols_file: str = field(
         default_factory=lambda: os.getenv("OVERSEER_SYMBOLS_FILE", "symbols.toml")
+    )
+
+    flask_secret_key: str = field(
+        default_factory=lambda: os.getenv("FLASK_SECRET_KEY", "")
     )
 
 

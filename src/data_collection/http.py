@@ -1,22 +1,3 @@
-"""Thin async HTTP client for exchange REST endpoints.
-
-Wraps aiosonic and folds in the three things every scraper needs but should
-never re-implement per venue:
-
-  * **proactive rate limiting** — a :class:`RateLimiter` is applied to every
-    request, so a call can't accidentally skip it;
-  * **retries with exponential backoff + full jitter** on transient failures
-    (timeouts, dropped connections, 5xx, 429);
-  * **reactive backoff** — a 429 honours ``Retry-After`` *and* pushes that pause
-    back into the limiter, so the whole client slows down, not just this call.
-
-Non-retryable responses (4xx other than 429) raise immediately — retrying a
-400/401/404 only wastes your rate budget and the venue's patience.
-
-This module is the single place that knows about aiosonic. Swap the HTTP
-library and this is the only file that changes.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -26,6 +7,7 @@ from typing import Any
 from aiosonic import HTTPClient, TCPConnector
 from aiosonic import exceptions as _aio
 from aiosonic.timeout import Timeouts
+
 from data_collection.ratelimit import RateLimiter
 
 # Transient failures worth retrying. Anything outside this tuple (e.g. a bug in

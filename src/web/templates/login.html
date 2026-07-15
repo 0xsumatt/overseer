@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}login · overseer{% endblock %}
+{% block content %}
+<div class="mx-auto mt-24 max-w-sm">
+  <h1 class="mb-6 text-xl font-semibold text-slate-100">overseer</h1>
+  <form method="post" class="space-y-4">
+    <input name="email" type="email" required placeholder="email"
+           class="w-full rounded bg-slate-900 border border-slate-700 px-3 py-2 text-sm focus:outline-none focus:border-slate-500">
+    <input name="password" type="password" required placeholder="password"
+           class="w-full rounded bg-slate-900 border border-slate-700 px-3 py-2 text-sm focus:outline-none focus:border-slate-500">
+    <button class="w-full rounded bg-slate-100 px-3 py-2 text-sm font-medium text-slate-900 hover:bg-white">
+      sign in
+    </button>
+  </form>
+</div>
+{% endblock %}

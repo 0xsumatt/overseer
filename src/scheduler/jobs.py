@@ -1,15 +1,3 @@
-"""Scheduled jobs: scrape, record heartbeat, alert on state changes.
-
-scrape_* do the work and return a JobOutcome (they never raise into the
-scheduler). run_* wrap them: persist the heartbeat and notify Discord only on
-transitions (ok->fail, fail->ok). post_digest is the once-a-day summary.
-
-Two scrape kinds share one monitoring path via _record_and_alert:
-  * scrape_ohlcv  — per (exchange, symbol, interval), resumes on bar open-time
-  * scrape_fills  — per tracked address (e.g. HLP), resumes on that address's
-                    last fill across all symbols
-"""
-
 from __future__ import annotations
 
 import logging
@@ -18,10 +6,10 @@ from datetime import datetime, timedelta, timezone
 
 from data_collection.base import BaseExchangeScraper
 from scheduler.notify import DiscordNotifier
-from scheduler.targets import FillsTarget, ScrapeTarget
+from scheduler.targets import FillsTarget, FundingTarget, LiquidityTarget, ScrapeTarget
 from storage.writers import Storage
 
-log = logging.getLogger("overseer.scheduler")
+log = logging.getLogger("scheduler")
 
 
 @dataclass(frozen=True)
@@ -97,6 +85,7 @@ async def _record_and_alert(
         log.info("%s  fetched=%d new=%d", outcome.job_id, outcome.fetched, outcome.new_rows)
 
 
+# -- registered jobs (thin wrappers; explicit so no function is passed as a job arg)
 
 async def run_ohlcv(scraper, storage, notifier, state, target: ScrapeTarget) -> None:
     outcome = await scrape_ohlcv(scraper, storage, target)
@@ -105,6 +94,46 @@ async def run_ohlcv(scraper, storage, notifier, state, target: ScrapeTarget) -> 
 
 async def run_fills(scraper, storage, notifier, state, target: FillsTarget) -> None:
     outcome = await scrape_fills(scraper, storage, target)
+    await _record_and_alert(outcome, storage, notifier, state)
+
+
+
+
+async def scrape_funding(
+    scraper: BaseExchangeScraper, storage: Storage, target: FundingTarget
+) -> JobOutcome:
+    ran_at = datetime.now(timezone.utc)
+    try:
+        latest = await storage.latest_funding_ts(scraper.exchange, target.symbol)
+        since = latest or (ran_at - timedelta(days=target.backfill_days))
+        records = await scraper.fetch_funding(target.symbol, since)
+        new_rows = await storage.write_funding(records)
+    except Exception as exc:
+        log.exception("funding scrape failed: %s", target.job_id)
+        return JobOutcome(target.job_id, "fail", 0, 0, repr(exc), ran_at)
+    return JobOutcome(target.job_id, "ok", len(records), new_rows, None, ran_at)
+
+
+async def scrape_liquidity(
+    scraper: BaseExchangeScraper, storage: Storage, target: LiquidityTarget
+) -> JobOutcome:
+    ran_at = datetime.now(timezone.utc)
+    try:
+        records = await scraper.fetch_liquidity(list(target.symbols))
+        new_rows = await storage.write_liquidity(records)
+    except Exception as exc:
+        log.exception("liquidity scrape failed: %s", target.job_id)
+        return JobOutcome(target.job_id, "fail", 0, 0, repr(exc), ran_at)
+    return JobOutcome(target.job_id, "ok", len(records), new_rows, None, ran_at)
+
+
+async def run_funding(scraper, storage, notifier, state, target: FundingTarget) -> None:
+    outcome = await scrape_funding(scraper, storage, target)
+    await _record_and_alert(outcome, storage, notifier, state)
+
+
+async def run_liquidity(scraper, storage, notifier, state, target: LiquidityTarget) -> None:
+    outcome = await scrape_liquidity(scraper, storage, target)
     await _record_and_alert(outcome, storage, notifier, state)
 
 
@@ -121,7 +150,8 @@ async def post_digest(storage: Storage, notifier: DiscordNotifier) -> None:
         )
     else:
         lines = "\n".join(
-            f"• {r['job_id']} — last ok {r['last_success_at']}" for r in failing
+            f"• {r['job_id']} — last ok {r['last_success_at'] or 'never'}"
+            for r in failing
         )
         await notifier.digest(
             f"⚠️ daily heartbeat — {len(failing)}/{total} jobs failing:\n{lines}"
