@@ -6,6 +6,7 @@ from pathlib import Path
 
 from core.enums import MarketType, Timeframe
 from core.symbols import SymbolConfigError, SymbolRegistry
+from data_collection.base import Capability
 from data_collection.exchanges.registry import REGISTRY
 
 
@@ -140,10 +141,22 @@ def load_targets(path: str | Path) -> tuple[
             if REGISTRY[venue].market_type_for(sym) == MarketType.PERP
         ]
         if section.get("funding"):
-            for sym in perp_syms:
-                funding.append(FundingTarget(venue, sym))
+            if Capability.FUNDING not in REGISTRY[venue].capabilities:
+                errors.append(
+                    f"[venues.{venue}] has funding = true but its adapter does not "
+                    "implement fetch_funding — sync gap? (check the adapter file)"
+                )
+            else:
+                for sym in perp_syms:
+                    funding.append(FundingTarget(venue, sym))
         if section.get("liquidity") and perp_syms:
-            liquidity.append(LiquidityTarget(venue, tuple(perp_syms)))
+            if Capability.LIQUIDITY not in REGISTRY[venue].capabilities:
+                errors.append(
+                    f"[venues.{venue}] has liquidity = true but its adapter does not "
+                    "implement fetch_liquidity — sync gap? (check the adapter file)"
+                )
+            else:
+                liquidity.append(LiquidityTarget(venue, tuple(perp_syms)))
 
     # -- tracked addresses -------------------------------------------------------
     fills: list[FillsTarget] = []

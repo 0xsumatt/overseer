@@ -77,7 +77,6 @@ extended = "AAVE-USD"
 # bulk         = "AAVE-USD"
 
 [assets.HYPE]
-binance_spot = "HYPE/USDT"
 binance_perp = "HYPE/USDT"
 hyperliquid  = "HYPE"
 bybit_spot = "HYPE/USDT"

@@ -24,6 +24,21 @@ _INTERVALS: dict[Timeframe, str] = {
 }
 
 
+
+def _window_ms(since: datetime, max_lookback_days: int = 60) -> tuple[int, int]:
+    """Bybit v5 is strict about time params: send BOTH start and end, with
+    start strictly before end, and don't ask for absurd lookbacks. Returns a
+    clamped (start_ms, end_ms) pair."""
+    now = datetime.now(timezone.utc)
+    end_ms = int(now.timestamp() * 1000)
+    floor = end_ms - max_lookback_days * 86_400_000
+    start_ms = int(since.timestamp() * 1000)
+    start_ms = max(start_ms, floor)          # cap the lookback
+    if start_ms >= end_ms:
+        start_ms = end_ms - 60_000           # clock skew / same-ms resume: back off 1min
+    return start_ms, end_ms
+
+
 def _unwrap(payload: Any) -> Any:
     """v5 envelope: HTTP 200 with retCode != 0 is still an error."""
     if payload.get("retCode") != 0:
@@ -41,7 +56,7 @@ class BybitSpotScraper(BaseExchangeScraper):
     def _build_http(self) -> HttpClient:
         return HttpClient(
             limiter=RateLimiter.per_second(20, burst=40),
-            default_headers={"User-Agent": "overseer/0.1"},
+            default_headers={"User-Agent": "cryptodash/0.1"},
         )
 
     # -- symbols (BTCUSDT concatenated, like Binance) ------------------------------
@@ -61,13 +76,15 @@ class BybitSpotScraper(BaseExchangeScraper):
     async def fetch_ohlcv(
         self, symbol: str, interval: Timeframe, since: datetime, *, limit: int = 1000
     ) -> Sequence[OHLCV]:
+        start_ms, end_ms = _window_ms(since)
         payload = await self.http.get_json(
             f"{self.base_url}/v5/market/kline",
             params={
                 "category": self.category,
                 "symbol": self.to_native(symbol),
                 "interval": _INTERVALS[interval],
-                "start": str(self._to_ms(since)),
+                "start": str(start_ms),
+                "end": str(end_ms),
                 "limit": str(limit),
             },
         )
@@ -119,12 +136,14 @@ class BybitPerpScraper(BybitSpotScraper):
         self, symbol: str, since: datetime, *, limit: int = 200
     ) -> Sequence[FundingRate]:
         native = self.to_native(symbol)
+        start_ms, end_ms = _window_ms(since)
         payload = await self.http.get_json(
             f"{self.base_url}/v5/market/funding/history",
             params={
                 "category": "linear",
                 "symbol": native,
-                "startTime": str(self._to_ms(since)),
+                "startTime": str(start_ms),
+                "endTime": str(end_ms),            # bybit wants a bounded window
                 "limit": str(limit),               # bybit caps this at 200
             },
         )
