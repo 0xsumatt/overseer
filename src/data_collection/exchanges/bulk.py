@@ -34,7 +34,7 @@ class BulkScraper(BaseExchangeScraper):
     def _build_http(self) -> HttpClient:
         return HttpClient(
             limiter=RateLimiter.per_minute(300, burst=20),  # spec doesn't pin limits
-            default_headers={"User-Agent": "cryptodash/0.1"},
+            default_headers={"User-Agent": "overseer/0.1"},
         )
 
     # -- symbols: identity ("BTC-USD"); perp-only so market_type is fixed ----------

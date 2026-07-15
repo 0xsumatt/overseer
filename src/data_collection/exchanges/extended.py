@@ -43,7 +43,7 @@ class ExtendedScraper(BaseExchangeScraper):
     def _build_http(self) -> HttpClient:
         return HttpClient(
             limiter=RateLimiter.per_minute(600, burst=60),     # docs: 1000/min default
-            default_headers={"User-Agent": "cryptodash/0.1"},
+            default_headers={"User-Agent": "overseer/0.1"},
         )
 
     # -- symbols: identity; type derivable from the naming convention ---------------

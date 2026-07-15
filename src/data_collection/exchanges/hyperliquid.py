@@ -24,7 +24,7 @@ class HyperliquidScraper(BaseExchangeScraper):
     def _build_http(self) -> HttpClient:
         return HttpClient(
             limiter=RateLimiter.per_minute(1200, burst=60),    # conservative; tune
-            default_headers={"User-Agent": "cryptodash/0.1"},
+            default_headers={"User-Agent": "overseer/0.1"},
         )
 
     # -- symbols ------------------------------------------------------------------

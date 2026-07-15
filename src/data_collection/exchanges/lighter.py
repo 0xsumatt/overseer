@@ -41,7 +41,7 @@ class LighterScraper(BaseExchangeScraper):
     def _build_http(self) -> HttpClient:
         return HttpClient(
             limiter=RateLimiter.per_minute(300, burst=20),     # conservative
-            default_headers={"User-Agent": "cryptodash/0.1"},
+            default_headers={"User-Agent": "overseer/0.1"},
         )
 
     # -- symbols: identity, HL-style convention ------------------------------------

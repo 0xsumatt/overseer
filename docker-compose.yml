@@ -3,7 +3,7 @@ services:
     image: timescale/timescaledb:latest-pg16
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: cryptodash
+      POSTGRES_DB: overseer
     ports:
       # localhost-only: reachable for psql on the server, NOT exposed publicly.
       # The scheduler reaches the DB over the compose network regardless.

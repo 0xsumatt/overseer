@@ -41,7 +41,7 @@ class BybitSpotScraper(BaseExchangeScraper):
     def _build_http(self) -> HttpClient:
         return HttpClient(
             limiter=RateLimiter.per_second(20, burst=40),
-            default_headers={"User-Agent": "cryptodash/0.1"},
+            default_headers={"User-Agent": "overseer/0.1"},
         )
 
     # -- symbols (BTCUSDT concatenated, like Binance) ------------------------------
