@@ -8,3 +8,6 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Real secrets live in .env (only .env.example is committed)
+.env
