@@ -132,6 +132,9 @@ class ReadStorage:
 
         apr_pct = rate * (8760 / interval_hours) * 100
         oi_notional = open_interest (base units) * mark_price
+        oi_delta_pct = OI now vs the closest snapshot >= 24h old (liquidity
+        polls every 5min, so "ts = now - 24h" exactly rarely exists) — building
+        OI + rich funding is the squeeze setup the dislocation alerts can't see.
         """
         return self._fetch(
             """
@@ -146,6 +149,13 @@ class ReadStorage:
                        exchange, symbol, ts, open_interest, volume_24h, mark_price
                 FROM liquidity
                 ORDER BY exchange, symbol, ts DESC
+            ),
+            liq_24h_ago AS (
+                SELECT DISTINCT ON (exchange, symbol)
+                       exchange, symbol, open_interest AS oi_24h_ago
+                FROM liquidity
+                WHERE ts <= now() - interval '24 hours'
+                ORDER BY exchange, symbol, ts DESC
             )
             SELECT
                 f.exchange, f.symbol,
@@ -155,13 +165,81 @@ class ReadStorage:
                 l.open_interest,
                 l.open_interest * l.mark_price                  AS oi_notional,
                 l.volume_24h, l.mark_price,
-                l.ts                                            AS liq_ts
+                l.ts                                            AS liq_ts,
+                CASE WHEN a.oi_24h_ago IS NOT NULL AND a.oi_24h_ago != 0
+                     THEN (l.open_interest - a.oi_24h_ago) / a.oi_24h_ago * 100
+                     ELSE NULL END                               AS oi_delta_pct
             FROM latest_funding f
             LEFT JOIN latest_liq l
               ON l.exchange = f.exchange AND l.symbol = f.symbol
+            LEFT JOIN liq_24h_ago a
+              ON a.exchange = f.exchange AND a.symbol = f.symbol
             ORDER BY f.symbol, f.exchange
             """
         )
+
+
+
+
+    def funding_series(self, exchange: str, symbol: str,
+                       hours: int = 48, limit: int = 2000) -> list[Row]:
+        """Settled funding history for one perp — the carry overlay on the
+        basis chart. apr_pct annualizes across venue intervals (1h/4h/8h)."""
+        return self._fetch(
+            """
+            SELECT ts, rate, interval_hours,
+                   (rate * (8760.0 / interval_hours) * 100)::numeric AS apr_pct
+            FROM funding_rates
+            WHERE exchange = %s AND symbol = %s
+              AND ts >= now() - make_interval(hours => %s)
+            ORDER BY ts
+            LIMIT %s
+            """,
+            (exchange, symbol, hours, limit),
+        )
+
+    def fills_pulse(self) -> list[Row]:
+        """24h activity per tracked account — the MM pulse widget."""
+        return self._fetch(
+            """
+            SELECT wallet_address,
+                   count(*)                                   AS fills_24h,
+                   count(*) FILTER (WHERE side = 'buy')        AS buys,
+                   count(*) FILTER (WHERE side = 'sell')       AS sells,
+                   max(ts)                                     AS last_ts
+            FROM trades
+            WHERE wallet_address IS NOT NULL
+              AND ts >= now() - interval '24 hours'
+            GROUP BY 1
+            """
+        )
+
+    # -- venue-wide volume (daily sweep) ----------------------------------------
+
+    def venue_volume(self, days: int = 30) -> dict:
+        """Latest per-venue totals + the daily CEX-share series.
+        cex = binance + bybit; share is of TRACKED venues, not the whole market."""
+        latest = self._fetch(
+            """
+            SELECT DISTINCT ON (exchange)
+                   exchange, ts, volume_total, volume_spot, volume_perp
+            FROM venue_volume
+            ORDER BY exchange, ts DESC
+            """
+        )
+        series = self._fetch(
+            """
+            SELECT ts,
+                   sum(volume_total) FILTER (WHERE exchange IN ('binance','bybit'))
+                     / NULLIF(sum(volume_total), 0) * 100    AS cex_share_pct,
+                   sum(volume_total)                         AS total
+            FROM venue_volume
+            WHERE ts >= now() - make_interval(days => %s)
+            GROUP BY ts ORDER BY ts
+            """,
+            (days,),
+        )
+        return {"latest": latest, "series": series}
 
     # -- health (the internal soak-monitoring page) -----------------------------
 
@@ -181,6 +259,16 @@ class ReadStorage:
             """
         )
 
+    def ingest_freshness(self) -> Row | None:
+        """Age of the newest bar anywhere — the 'is ingest alive at all' signal
+        behind the public-page stale banner. Per-series staleness (one venue
+        quietly dead) stays the health page's job via freshness()."""
+        rows = self._fetch(
+            "SELECT max(ts) AS last_ts, "
+            "EXTRACT(EPOCH FROM (now() - max(ts))) AS age_seconds FROM ohlcv"
+        )
+        return rows[0] if rows and rows[0]["last_ts"] is not None else None
+
     def job_health(self) -> list[Row]:
         """Current heartbeat state of every scheduled job (job_runs table)."""
         return self._fetch(
@@ -192,6 +280,54 @@ class ReadStorage:
             ORDER BY (last_status = 'fail') DESC, job_id
             """
         )
+
+    def wallet_symbols(self, addresses: list[str]) -> list[Row]:
+        """Symbols any tracked wallet has traded, most active first — drives
+        the wallets page coin selector."""
+        return self._fetch(
+            "SELECT symbol, count(*) AS fills FROM trades "
+            "WHERE wallet_address = ANY(%s) GROUP BY 1 ORDER BY fills DESC",
+            (addresses,),
+        )
+
+    def wallet_flows(
+        self, symbol: str, addresses: list[str], since: datetime
+    ) -> list[Row]:
+        """5-minute net signed flow (buys − sells, base units) per wallet for
+        one symbol. The wallets page cumulates client-side, so a bucket with no
+        fills simply doesn't emit a row."""
+        return self._fetch(
+            """
+            SELECT wallet_address, time_bucket('5 minutes', ts) AS bucket,
+                   sum(CASE WHEN side = 'buy' THEN amount ELSE -amount END) AS net
+            FROM trades
+            WHERE symbol = %s AND wallet_address = ANY(%s) AND ts >= %s
+            GROUP BY 1, 2 ORDER BY 2
+            """,
+            (symbol, addresses, since),
+        )
+
+    def wallet_volume_24h(self, addresses: list[str]) -> list[Row]:
+        """Quote notional each tracked wallet filled in the last 24h — the
+        numerator for the wallet-share meters."""
+        return self._fetch(
+            "SELECT wallet_address, sum(price * amount) AS notional, count(*) AS fills "
+            "FROM trades "
+            "WHERE wallet_address = ANY(%s) AND ts >= now() - interval '24 hours' "
+            "GROUP BY 1",
+            (addresses,),
+        )
+
+    def venue_volume_latest(self, exchanges: list[str]) -> dict[str, Any]:
+        """Latest daily-sweep total per exchange, keyed — the wallet-share
+        denominator. A venue with no sweep yet is simply absent from the dict
+        rather than raising, so the meter reads '—' instead of erroring."""
+        rows = self._fetch(
+            "SELECT DISTINCT ON (exchange) exchange, volume_total FROM venue_volume "
+            "WHERE exchange = ANY(%s) ORDER BY exchange, ts DESC",
+            (exchanges,),
+        )
+        return {r["exchange"]: r["volume_total"] for r in rows}
 
     def fills_summary(self, wallet_address: str) -> list[Row]:
         """Per-symbol/side rollup of a tracked address's fills (e.g. HLP)."""

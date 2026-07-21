@@ -1,44 +1,364 @@
 {% extends "base.html" %}
 {% block title %}charts · overseer{% endblock %}
 {% block content %}
-<div class="mb-4 flex items-center gap-3">
-  <select id="series" class="rounded bg-slate-900 border border-slate-700 px-3 py-1.5 text-sm">
-    {% for s in series %}
-    <option value="{{ s.exchange }}|{{ s.market_type }}|{{ s.symbol }}|{{ s.interval }}">
-      {{ s.exchange }} {{ s.market_type }} · {{ s.symbol }} · {{ s.interval }}
-    </option>
-    {% endfor %}
-  </select>
-  <select id="hours" class="rounded bg-slate-900 border border-slate-700 px-3 py-1.5 text-sm">
-    <option value="24">24h</option>
-    <option value="48" selected>48h</option>
-    <option value="168">7d</option>
-  </select>
+<style>
+  /* panel chrome states (toggled by JS; compound styles live here, not utilities) */
+  .panel-collapsed { height: auto !important; }
+  .panel-maxed {
+    position: fixed; inset: 1.25rem; z-index: 40;
+    height: auto !important; background: #0D1119;
+    box-shadow: 0 0 0 100vmax rgba(11,14,22,.7);   /* dims everything behind */
+  }
+</style>
+<div class="mb-5 flex flex-wrap items-end justify-between gap-4">
+  <div>
+    <div class="font-mono text-xs tracking-label uppercase text-phosphor">price / ohlcv</div>
+    <h1 class="mt-1 text-xl font-semibold text-body">Charts</h1>
+  </div>
+  <div class="flex flex-wrap items-center gap-2">
+    <select id="series" class="rounded border border-line bg-panel px-3 py-1.5 font-mono text-xs text-body focus:border-phosphor focus:outline-none">
+      {% for s in series %}
+      <option value="{{ s.exchange }}|{{ s.market_type }}|{{ s.symbol }}|{{ s.interval }}">
+        {{ s.exchange }} · {{ s.market_type }} · {{ s.symbol }} · {{ s.interval }}</option>
+      {% endfor %}
+    </select>
+    <select id="compare-add" class="rounded border border-line bg-panel px-3 py-1.5 font-mono text-xs text-dim focus:border-phosphor focus:outline-none">
+      <option value="">+ compare…</option>
+      {% for s in series %}
+      <option value="{{ s.exchange }}|{{ s.market_type }}|{{ s.symbol }}|{{ s.interval }}">
+        {{ s.exchange }} · {{ s.market_type }} · {{ s.symbol }} · {{ s.interval }}</option>
+      {% endfor %}
+    </select>
+    <select id="hours" class="rounded border border-line bg-panel px-3 py-1.5 font-mono text-xs text-body focus:border-phosphor focus:outline-none">
+      <option value="24">24h</option>
+      <option value="48" selected>48h</option>
+      <option value="168">7d</option>
+    </select>
+  </div>
 </div>
-<div id="chart" class="h-[520px] w-full rounded border border-slate-800"></div>
 
-<script src="https://unpkg.com/lightweight-charts@4/dist/lightweight-charts.standalone.production.js"></script>
+<div id="legend" class="mb-3 hidden flex-wrap items-center gap-2"></div>
+<div id="stats" class="mb-4 grid grid-cols-2 gap-px overflow-hidden rounded-md border border-line bg-line sm:grid-cols-4"></div>
+
+<section data-panel="chart" class="flex h-[25rem] flex-col overflow-hidden rounded-md border border-line bg-panel/50">
+  <div class="flex items-center justify-between border-b border-line/60 px-3 py-1.5">
+    <span class="font-mono text-[10px] tracking-label uppercase text-dim">price chart</span>
+    <div class="flex items-center gap-1">
+      <button data-max class="rounded px-1 font-mono text-xs text-dim hover:text-body">⛶</button>
+      <button data-collapse class="rounded px-1 font-mono text-xs text-dim hover:text-body">−</button>
+    </div>
+  </div>
+  <div data-panel-body class="min-h-0 flex-1">
+    <div id="chart" class="h-full w-full"></div>
+  </div>
+</section>
+<p id="compare-note" class="mt-2 hidden font-mono text-[11px] text-faint">
+  compare mode · each series rebased to 0% at window start</p>
+
+<div class="mt-4 grid gap-4 lg:grid-cols-3">
+
+  <section data-panel="volume" class="flex h-[21rem] flex-col rounded-md border border-line bg-panel/50 p-4">
+    <div class="mb-1 flex items-baseline justify-between">
+      <h2 class="font-mono text-xs tracking-label uppercase text-dim">24h volume by venue</h2>
+      <div class="flex items-center gap-3">
+        <span id="cex-share" class="font-mono text-sm tabular-nums text-phosphor">—</span>
+        <div class="flex items-center gap-1">
+          <button data-max class="rounded px-1 font-mono text-xs text-dim hover:text-body">⛶</button>
+          <button data-collapse class="rounded px-1 font-mono text-xs text-dim hover:text-body">−</button>
+        </div>
+      </div>
+    </div>
+    <div data-panel-body class="flex min-h-0 flex-1 flex-col">
+      <div class="mb-3 font-mono text-[10px] text-faint">cex share of tracked venues</div>
+      <div id="vol-bars" class="scroll-thin min-h-0 flex-1 space-y-2 overflow-y-auto pr-3"></div>
+    </div>
+  </section>
+
+  <section data-panel="oi" class="flex h-[21rem] flex-col rounded-md border border-line bg-panel/50 p-4">
+    <div class="mb-1 flex items-baseline justify-between">
+      <h2 class="font-mono text-xs tracking-label uppercase text-dim">open interest by asset</h2>
+      <div class="flex items-center gap-1">
+        <button data-max class="rounded px-1 font-mono text-xs text-dim hover:text-body">⛶</button>
+        <button data-collapse class="rounded px-1 font-mono text-xs text-dim hover:text-body">−</button>
+      </div>
+    </div>
+    <div data-panel-body class="flex min-h-0 flex-1 flex-col">
+      <div class="mb-3 font-mono text-[10px] text-faint">summed across perp venues, notional</div>
+      <div id="oi-bars" class="scroll-thin min-h-0 flex-1 space-y-2 overflow-y-auto pr-3"></div>
+    </div>
+  </section>
+
+  <section data-panel="basis" class="flex h-[21rem] flex-col rounded-md border border-line bg-panel/50 p-4">
+    <div class="mb-1 flex items-baseline justify-between">
+      <h2 class="font-mono text-xs tracking-label uppercase text-dim">basis snapshot</h2>
+      <div class="flex items-center gap-1">
+        <button data-max class="rounded px-1 font-mono text-xs text-dim hover:text-body">⛶</button>
+        <button data-collapse class="rounded px-1 font-mono text-xs text-dim hover:text-body">−</button>
+      </div>
+    </div>
+    <div data-panel-body class="flex min-h-0 flex-1 flex-col">
+      <div class="mb-3 font-mono text-[10px] text-faint">same-venue spot vs perp, latest bar, bps</div>
+      <div id="basis-rows" class="scroll-thin min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-3"></div>
+    </div>
+  </section>
+
+</div>
+<script id="series-data" type="application/json">[
+  {%- for s in series -%}
+    {"exchange":"{{ s.exchange }}","market_type":"{{ s.market_type }}","symbol":"{{ s.symbol }}"}
+    {{- "," if not loop.last -}}
+  {%- endfor -%}
+]</script>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/lightweight-charts.standalone.js') }}"></script>
 <script>
-const el = document.getElementById('chart');
-const chart = LightweightCharts.createChart(el, {
-  layout: { background: { color: 'transparent' }, textColor: '#94a3b8' },
-  grid: { vertLines: { color: '#1e293b' }, horzLines: { color: '#1e293b' } },
-  timeScale: { timeVisible: true, secondsVisible: false },
+const PALETTE = ['#FFB454', '#7DD3FC', '#C4B5FD', '#F9A8D4', '#86EFAC', '#FCA5A5'];
+
+const chart = LightweightCharts.createChart(document.getElementById('chart'), {
+  layout: { background: { color: 'transparent' }, textColor: '#667089',
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' },
+  grid: { vertLines: { color: '#161D2E' }, horzLines: { color: '#161D2E' } },
+  crosshair: { vertLine: { color: '#3D465C' }, horzLine: { color: '#3D465C' } },
+  timeScale: { timeVisible: true, secondsVisible: false, borderColor: '#232B3D' },
+  rightPriceScale: { borderColor: '#232B3D' },
   autoSize: true,
 });
-const candles = chart.addCandlestickSeries();
+
+let compares = [];        // series keys beyond the primary
+let handles = [];         // live series objects, removed on every redraw
+
+const fmt = n => n >= 1000 ? n.toLocaleString(undefined, {maximumFractionDigits: 1})
+                           : n.toPrecision(5).replace(/\.?0+$/, '');
+const label = key => {
+  const [ex, mt, sym] = key.split('|');
+  return `${ex} ${sym}${mt === 'perp' ? ' ⊥' : ''}`;
+};
+const stat = (l, v, cls) => `<div class="bg-panel px-4 py-3">
+    <div class="font-mono text-[10px] tracking-label uppercase text-dim">${l}</div>
+    <div class="mt-0.5 font-mono text-base tabular-nums ${cls || 'text-body'}">${v}</div></div>`;
+
+async function fetchCandles(key, hours) {
+  const [exchange, market_type, symbol, interval] = key.split('|');
+  const qs = new URLSearchParams({ exchange, market_type, symbol, interval, hours, limit: 5000 });
+  return (await fetch(`/api/candles?${qs}`)).json();
+}
+
+function clearSeries() {
+  handles.forEach(h => chart.removeSeries(h));
+  handles = [];
+}
+
+function renderLegend(entries) {
+  const el = document.getElementById('legend');
+  if (!entries.length) { el.classList.add('hidden'); el.classList.remove('flex'); return; }
+  el.classList.remove('hidden'); el.classList.add('flex');
+  el.innerHTML = entries.map((e, i) => `
+    <span class="inline-flex items-center gap-2 rounded border border-line bg-panel px-2.5 py-1 font-mono text-xs">
+      <span class="h-2 w-2 rounded-full" style="background:${e.color}"></span>
+      <span class="text-body">${e.label}</span>
+      <span class="tabular-nums ${e.delta >= 0 ? 'text-gain' : 'text-loss'}">
+        ${e.delta >= 0 ? '+' : ''}${e.delta.toFixed(2)}%</span>
+      ${i > 0 ? `<button data-remove="${i-1}" class="ml-1 text-dim hover:text-loss" aria-label="Remove ${e.label}">×</button>` : ''}
+    </span>`).join('');
+}
 
 async function load() {
-  const [exchange, market_type, symbol, interval] =
-      document.getElementById('series').value.split('|');
+  const primary = document.getElementById('series').value;
   const hours = document.getElementById('hours').value;
-  const qs = new URLSearchParams({ exchange, market_type, symbol, interval, hours, limit: 5000 });
-  const data = await (await fetch(`/api/candles?${qs}`)).json();
-  candles.setData(data);
+  const keys = [primary, ...compares];
+  const all = await Promise.all(keys.map(k => fetchCandles(k, hours)));
+  clearSeries();
+
+  const stats = document.getElementById('stats');
+  const note = document.getElementById('compare-note');
+
+  if (compares.length === 0) {
+    // single-series: candles + stat strip
+    note.classList.add('hidden');
+    renderLegend([]);
+    stats.classList.remove('hidden');
+    const data = all[0];
+    const s = chart.addCandlestickSeries({
+      upColor: '#4ADE80', downColor: '#FB7185',
+      wickUpColor: '#4ADE80', wickDownColor: '#FB7185', borderVisible: false,
+    });
+    s.setData(data); handles.push(s);
+    if (data.length) {
+      const last = data[data.length-1], first = data[0];
+      const d = (last.close - first.close) / first.close * 100;
+      stats.innerHTML =
+        stat('last', fmt(last.close)) +
+        stat(`Δ ${hours}h`, `${d >= 0 ? '+' : ''}${d.toFixed(2)}%`, d >= 0 ? 'text-gain' : 'text-loss') +
+        stat('high', fmt(Math.max(...data.map(x => x.high)))) +
+        stat('low',  fmt(Math.min(...data.map(x => x.low))));
+    } else {
+      stats.innerHTML = stat('status', 'no bars in window', 'text-dim');
+    }
+  } else {
+    // compare mode: normalized close lines, one color per series
+    note.classList.remove('hidden');
+    stats.classList.add('hidden');
+    const legend = [];
+    keys.forEach((key, i) => {
+      const data = all[i];
+      if (!data.length) { legend.push({label: label(key), color: PALETTE[i % PALETTE.length], delta: 0}); return; }
+      const base = data[0].close;
+      const line = chart.addLineSeries({
+        color: PALETTE[i % PALETTE.length], lineWidth: 2,
+        priceFormat: { type: 'custom', formatter: v => `${v >= 0 ? '+' : ''}${v.toFixed(2)}%` },
+      });
+      line.setData(data.map(d => ({ time: d.time, value: (d.close / base - 1) * 100 })));
+      handles.push(line);
+      legend.push({ label: label(key), color: PALETTE[i % PALETTE.length],
+                    delta: (data[data.length-1].close / base - 1) * 100 });
+    });
+    renderLegend(legend);
+  }
   chart.timeScale().fitContent();
 }
+
 document.getElementById('series').addEventListener('change', load);
 document.getElementById('hours').addEventListener('change', load);
+document.getElementById('compare-add').addEventListener('change', e => {
+  const v = e.target.value;
+  e.target.value = '';
+  const primary = document.getElementById('series').value;
+  if (!v || v === primary || compares.includes(v) || compares.length >= 5) return;
+  compares.push(v);
+  load();
+});
+document.getElementById('legend').addEventListener('click', e => {
+  const btn = e.target.closest('[data-remove]');
+  if (!btn) return;
+  compares.splice(Number(btn.dataset.remove), 1);
+  load();
+});
+
 load();
+
+// ---- panel chrome: collapse (persisted) + maximize (transient) --------------
+// Collapse folds a panel to its title row and survives reloads via localStorage.
+// Maximize floats the panel over the page (Esc restores). The chart keeps
+// working in both: autoSize re-measures whenever its container changes.
+const PANELS_KEY = 'overseer.collapsed';
+const collapsedPanels = new Set(JSON.parse(localStorage.getItem(PANELS_KEY) || '[]'));
+let maxedPanel = null;
+
+function refreshPanels() {
+  document.querySelectorAll('[data-panel]').forEach(sec => {
+    const id = sec.dataset.panel;
+    const isMax = maxedPanel === id;
+    const isCol = collapsedPanels.has(id) && !isMax;
+    sec.querySelector('[data-panel-body]').classList.toggle('hidden', isCol);
+    sec.classList.toggle('panel-collapsed', isCol);
+    sec.classList.toggle('panel-maxed', isMax);
+    const colBtn = sec.querySelector('[data-collapse]');
+    colBtn.textContent = isCol ? '+' : '−';
+    colBtn.title = isCol ? 'expand' : 'collapse';
+    colBtn.setAttribute('aria-label', (isCol ? 'Expand ' : 'Collapse ') + id + ' panel');
+    const maxBtn = sec.querySelector('[data-max]');
+    maxBtn.textContent = isMax ? '✕' : '⛶';
+    maxBtn.title = isMax ? 'restore' : 'maximize';
+    maxBtn.setAttribute('aria-label', (isMax ? 'Restore ' : 'Maximize ') + id + ' panel');
+  });
+}
+
+document.addEventListener('click', e => {
+  const btn = e.target.closest('[data-collapse],[data-max]');
+  if (!btn) return;
+  const id = btn.closest('[data-panel]').dataset.panel;
+  if (btn.hasAttribute('data-collapse')) {
+    collapsedPanels.has(id) ? collapsedPanels.delete(id) : collapsedPanels.add(id);
+    localStorage.setItem(PANELS_KEY, JSON.stringify([...collapsedPanels]));
+  } else {
+    maxedPanel = maxedPanel === id ? null : id;
+  }
+  refreshPanels();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && maxedPanel) { maxedPanel = null; refreshPanels(); }
+});
+refreshPanels();
+
+// ---- market overview panels (venue volume + OI + carry spreads) -------------
+const fmtB = n => n == null ? '—'
+  : n >= 1e9 ? '$' + (n/1e9).toFixed(1) + 'B'
+  : n >= 1e6 ? '$' + (n/1e6).toFixed(0) + 'M'
+  : '$' + (n/1e3).toFixed(0) + 'K';
+
+function bar(label, value, max, color, extra) {
+  const w = max > 0 ? Math.max(1.5, value / max * 100) : 0;
+  return `<div>
+    <div class="mb-0.5 flex items-baseline justify-between font-mono text-xs">
+      <span class="text-body">${label}</span>
+      <span class="tabular-nums text-dim">${extra || fmtB(value)}</span></div>
+    <div class="h-1.5 rounded bg-panel2">
+      <div class="h-1.5 rounded" style="width:${w}%;background:${color}"></div></div>
+  </div>`;
+}
+
+async function loadOverview() {
+  try {
+    const vv = await (await fetch('/api/venue-volume')).json();
+    const latest = vv.latest.sort((a, b) => b.total - a.total);
+    const max = latest[0]?.total || 0;
+    const cexTotal = latest.filter(v => ['binance','bybit'].includes(v.exchange))
+                           .reduce((s, v) => s + v.total, 0);
+    const all = latest.reduce((s, v) => s + v.total, 0);
+    document.getElementById('cex-share').textContent =
+      all ? `cex ${ (cexTotal / all * 100).toFixed(1) }%` : '—';
+    document.getElementById('vol-bars').innerHTML = latest.length
+      ? latest.map(v => bar(v.exchange, v.total, max,
+          ['binance','bybit'].includes(v.exchange) ? '#FFB454' : '#7DD3FC')).join('')
+      : '<div class="font-mono text-xs text-dim">no sweep yet — first run lands at 00:37 UTC</div>';
+  } catch (e) { /* panel stays empty */ }
+
+  try {
+    const fu = await (await fetch('/api/funding')).json();
+    const oi = Object.entries(fu).map(([coin, rows]) => [coin,
+        rows.reduce((s, r) => s + (r.oi_notional || 0), 0)])
+      .filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+    const oimax = oi[0]?.[1] || 0;
+    document.getElementById('oi-bars').innerHTML = oi.length
+      ? oi.map(([c, v]) => bar(c, v, oimax, '#C4B5FD')).join('')
+      : '<div class="font-mono text-xs text-dim">no liquidity data yet</div>';
+
+  } catch (e) { /* panels stay empty */ }
+}
+
+loadOverview();
+setInterval(loadOverview, 120_000);
+
+// ---- basis snapshot: same-venue spot/perp pairs, latest bar -----------------
+async function loadBasis() {
+  const series = JSON.parse(document.getElementById('series-data').textContent);
+  const pairs = [];
+  for (const s of series.filter(x => x.market_type === 'spot')) {
+    if (series.some(p => p.market_type === 'perp' && p.exchange === s.exchange && p.symbol === s.symbol))
+      pairs.push(s);
+  }
+  const shown = pairs.filter(p => p.exchange === 'binance').slice(0, 8);
+  const results = await Promise.all(shown.map(async p => {
+    const qs = new URLSearchParams({ spot_exchange: p.exchange, spot_symbol: p.symbol,
+      perp_exchange: p.exchange, perp_symbol: p.symbol, interval: '1m', limit: 1 });
+    const d = await (await fetch(`/api/basis?${qs}`)).json();
+    return d.length ? { symbol: p.symbol, bps: d[d.length-1].basis_pct * 100 } : null;
+  }));
+  const rows = results.filter(Boolean).sort((a, b) => Math.abs(b.bps) - Math.abs(a.bps));
+  document.getElementById('basis-rows').innerHTML = rows.length
+    ? rows.map(r => `
+      <div class="flex items-baseline justify-between rounded bg-panel2/60 px-2.5 py-1.5 font-mono text-xs">
+        <span class="text-body">${r.symbol}</span>
+        <span class="tabular-nums ${r.bps >= 0 ? 'text-gain' : 'text-loss'}">
+          ${r.bps >= 0 ? '+' : ''}${r.bps.toFixed(1)} bp</span></div>`).join('')
+    : '<div class="font-mono text-xs text-dim">no joined bars yet</div>';
+}
+
+
+loadBasis();
+setInterval(loadBasis, 120_000);
+
 </script>
 {% endblock %}

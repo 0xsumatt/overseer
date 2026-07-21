@@ -37,7 +37,7 @@ class ExtendedScraper(BaseExchangeScraper):
     base_url: ClassVar[str] = "https://api.starknet.extended.exchange"
     market_type: ClassVar[MarketType] = MarketType.PERP        # default/primary
     capabilities: ClassVar[frozenset[Capability]] = frozenset(
-        {Capability.OHLCV, Capability.FUNDING, Capability.LIQUIDITY}
+        {Capability.OHLCV, Capability.FUNDING, Capability.LIQUIDITY, Capability.VENUE_VOLUME}
     )
 
     def _build_http(self) -> HttpClient:
@@ -150,3 +150,17 @@ class ExtendedScraper(BaseExchangeScraper):
                 )
             )
         return out
+
+    # -- venue volume: same markets call, no market filter, ALL types summed -----
+
+    async def fetch_venue_volume(self) -> dict:
+        payload = await self.http.get_json(f"{self.base_url}/api/v1/info/markets")
+        rows = _unwrap(payload)
+        perp = spot = 0
+        for m in rows:
+            v = self._dec(m.get("marketStats", {}).get("dailyVolume", 0))
+            if m.get("type") == "PERPETUAL":
+                perp += v
+            else:
+                spot += v
+        return {"spot": spot or None, "perp": perp or None}

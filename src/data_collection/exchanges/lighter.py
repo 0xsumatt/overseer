@@ -30,7 +30,8 @@ class LighterScraper(BaseExchangeScraper):
     base_url: ClassVar[str] = "https://mainnet.zklighter.elliot.ai"
     market_type: ClassVar[MarketType] = MarketType.PERP        # default/primary
     capabilities: ClassVar[frozenset[Capability]] = frozenset(
-        {Capability.OHLCV, Capability.FUNDING, Capability.LIQUIDITY, Capability.FILLS}
+        {Capability.OHLCV, Capability.FUNDING, Capability.LIQUIDITY, Capability.FILLS,
+         Capability.VENUE_VOLUME}
     )
 
     def __init__(self, http: HttpClient | None = None) -> None:
@@ -228,3 +229,16 @@ class LighterScraper(BaseExchangeScraper):
             )
         out.sort(key=lambda x: x.ts)
         return out
+
+    # -- venue volume: same orderBookDetails call, summed over EVERY market ------
+
+    async def fetch_venue_volume(self) -> dict:
+        markets = await self._market_map(refresh=True)
+        perp = spot = Decimal(0)
+        for _, mt, stats in markets.values():
+            v = self._dec(stats.get("daily_quote_token_volume", 0))
+            if mt is MarketType.PERP:
+                perp += v
+            else:
+                spot += v
+        return {"spot": spot or None, "perp": perp or None}

@@ -71,7 +71,9 @@ class BybitSpotScraper(BaseExchangeScraper):
     base_url: ClassVar[str] = "https://api.bybit.com"
     market_type: ClassVar[MarketType] = MarketType.SPOT
     category: ClassVar[str] = "spot"
-    capabilities: ClassVar[frozenset[Capability]] = frozenset({Capability.OHLCV})
+    capabilities: ClassVar[frozenset[Capability]] = frozenset(
+        {Capability.OHLCV, Capability.VENUE_VOLUME}
+    )
 
     def _build_http(self) -> HttpClient:
         return HttpClient(
@@ -138,6 +140,17 @@ class BybitSpotScraper(BaseExchangeScraper):
         out.reverse()          # bybit returns newest-first
         return out
 
+    # -- venue volume: full tickers list for the category (no symbol) ------------
+
+    async def fetch_venue_volume(self) -> dict:
+        payload = await self.http.get_json(
+            f"{self.base_url}/v5/market/tickers", params={"category": self.category}
+        )
+        items = self._unwrap(payload)["list"]
+        total = sum(self._dec(t["turnover24h"]) for t in items) if items else None
+        return {"spot": total, "perp": None} if self.market_type is MarketType.SPOT \
+            else {"spot": None, "perp": total}
+
 
 class BybitPerpScraper(BybitSpotScraper):
     """USDT linear perpetuals: same endpoints, category=linear, plus funding
@@ -146,7 +159,7 @@ class BybitPerpScraper(BybitSpotScraper):
     market_type: ClassVar[MarketType] = MarketType.PERP
     category: ClassVar[str] = "linear"
     capabilities: ClassVar[frozenset[Capability]] = frozenset(
-        {Capability.OHLCV, Capability.FUNDING, Capability.LIQUIDITY}
+        {Capability.OHLCV, Capability.FUNDING, Capability.LIQUIDITY, Capability.VENUE_VOLUME}
     )
 
     _funding_intervals: dict[str, int] | None = None   # native -> hours

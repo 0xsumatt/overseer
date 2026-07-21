@@ -47,6 +47,25 @@ def basis():
     return render_template("basis.html", series=_store().series_list())
 
 
+@bp.get("/funding")
+@login_required
+def funding():
+    # data comes client-side from /api/funding; the page is just the shell
+    return render_template("funding.html")
+
+
+@bp.get("/wallets")
+@login_required
+def wallets():
+    tracked = current_app.extensions.get("tracked_wallets", [])
+    store = _store()
+    symbols = store.wallet_symbols([w["address"] for w in tracked]) if tracked else []
+    summaries = [(w["label"], w["venue"], store.fills_summary(w["address"]))
+                 for w in tracked]
+    return render_template("wallets.html", wallets=tracked,
+                           symbols=symbols, summaries=summaries)
+
+
 @bp.get("/health")
 @role_required("can_view_internal")
 def health():

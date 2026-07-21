@@ -7,7 +7,7 @@ from typing import Any
 import asyncpg
 
 from core.enums import Exchange, MarketType, Timeframe
-from core.models import OHLCV, FundingRate, LiquiditySnapshot, Trade
+from core.models import OHLCV, FundingRate, LiquiditySnapshot, Trade, VenueVolume
 
 # (db column, postgres array cast, value extractor)
 _Col = tuple[str, str, Callable[[Any], Any]]
@@ -61,6 +61,15 @@ _LIQ_COLS: tuple[_Col, ...] = (
     ("mark_price",    "numeric",     lambda r: r.mark_price),
 )
 _LIQ_CONFLICT = ("exchange", "symbol", "ts")
+
+_VENUE_VOL_COLS: tuple[_Col, ...] = (
+    ("exchange",     "text",        lambda r: r.exchange.value),
+    ("ts",           "timestamptz", lambda r: r.ts),
+    ("volume_total", "numeric",     lambda r: r.volume_total),
+    ("volume_spot",  "numeric",     lambda r: r.volume_spot),
+    ("volume_perp",  "numeric",     lambda r: r.volume_perp),
+)
+_VENUE_VOL_CONFLICT = ("exchange", "ts")
 
 
 class Storage:
@@ -176,6 +185,20 @@ class Storage:
 
     async def write_liquidity(self, records: Sequence[LiquiditySnapshot]) -> int:
         return await self._bulk_upsert("liquidity", _LIQ_COLS, _LIQ_CONFLICT, records)
+
+    async def write_venue_volume(self, records: Sequence[VenueVolume]) -> int:
+        return await self._bulk_upsert(
+            "venue_volume", _VENUE_VOL_COLS, _VENUE_VOL_CONFLICT, records
+        )
+
+    async def latest_funding_rows(self) -> list[asyncpg.Record]:
+        """Newest settled funding per (exchange, symbol) — feeds the
+        dislocation alert job."""
+        return await self.pool.fetch(
+            "SELECT DISTINCT ON (exchange, symbol) "
+            "exchange, symbol, ts, rate, interval_hours "
+            "FROM funding_rates ORDER BY exchange, symbol, ts DESC"
+        )
 
     async def latest_funding_ts(self, exchange: Exchange, symbol: str) -> datetime | None:
         return await self.pool.fetchval(

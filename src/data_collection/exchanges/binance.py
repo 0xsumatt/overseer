@@ -21,9 +21,13 @@ class BinanceSpotScraper(BaseExchangeScraper):
     exchange: ClassVar[Exchange] = Exchange.BINANCE
     base_url: ClassVar[str] = "https://api.binance.com"
     market_type: ClassVar[MarketType] = MarketType.SPOT
-    capabilities: ClassVar[frozenset[Capability]] = frozenset({Capability.OHLCV})
+    capabilities: ClassVar[frozenset[Capability]] = frozenset(
+        {Capability.OHLCV, Capability.VENUE_VOLUME}
+    )
     _klines_path: ClassVar[str] = "/api/v3/klines"
     _klines_weight: ClassVar[int] = 2
+    _ticker24h_path: ClassVar[str] = "/api/v3/ticker/24hr"
+    _ticker24h_weight: ClassVar[int] = 80         # full-list weight (no symbol)
 
     def _build_http(self) -> HttpClient:
         return HttpClient(
@@ -81,6 +85,18 @@ class BinanceSpotScraper(BaseExchangeScraper):
     # Public trades are intentionally NOT scraped over REST (recent-only / gappy,
     # not real-time). The trade tape lives on the websocket layer instead.
 
+    # -- venue volume: full ticker/24hr list (no symbol), summed quoteVolume -----
+    #    Spot and futures share this response shape; only the host/path/weight
+    #    differ (via the classvars above), so one implementation covers both.
+
+    async def fetch_venue_volume(self) -> dict:
+        rows = await self.http.get_json(
+            f"{self.base_url}{self._ticker24h_path}", weight=self._ticker24h_weight
+        )
+        total = sum(self._dec(r["quoteVolume"]) for r in rows) if rows else None
+        return {"spot": total, "perp": None} if self.market_type is MarketType.SPOT \
+            else {"spot": None, "perp": total}
+
 
 class BinanceFuturesScraper(BinanceSpotScraper):
     """USDT-M perpetual futures. Same shapes as spot; different host/path/limit."""
@@ -89,6 +105,8 @@ class BinanceFuturesScraper(BinanceSpotScraper):
     market_type: ClassVar[MarketType] = MarketType.PERP
     _klines_path: ClassVar[str] = "/fapi/v1/klines"
     _klines_weight: ClassVar[int] = 5            # fapi klines weight at limit <= 1000
+    _ticker24h_path: ClassVar[str] = "/fapi/v1/ticker/24hr"
+    _ticker24h_weight: ClassVar[int] = 40         # full-list weight (no symbol)
 
     def _build_http(self) -> HttpClient:
         return HttpClient(
@@ -98,7 +116,9 @@ class BinanceFuturesScraper(BinanceSpotScraper):
 
     # -- funding: GET /fapi/v1/fundingRate (+ /fundingInfo for per-symbol intervals)
 
-    capabilities = frozenset({Capability.OHLCV, Capability.FUNDING, Capability.LIQUIDITY})
+    capabilities = frozenset(
+        {Capability.OHLCV, Capability.FUNDING, Capability.LIQUIDITY, Capability.VENUE_VOLUME}
+    )
 
     _funding_intervals: dict[str, int] | None = None   # native symbol -> hours
 

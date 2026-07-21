@@ -34,6 +34,17 @@ liquidity = true
 # funding = true
 # liquidity = true
 
+
+ [venues.rise]
+ intervals = ["1m"]
+ funding = true
+ liquidity = true
+ 
+[venues.bullet]
+intervals = ["1m"]
+funding = true
+iquidity = true
+
 # -- assets --------------------------------------------------------------------
 
 [assets.BTC]
@@ -44,6 +55,8 @@ bybit_spot = "BTC/USDT"
 bybit_perp = "BTC/USDT"
 lighter = "BTC"
 extended = "BTC-USD"
+bullet = "BTC-USD"
+rise ="BTC/USDC"
 # bulk         = "BTC-USD"
 
 [assets.ETH]
@@ -54,6 +67,8 @@ bybit_spot = "ETH/USDT"
 bybit_perp = "ETH/USDT"
 lighter = "ETH"
 extended = "ETH-USD"
+bullet = "ETH-USD"
+rise ="ETH/USDC"
 # bulk         = "ETH-USD"
 
 [assets.SOL]
@@ -64,6 +79,8 @@ bybit_spot = "SOL/USDT"
 bybit_perp = "SOL/USDT"
 lighter = "SOL"
 extended = "SOL-USD"
+bullet = "SOL-USD"
+rise ="SOL/USDC"
 # bulk         = "SOL-USD"
 
 [assets.AAVE]
@@ -74,6 +91,8 @@ bybit_spot = "AAVE/USDT"
 bybit_perp = "AAVE/USDT"
 lighter = "AAVE"
 extended = "AAVE-USD"
+bullet = "AAVE-USD"
+rise ="AAVE/USDC"
 # bulk         = "AAVE-USD"
 
 [assets.HYPE]
@@ -83,7 +102,11 @@ bybit_spot = "HYPE/USDT"
 bybit_perp = "HYPE/USDT"
 lighter = "HYPE"
 extended = "HYPE-USD"
+bullet = "HYPE-USD"
+rise ="HYPE/USDC"
 # bulk         = "HYPE-USD"
+
+
 
 # -- tracked addresses -----------------------------------------------------------
 

@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* Native form controls (select popups, scrollbars, pickers) render LIGHT
+     unless the page declares a dark color-scheme — this is the fix for the
+     harsh white dropdown lists. */
+  html { color-scheme: dark; }
+  select option {
+    background-color: #111624;   /* panel */
+    color: #C8D0E0;              /* body */
+  }
+  ::selection { background: rgba(255, 180, 84, 0.25); }
+}

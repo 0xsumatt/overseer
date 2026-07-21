@@ -18,7 +18,8 @@ class HyperliquidScraper(BaseExchangeScraper):
     # FILLS is scheduled for specific known addresses (e.g. the HLP vault), not
     # as a market-wide tape — that's still WS's job. See scheduler/targets.py.
     capabilities: ClassVar[frozenset[Capability]] = frozenset(
-        {Capability.OHLCV, Capability.FILLS, Capability.FUNDING, Capability.LIQUIDITY}
+        {Capability.OHLCV, Capability.FILLS, Capability.FUNDING, Capability.LIQUIDITY,
+         Capability.VENUE_VOLUME}
     )
 
     def _build_http(self) -> HttpClient:
@@ -176,3 +177,18 @@ class HyperliquidScraper(BaseExchangeScraper):
                 )
             )
         return out
+
+    # -- venue volume: sum dayNtlVlm across the WHOLE listed universe, perp +
+    #    spot separately (metaAndAssetCtxs / spotMetaAndAssetCtxs mirror each
+    #    other's [meta, ctxs] shape; dayNtlVlm is already quote-notional) -------
+
+    async def fetch_venue_volume(self) -> dict:
+        meta, ctxs = await self.http.post_json(
+            f"{self.base_url}/info", json={"type": "metaAndAssetCtxs"}
+        )
+        perp = sum(self._dec(c["dayNtlVlm"]) for c in ctxs) if ctxs else None
+        spot_meta, spot_ctxs = await self.http.post_json(
+            f"{self.base_url}/info", json={"type": "spotMetaAndAssetCtxs"}
+        )
+        spot = sum(self._dec(c["dayNtlVlm"]) for c in spot_ctxs) if spot_ctxs else None
+        return {"spot": spot, "perp": perp}

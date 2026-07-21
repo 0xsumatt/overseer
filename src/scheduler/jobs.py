@@ -4,7 +4,8 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from data_collection.base import BaseExchangeScraper
+from core.symbols import SymbolRegistry
+from data_collection.base import BaseExchangeScraper, Capability
 from scheduler.notify import DiscordNotifier
 from scheduler.targets import FillsTarget, FundingTarget, LiquidityTarget, ScrapeTarget
 from storage.writers import Storage
@@ -135,6 +136,132 @@ async def run_funding(scraper, storage, notifier, state, target: FundingTarget) 
 async def run_liquidity(scraper, storage, notifier, state, target: LiquidityTarget) -> None:
     outcome = await scrape_liquidity(scraper, storage, target)
     await _record_and_alert(outcome, storage, notifier, state)
+
+
+async def _alert_venue_volume_errors(
+    scrapers: dict, errors: dict[str, str],
+    notifier: DiscordNotifier, state: dict[str, str],
+) -> None:
+    """Per-venue edge-triggered alerts for the sweep, independent of the
+    aggregate job status. Without this, one venue erroring inside an otherwise-
+    successful sweep only ever shows up as a 'partial:' note buried in
+    job_runs — never a Discord ping — so a broken venue could go unnoticed
+    indefinitely. Reuses notifier.failure/recovery (same shape as the polling
+    job alerts) with a synthetic job_id so it reads consistently in Discord."""
+    candidates = [v for v, s in scrapers.items() if Capability.VENUE_VOLUME in s.capabilities]
+    for venue in candidates:
+        key = f"venue_volume:{venue}"
+        prev = state.get(key, "ok")
+        if venue in errors and prev != "fail":
+            state[key] = "fail"
+            await notifier.failure(key, errors[venue])
+        elif venue not in errors and prev == "fail":
+            state[key] = "ok"
+            await notifier.recovery(key, 1, 0)
+
+
+async def scrape_venue_volume(
+    scrapers: dict, storage: Storage, notifier: DiscordNotifier, state: dict[str, str]
+) -> JobOutcome:
+    """Daily venue-wide volume sweep — ONE job, sequential across venues (each
+    call rides its venue's own limiter, so it can't collide with the polling
+    herd), legs merged per exchange (binance spot+perp venues -> one row)."""
+    from core.models import VenueVolume
+
+    ran_at = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    legs: dict = {}          # exchange -> {"spot": x|None, "perp": y|None}
+    errors: dict[str, str] = {}     # venue-id -> error, for per-venue alerting
+    fetched = 0
+    for venue, scraper in sorted(scrapers.items()):
+        if Capability.VENUE_VOLUME not in scraper.capabilities:
+            continue
+        try:
+            vol = await scraper.fetch_venue_volume()
+            fetched += 1
+        except Exception as exc:
+            errors[venue] = repr(exc)
+            continue
+        agg = legs.setdefault(scraper.exchange, {"spot": None, "perp": None})
+        for side in ("spot", "perp"):
+            v = vol.get(side)
+            if v is not None:
+                agg[side] = (agg[side] or 0) + v
+
+    await _alert_venue_volume_errors(scrapers, errors, notifier, state)
+
+    records = [
+        VenueVolume(
+            exchange=ex, ts=ran_at,
+            volume_total=(v["spot"] or 0) + (v["perp"] or 0),
+            volume_spot=v["spot"], volume_perp=v["perp"],
+        )
+        for ex, v in legs.items()
+    ]
+    try:
+        new_rows = await storage.write_venue_volume(records) if records else 0
+    except Exception as exc:
+        return JobOutcome("venue_volume:daily", "fail", fetched, 0, repr(exc), ran_at)
+    if errors and not records:
+        return JobOutcome("venue_volume:daily", "fail", fetched, 0,
+                          "; ".join(f"{v}: {e}" for v, e in errors.items()), ran_at)
+    # partial failures record as ok-with-error-note: some venues > no venues.
+    # The per-venue alert above is what actually notifies; this note is just
+    # the job_runs/health-page detail.
+    err = ("partial: " + "; ".join(f"{v}: {e}" for v, e in errors.items())) if errors else None
+    return JobOutcome("venue_volume:daily", "ok", fetched, new_rows, err, ran_at)
+
+
+async def run_venue_volume(scrapers: dict, storage, notifier, state) -> None:
+    outcome = await scrape_venue_volume(scrapers, storage, notifier, state)
+    await _record_and_alert(outcome, storage, notifier, state)
+
+
+async def check_dislocations(
+    storage: Storage,
+    notifier: DiscordNotifier,
+    state: dict[str, str],
+    registry: SymbolRegistry,
+    threshold_apr: float,
+) -> None:
+    """Ping Discord when a coin's cross-venue funding spread opens past the
+    threshold. Edge-triggered like the job alerts (one ping on crossing, one on
+    narrowing), with 20% hysteresis so a spread hovering at the line doesn't
+    flap. State keys are 'dislocation:<asset>' — same dict as job statuses,
+    disjoint keyspace."""
+    try:
+        rows = await storage.latest_funding_rows()
+    except Exception:
+        log.exception("dislocation check failed")
+        return
+    # a venue whose feed died still has a "latest" row; an old extreme rate is
+    # not a live dislocation, so only rates settled in the last day count.
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    legs: dict[str, list[tuple[str, float]]] = {}
+    for r in rows:
+        if r["ts"] < cutoff:
+            continue
+        asset = registry.asset_for(r["symbol"]) or r["symbol"]
+        apr = float(r["rate"]) * (8760 / r["interval_hours"]) * 100
+        legs.setdefault(asset, []).append((r["exchange"], apr))
+    for asset, venues in sorted(legs.items()):
+        if len(venues) < 2:
+            continue
+        hi = max(venues, key=lambda v: v[1])
+        lo = min(venues, key=lambda v: v[1])
+        spread = hi[1] - lo[1]
+        key = f"dislocation:{asset}"
+        prev = state.get(key, "ok")
+        if spread >= threshold_apr and prev != "wide":
+            state[key] = "wide"
+            await notifier.digest(
+                f"📈 **{asset}** funding spread {spread:.1f}% APR — "
+                f"{hi[0]} {hi[1]:+.1f}% vs {lo[0]} {lo[1]:+.1f}%"
+            )
+        elif spread < threshold_apr * 0.8 and prev == "wide":
+            state[key] = "ok"
+            await notifier.digest(
+                f"↩️ **{asset}** funding spread narrowed to {spread:.1f}% APR"
+            )
 
 
 async def post_digest(storage: Storage, notifier: DiscordNotifier) -> None:

@@ -1,0 +1,9 @@
+{
+  "private": true,
+  "scripts": {
+    "css": "tailwindcss -i src/web/static/css/assets.css -o src/web/static/css/app.css --minify"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.0"
+  }
+}

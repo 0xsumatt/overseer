@@ -1,0 +1,234 @@
+{% extends "base.html" %}
+{% block title %}funding · overseer{% endblock %}
+{% block content %}
+<div class="mb-5 flex flex-wrap items-end justify-between gap-4">
+  <div>
+    <div class="font-mono text-xs tracking-label uppercase text-phosphor">carry / annualized</div>
+    <h1 class="mt-1 text-xl font-semibold text-body">Funding</h1>
+  </div>
+  <div class="flex items-center gap-3">
+    <input id="ffilter" type="search" placeholder="filter coins…"
+           class="w-40 rounded border border-line bg-panel px-3 py-1.5 font-mono text-xs
+                  text-body placeholder-faint focus:border-phosphor focus:outline-none">
+    <div class="flex items-center gap-2 font-mono text-[11px] text-dim">
+      <span id="refresh-dot" class="inline-block h-1.5 w-1.5 rounded-full bg-gain"></span>
+      <span id="refresh-label">live · 60s</span>
+    </div>
+  </div>
+</div>
+
+<div id="highlights" class="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4"></div>
+
+<style>
+  /* compiled app.css carries no .sticky utility — pin the header here. The rule
+     targets th (not thead) so it also applies to the venue columns the JS
+     injects into #fhead on every refresh. */
+  #ftable thead th {
+    position: sticky; top: 0; z-index: 5;
+    background: rgb(17 22 36);                 /* bg-panel */
+    box-shadow: 0 1px 0 rgb(35 43 61);         /* border-b that survives scrolling */
+  }
+</style>
+<div class="flex h-[520px] flex-col overflow-hidden rounded-md border border-line bg-panel/50">
+  <div class="scroll-thin min-h-0 flex-1 overflow-x-auto overflow-y-auto">
+    <table class="w-full text-sm" id="ftable">
+      <thead>
+        <tr id="fhead" class="font-mono text-[10px] tracking-label uppercase text-dim">
+          <th class="px-4 py-2.5 text-left">coin</th></tr>
+      </thead>
+      <tbody id="fbody"></tbody>
+    </table>
+  </div>
+  <p class="border-t border-line px-4 py-2 font-mono text-[11px] text-faint">
+    rates annualized across settlement intervals (1h / 4h / 8h) · sorted by widest venue spread ·
+    hover a cell for venue liquidity · green pays shorts, red pays longs</p>
+</div>
+
+<div id="tip" class="pointer-events-none fixed z-50 hidden w-72 rounded-md border border-line
+                     bg-panel p-3 font-mono text-xs shadow-2xl shadow-black/50"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ---- venue links --------------------------------------------------------------
+// Trade deep-links open the market directly. Referral attribution on most
+// venues happens at SIGNUP, not per trade click — so paste your codes below
+// and the venue column headers become your join/invite links (the income
+// path), while cells stay direct trade links. Empty code = plain header.
+const REFS = { binance: '', bybit: '', hyperliquid: '', lighter: '', extended: '', bulk: '' };
+
+const TRADE_URLS = {
+  binance:     s => `https://www.binance.com/en/futures/${s.replace('/','')}`,
+  bybit:       s => `https://www.bybit.com/trade/usdt/${s.replace('/','')}`,
+  hyperliquid: s => `https://app.hyperliquid.xyz/trade/${s}`,
+  lighter:     s => `https://app.lighter.xyz/trade/${s}`,
+  extended:    s => `https://app.extended.exchange/trade/${s}`,   // verify path once live
+  bulk:        s => `https://app.bulk.trade/trade/${s}`,          // verify at mainnet
+};
+const JOIN_URLS = {
+  binance:     c => `https://accounts.binance.com/register?ref=${c}`,
+  bybit:       c => `https://www.bybit.com/invite?ref=${c}`,
+  hyperliquid: c => `https://app.hyperliquid.xyz/join/${c}`,
+  lighter:     c => `https://app.lighter.xyz/join/${c}`,
+  extended:    c => `https://app.extended.exchange/join/${c}`,
+  bulk:        c => `https://app.bulk.trade/join/${c}`,
+};
+const tradeUrl = (ex, sym) => (TRADE_URLS[ex] || (() => null))(sym);
+
+const fmtUsd = n => n == null ? '—'
+  : n >= 1e9 ? '$' + (n/1e9).toFixed(2) + 'B'
+  : n >= 1e6 ? '$' + (n/1e6).toFixed(1) + 'M'
+  : n >= 1e3 ? '$' + (n/1e3).toFixed(0) + 'K'
+  : '$' + n.toFixed(0);
+
+const tip = document.getElementById('tip');
+
+// heatmap tint: alpha scales with |APR|, saturating at 30%
+function cell(v) {
+  if (!v) return '<td class="px-4 py-2 font-mono text-faint">—</td>';
+  const a = Math.min(Math.abs(v.apr_pct) / 30, 1) * 0.22;
+  const bg = v.apr_pct >= 0 ? `rgba(74,222,128,${a})` : `rgba(251,113,133,${a})`;
+  const cls = v.apr_pct > 0 ? 'text-gain' : v.apr_pct < 0 ? 'text-loss' : 'text-dim';
+  const href = tradeUrl(v.exchange, v.symbol);
+  return `<td class="px-1 py-1">
+    <a ${href ? `href="${href}" target="_blank" rel="noopener"` : ''}
+       class="block rounded px-3 py-1 font-mono tabular-nums ${cls} hover:brightness-125"
+       style="background:${bg}"
+       data-tip='${JSON.stringify({
+            symbol: v.symbol, exchange: v.exchange,
+            rate: v.rate, hours: v.interval_hours,
+            oi: v.oi_notional, oiDelta: v.oi_delta_pct,
+            vol: v.volume_24h, mark: v.mark_price,
+            ts: v.funding_ts })}'>
+      ${v.apr_pct >= 0 ? '+' : ''}${v.apr_pct.toFixed(2)}%
+    </a></td>`;
+}
+
+async function load() {
+  const dot = document.getElementById('refresh-dot');
+  try {
+    const data = await (await fetch('/api/funding')).json();
+    // dislocation-first: sort by max-min APR spread so memecoin/new-listing
+    // outliers surface at the top of a wide-universe table
+    const spread = rows => {
+      const a = rows.map(r => r.apr_pct);
+      return a.length > 1 ? Math.max(...a) - Math.min(...a) : Math.abs(a[0] ?? 0);
+    };
+    const q = (document.getElementById('ffilter').value || '').toUpperCase();
+    const coins = Object.entries(data)
+      .filter(([coin]) => !q || coin.toUpperCase().includes(q))
+      .sort(([, ra], [, rb]) => spread(rb) - spread(ra));
+    const venues = [...new Set(Object.values(data).flat().map(v => v.exchange))].sort();
+    document.getElementById('fhead').innerHTML =
+      '<th class="px-4 py-2.5 text-left">coin</th>' +
+      venues.map(v => {
+        const code = REFS[v];
+        return `<th class="px-4 py-2.5 text-left">${
+          code ? `<a href="${JOIN_URLS[v](code)}" target="_blank" rel="noopener"
+                     class="underline decoration-dotted decoration-phosphor/50 hover:text-phosphor">${v}</a>`
+               : v}</th>`;
+      }).join('');
+    const body = document.getElementById('fbody');
+    if (!coins.length) {
+      body.innerHTML = `<tr><td class="px-4 py-6 font-mono text-xs text-dim">
+        No funding data yet — first settlements land within the hour.</td></tr>`;
+      return;
+    }
+    body.innerHTML = coins.map(([coin, rows]) => {
+      const byVenue = Object.fromEntries(rows.map(r => [r.exchange, r]));
+      return `<tr class="border-t border-line/60 hover:bg-panel2/60">
+        <td class="px-4 py-2 font-mono font-semibold text-body">${coin}</td>
+        ${venues.map(v => cell(byVenue[v])).join('')}
+      </tr>`;
+    }).join('');
+    // ---- highlights: superlatives across the whole (unfiltered) universe ----
+    const flat = Object.entries(data).flatMap(([coin, rows]) => rows.map(r => ({coin, ...r})));
+    const spreads2 = Object.entries(data)
+      .map(([coin, rows]) => {
+        if (rows.length < 2) return null;
+        const hi = rows.reduce((a,b) => a.apr_pct > b.apr_pct ? a : b);
+        const lo = rows.reduce((a,b) => a.apr_pct < b.apr_pct ? a : b);
+        return { coin, spread: hi.apr_pct - lo.apr_pct, hi, lo };
+      }).filter(Boolean).sort((a,b) => b.spread - a.spread);
+    const richest = flat.reduce((a,b) => (b.apr_pct > (a?.apr_pct ?? -1e9) ? b : a), null);
+    const mostNeg = flat.reduce((a,b) => (b.apr_pct < (a?.apr_pct ?? 1e9) ? b : a), null);
+    const mostLiq = flat.filter(r => r.oi_notional)
+      .reduce((a,b) => (b.oi_notional > (a?.oi_notional ?? -1) ? b : a), null);
+    // href2: a second venue tab opened by JS in the same click — browsers
+    // allow one window.open() per gesture alongside the anchor navigation,
+    // so both legs of a spread open without tripping the popup blocker.
+    const card = (label, big, cls, sub, href, href2) => `
+      <a ${href ? `href="${href}" target="_blank" rel="noopener"` : ''}
+         ${href2 ? `data-href2="${href2}"` : ''}
+         class="block rounded-md border border-line bg-panel/50 p-3 hover:border-phosphor/50">
+        <div class="font-mono text-[10px] tracking-label uppercase text-dim">${label}</div>
+        <div class="mt-1 font-mono text-lg tabular-nums ${cls}">${big}</div>
+        <div class="mt-0.5 truncate font-mono text-[11px] text-faint">${sub}</div></a>`;
+    const hl = document.getElementById('highlights');
+    hl.innerHTML = [
+      spreads2[0] && card('largest spread', `${spreads2[0].spread.toFixed(1)}%`, 'text-phosphor',
+        `${spreads2[0].coin} · ${spreads2[0].hi.exchange} vs ${spreads2[0].lo.exchange} · opens both`,
+        tradeUrl(spreads2[0].hi.exchange, spreads2[0].hi.symbol),
+        tradeUrl(spreads2[0].lo.exchange, spreads2[0].lo.symbol)),
+      richest && card('richest carry', `+${richest.apr_pct.toFixed(1)}%`, 'text-gain',
+        `${richest.coin} · ${richest.exchange}`, tradeUrl(richest.exchange, richest.symbol)),
+      mostNeg && card('most negative', `${mostNeg.apr_pct.toFixed(1)}%`, 'text-loss',
+        `${mostNeg.coin} · ${mostNeg.exchange}`, tradeUrl(mostNeg.exchange, mostNeg.symbol)),
+      mostLiq && card('most liquid', fmtUsd(mostLiq.oi_notional), 'text-body',
+        `${mostLiq.coin} · ${mostLiq.exchange} open interest`,
+        tradeUrl(mostLiq.exchange, mostLiq.symbol)),
+    ].filter(Boolean).join('');
+
+    dot.className = 'inline-block h-1.5 w-1.5 rounded-full bg-gain';
+  } catch (e) {
+    dot.className = 'inline-block h-1.5 w-1.5 rounded-full bg-loss';
+    document.getElementById('refresh-label').textContent = 'refresh failed — retrying';
+  }
+}
+
+document.addEventListener('mouseover', e => {
+  const el = e.target.closest('[data-tip]');
+  if (!el) { tip.classList.add('hidden'); return; }
+  const d = JSON.parse(el.dataset.tip);
+  tip.innerHTML = `
+    <div class="mb-2 flex items-baseline justify-between">
+      <span class="font-semibold text-body">${d.exchange}</span>
+      <span class="text-dim">${d.symbol}</span></div>
+    <div class="grid grid-cols-2 gap-x-3 gap-y-1 text-dim">
+      <span>funding / ${d.hours}h</span>
+      <span class="text-right tabular-nums text-body">${(d.rate*100).toFixed(4)}%</span>
+      <span>open interest</span>
+      <span class="text-right tabular-nums text-body">${fmtUsd(d.oi)}</span>
+      <span>OI Δ24h</span>
+      <span class="text-right tabular-nums ${d.oiDelta == null ? 'text-dim' : d.oiDelta >= 0 ? 'text-gain' : 'text-loss'}">${
+        d.oiDelta == null ? '—' : (d.oiDelta >= 0 ? '+' : '') + d.oiDelta.toFixed(1) + '%'}</span>
+      <span>24h volume</span>
+      <span class="text-right tabular-nums text-body">${fmtUsd(d.vol)}</span>
+      <span>mark</span>
+      <span class="text-right tabular-nums text-body">${d.mark == null ? '—' : d.mark.toLocaleString()}</span>
+    </div>
+    <div class="mt-2 border-t border-line pt-1.5 text-[10px] text-faint">
+      settled ${new Date(d.ts).toLocaleString()}</div>`;
+  tip.classList.remove('hidden');
+});
+document.addEventListener('mousemove', e => {
+  if (tip.classList.contains('hidden')) return;
+  const pad = 14;
+  tip.style.left = Math.min(e.clientX + pad, window.innerWidth - 300) + 'px';
+  tip.style.top  = Math.min(e.clientY + pad, window.innerHeight - 170) + 'px';
+});
+
+// spread card: open the second venue alongside the anchor's own navigation.
+// Skip modified clicks (ctrl/cmd/shift/middle) — the user is choosing how to
+// open the FIRST link; forcing a second tab on top of that is a surprise.
+document.getElementById('highlights').addEventListener('click', e => {
+  const el = e.target.closest('[data-href2]');
+  if (!el || e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
+  window.open(el.dataset.href2, '_blank', 'noopener');
+});
+
+document.getElementById('ffilter').addEventListener('input', () => load());
+load();
+setInterval(load, 60_000);
+</script>
+{% endblock %}

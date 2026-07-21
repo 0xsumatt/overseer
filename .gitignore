@@ -11,3 +11,6 @@ wheels/
 
 # Real secrets live in .env (only .env.example is committed)
 .env
+
+# Node (tailwind build tooling)
+node_modules/

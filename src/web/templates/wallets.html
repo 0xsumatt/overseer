@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% block title %}wallets · overseer{% endblock %}
+{% block content %}
+<div class="mb-5 flex flex-wrap items-end justify-between gap-4">
+  <div>
+    <div class="font-mono text-xs tracking-label uppercase text-phosphor">tracked wallets</div>
+    <h1 class="mt-1 text-xl font-semibold text-body">Wallets</h1>
+  </div>
+  <div class="flex flex-wrap items-center gap-2 font-mono text-xs">
+    <select id="wsym" class="rounded border border-line bg-panel px-3 py-1.5 text-body focus:border-phosphor focus:outline-none">
+      {% for s in symbols %}
+      <option value="{{ s.symbol }}">{{ s.symbol }} · {{ s.fills }} fills</option>
+      {% endfor %}
+    </select>
+    <select id="whours" class="rounded border border-line bg-panel px-3 py-1.5 text-body focus:border-phosphor focus:outline-none">
+      <option value="24">24h</option>
+      <option value="48" selected>48h</option>
+      <option value="168">7d</option>
+    </select>
+  </div>
+</div>
+
+{% if not symbols %}
+<div class="rounded-md border border-line bg-panel/50 p-6 font-mono text-xs text-dim">
+  No fills recorded yet — tracked wallets are polled every 30s; first rows land shortly after the scheduler starts.
+</div>
+{% else %}
+<div id="wlegend" class="mb-3 flex flex-wrap items-center gap-2"></div>
+<div id="wchart" class="h-[440px] w-full rounded-md border border-line bg-panel/50"></div>
+<p class="mt-2 font-mono text-[11px] text-faint">
+  cumulative net flow (buys − sells, base units, left axis) within the window vs price (right axis) ·
+  flow measures drift from the window-start position, not absolute inventory</p>
+
+<div id="wshare" class="mt-4 grid gap-4 sm:grid-cols-2"></div>
+{% endif %}
+
+<div class="mt-8 grid gap-4 lg:grid-cols-2">
+  {% for label, venue, rows in summaries %}
+  <section class="flex h-[21rem] flex-col rounded-md border border-line bg-panel/50 p-4">
+    <div class="mb-3 flex items-baseline justify-between">
+      <h2 class="font-mono text-xs tracking-label uppercase text-dim">{{ label }}</h2>
+      <span class="font-mono text-[10px] text-faint">{{ venue }}</span>
+    </div>
+    <div class="scroll-thin min-h-0 flex-1 overflow-y-auto pr-3">
+      {% if rows %}
+      <table class="w-full font-mono text-xs">
+        <thead>
+          <tr class="text-left text-[10px] tracking-label uppercase text-faint">
+            <th class="pb-1.5">symbol</th><th class="pb-1.5">side</th>
+            <th class="pb-1.5 text-right">fills</th><th class="pb-1.5 text-right">total size</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+          <tr class="border-t border-line/60">
+            <td class="py-1.5 text-body">{{ r.symbol }}</td>
+            <td class="py-1.5 {{ 'text-gain' if r.side == 'buy' else 'text-loss' }}">{{ r.side }}</td>
+            <td class="py-1.5 text-right tabular-nums text-dim">{{ r.fills }}</td>
+            <td class="py-1.5 text-right tabular-nums text-dim">{{ r.total_amount }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="font-mono text-xs text-dim">no fills yet</div>
+      {% endif %}
+    </div>
+  </section>
+  {% endfor %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% if symbols %}
+<script src="{{ url_for('static', filename='js/lightweight-charts.standalone.js') }}"></script>
+<script>
+const WALLET_COLORS = ['#FFB454', '#7DD3FC', '#C4B5FD', '#F9A8D4'];
+
+const chart = LightweightCharts.createChart(document.getElementById('wchart'), {
+  layout: { background: { color: 'transparent' }, textColor: '#667089',
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' },
+  grid: { vertLines: { color: '#161D2E' }, horzLines: { color: '#161D2E' } },
+  crosshair: { vertLine: { color: '#3D465C' }, horzLine: { color: '#3D465C' } },
+  timeScale: { timeVisible: true, secondsVisible: false, borderColor: '#232B3D' },
+  rightPriceScale: { borderColor: '#232B3D' },
+  leftPriceScale: { visible: true, borderColor: '#232B3D' },
+  autoSize: true,
+});
+let handles = [];
+
+async function loadWallets() {
+  const symbol = document.getElementById('wsym').value;
+  const hours = document.getElementById('whours').value;
+  // price context comes from hyperliquid, whose bare-coin symbols match the
+  // wallet venues' convention (HL + lighter both call it just "BTC")
+  const pxQs = new URLSearchParams({ exchange: 'hyperliquid', market_type: 'perp',
+                                     symbol, interval: '1m', hours, limit: 5000 });
+  const [flows, candles] = await Promise.all([
+    (await fetch(`/api/wallet-flows?${new URLSearchParams({ symbol, hours })}`)).json(),
+    (await fetch(`/api/candles?${pxQs}`)).json(),
+  ]);
+  handles.forEach(h => chart.removeSeries(h));
+  handles = [];
+
+  const legend = [];
+  if (candles.length) {
+    const px = chart.addLineSeries({
+      color: '#667089', lineWidth: 1, priceScaleId: 'right',
+      lastValueVisible: false, priceLineVisible: false,
+    });
+    px.setData(candles.map(c => ({ time: c.time, value: c.close })));
+    handles.push(px);
+    legend.push({ label: `${symbol} price`, color: '#667089' });
+  }
+  Object.entries(flows).forEach(([label, pts], i) => {
+    if (!pts.length) return;
+    let cum = 0;
+    const line = chart.addLineSeries({
+      color: WALLET_COLORS[i % WALLET_COLORS.length], lineWidth: 2, priceScaleId: 'left',
+    });
+    line.setData(pts.map(p => ({ time: p.time, value: (cum += p.net) })));
+    handles.push(line);
+    legend.push({ label: `${label} net flow`, color: WALLET_COLORS[i % WALLET_COLORS.length] });
+  });
+  document.getElementById('wlegend').innerHTML = legend.map(e => `
+    <span class="inline-flex items-center gap-2 rounded border border-line bg-panel px-2.5 py-1 font-mono text-xs">
+      <span class="h-2 w-2 rounded-full" style="background:${e.color}"></span>
+      <span class="text-body">${e.label}</span></span>`).join('');
+  chart.timeScale().fitContent();
+}
+
+// ---- share meters: wallet 24h notional vs venue 24h volume ------------------
+// Radial meter, not a 2-slice pie: one filled arc on a muted same-hue track,
+// the share % as the figure. Entity hues match the flow lines above.
+const fmtUsd = n => n == null ? '—'
+  : n >= 1e9 ? '$' + (n/1e9).toFixed(2) + 'B'
+  : n >= 1e6 ? '$' + (n/1e6).toFixed(0) + 'M'
+  : '$' + (n/1e3).toFixed(0) + 'K';
+
+function meter(w, color) {
+  const r = 34, c = 2 * Math.PI * r;
+  const pct = w.share_pct;
+  const dash = pct == null ? 0 : Math.min(pct, 100) / 100 * c;
+  return `
+  <section class="flex items-center gap-5 rounded-md border border-line bg-panel/50 p-4">
+    <svg viewBox="0 0 84 84" class="h-24 w-24 shrink-0" role="img"
+         aria-label="${w.label} is ${pct == null ? 'unknown' : pct.toFixed(2) + '%'} of ${w.venue} 24h volume">
+      <circle cx="42" cy="42" r="${r}" fill="none" stroke="${color}22" stroke-width="8"/>
+      <circle cx="42" cy="42" r="${r}" fill="none" stroke="${color}" stroke-width="8"
+              stroke-linecap="round" stroke-dasharray="${dash} ${c}"
+              transform="rotate(-90 42 42)"/>
+      <text x="42" y="47" text-anchor="middle" fill="#C8D0E0"
+            font-family="ui-sans-serif,system-ui" font-size="15" font-weight="600">
+        ${pct == null ? '—' : pct.toFixed(1) + '%'}</text>
+    </svg>
+    <div class="min-w-0">
+      <div class="flex items-center gap-2">
+        <span class="h-2 w-2 rounded-full" style="background:${color}"></span>
+        <span class="font-mono text-xs tracking-label uppercase text-body">${w.label}</span>
+        <span class="font-mono text-[10px] text-faint">${w.venue}</span>
+      </div>
+      <div class="mt-1 font-mono text-[11px] text-dim">
+        ${fmtUsd(w.wallet_notional_24h)} filled of ${fmtUsd(w.venue_notional_24h)} venue-wide 24h volume</div>
+      <div class="font-mono text-[11px] text-faint">${w.fills_24h.toLocaleString()} fills ·
+        venue total from the daily sweep · fills feed is best-effort (see caption above)</div>
+    </div>
+  </section>`;
+}
+
+async function loadShare() {
+  try {
+    const rows = await (await fetch('/api/wallet-share')).json();
+    document.getElementById('wshare').innerHTML =
+      rows.map((w, i) => meter(w, WALLET_COLORS[i % WALLET_COLORS.length])).join('');
+  } catch (e) { /* panel stays as-is */ }
+}
+
+document.getElementById('wsym').addEventListener('change', loadWallets);
+document.getElementById('whours').addEventListener('change', loadWallets);
+loadWallets();
+loadShare();
+setInterval(loadWallets, 120_000);
+setInterval(loadShare, 120_000);
+</script>
+{% endif %}
+{% endblock %}

@@ -10,6 +10,8 @@ class Exchange(StrEnum):
     LIGHTER = "lighter"
     EXTENDED = "extended"
     BULK = "bulk"
+    RISE = "rise"
+    BULLET = "bullet"
 
 
 class Side(StrEnum):

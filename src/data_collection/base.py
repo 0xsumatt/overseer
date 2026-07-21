@@ -16,6 +16,7 @@ class Capability(StrEnum):
     OHLCV = "ohlcv"
     FUNDING = "funding"    # settled funding-rate history (perps)
     LIQUIDITY = "liquidity"  # OI / 24h volume / mark snapshots (perps)
+    VENUE_VOLUME = "venue_volume"  # venue-wide 24h volume, all markets
     TRADES = "trades"      # public tape — a STREAM (websocket) capability, not REST
     FILLS = "fills"        # per-address fills; on-demand utility, not scheduled
 
@@ -81,6 +82,21 @@ class BaseExchangeScraper(ABC):
         that serve all coins in one call (Hyperliquid) filter; per-symbol venues
         (Binance) loop internally."""
         raise UnsupportedCapability(self.exchange, "fetch_liquidity")
+
+    # Venues whose liquidity endpoint returns ALL markets in one call can serve
+    # liquidity = "all" in config; per-symbol venues (binance OI) cannot.
+    supports_wide_liquidity: ClassVar[bool] = False
+
+    async def list_perp_symbols(self) -> list[str]:
+        """Every perp symbol the venue lists, in canonical form — powers
+        funding = "all" (wildcard targets expanded at scheduler startup)."""
+        raise UnsupportedCapability(self.exchange, "list_perp_symbols")
+
+    async def fetch_venue_volume(self) -> dict:
+        """Venue-WIDE 24h quote volume across ALL markets, as
+        {"spot": Decimal|None, "perp": Decimal|None} — one side None where the
+        venue (or this venue-id) covers only the other."""
+        raise UnsupportedCapability(self.exchange, "fetch_venue_volume")
 
     @classmethod
     def is_fill_ref(cls, ref: object) -> bool:

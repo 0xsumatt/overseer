@@ -81,3 +81,20 @@ class LiquiditySnapshot:
     @property
     def key(self) -> tuple[str, str, datetime]:
         return (self.exchange, self.symbol, self.ts)
+
+
+@dataclass(frozen=True, slots=True)
+class VenueVolume:
+    """Venue-WIDE 24h quote volume (all markets, not just tracked assets).
+    Collected once daily; spot/perp splits are nullable where a venue has one
+    side only. Feeds the CEX-vs-DEX share widget."""
+
+    exchange: Exchange
+    ts: datetime
+    volume_total: Decimal
+    volume_spot: Decimal | None
+    volume_perp: Decimal | None
+
+    @property
+    def key(self) -> tuple[str, datetime]:
+        return (self.exchange, self.ts)

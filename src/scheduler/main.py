@@ -10,8 +10,10 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from core.config import settings
+from core.symbols import SymbolRegistry
 from data_collection.exchanges.registry import REGISTRY
-from scheduler.jobs import post_digest, run_fills, run_funding, run_liquidity, run_ohlcv
+from scheduler.jobs import (check_dislocations, post_digest, run_fills,
+                            run_funding, run_liquidity, run_ohlcv, run_venue_volume)
 from scheduler.notify import DiscordNotifier
 from scheduler.targets import load_targets
 from storage.writers import Storage
@@ -25,6 +27,7 @@ def _jitter(poll_seconds: int) -> int:
 def build_scheduler(
     scrapers, storage, notifier, state,
     ohlcv_targets, fills_targets, funding_targets, liquidity_targets,
+    registry: SymbolRegistry | None = None,
 ) -> AsyncIOScheduler:
     sched = AsyncIOScheduler(
         job_defaults={
@@ -53,6 +56,23 @@ def build_scheduler(
         args=[storage, notifier], id="digest:daily", name="digest:daily",
         replace_existing=True,
     )
+    # venue-wide 24h volume sweep — once daily, sequential across every venue
+    # that declares the capability (see scrape_venue_volume). 00:37 UTC: off
+    # the top of the hour, matching the dashboard's "first sweep" copy.
+    sched.add_job(
+        run_venue_volume, trigger=CronTrigger(hour=0, minute=37, timezone="UTC"),
+        args=[scrapers, storage, notifier, state],
+        id="venue_volume:daily", name="venue_volume:daily", replace_existing=True,
+    )
+    # funding-dislocation alerts: only meaningful if funding is being collected
+    if funding_targets and registry is not None:
+        sched.add_job(
+            check_dislocations,
+            trigger=IntervalTrigger(seconds=900),
+            args=[storage, notifier, state, registry, settings.spread_alert_apr],
+            id="alert:dislocations", name="alert:dislocations",
+            replace_existing=True,
+        )
     return sched
 
 
@@ -86,8 +106,10 @@ async def main() -> None:
     scrapers = {v: REGISTRY[v]() for v in venues}
 
     state: dict[str, str] = {}      # job_id -> last status, for edge-triggered alerts
+    registry = SymbolRegistry.load(settings.symbols_file)
     sched = build_scheduler(scrapers, storage, notifier, state,
-                            ohlcv_targets, fills_targets, funding_targets, liquidity_targets)
+                            ohlcv_targets, fills_targets, funding_targets, liquidity_targets,
+                            registry=registry)
     sched.start()
     log.info("scheduler started with %d job(s)", len(sched.get_jobs()))
 

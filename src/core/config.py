@@ -24,5 +24,10 @@ class Settings:
         default_factory=lambda: os.getenv("FLASK_SECRET_KEY", "")
     )
 
+    # Discord ping when a coin's cross-venue funding spread exceeds this (% APR).
+    spread_alert_apr: float = field(
+        default_factory=lambda: float(os.getenv("OVERSEER_SPREAD_ALERT_APR", "25"))
+    )
+
 
 settings = Settings()
