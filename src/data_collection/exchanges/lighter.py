@@ -138,7 +138,14 @@ class LighterScraper(BaseExchangeScraper):
         )
         out: list[FundingRate] = []
         for f in payload.get("fundings", []) or []:
-            rate = self._dec(f["rate"])
+            # API's "rate" is a PERCENTAGE per hour (e.g. "0.0012" = 0.0012%),
+            # not the fraction convention core.models.FundingRate documents
+            # (0.0001 = 1bp = 0.01%) that every other venue's adapter already
+            # follows — confirmed live 2026-07-22: raw "0.0012" annualizes to
+            # a sane ~10.5% APR once divided by 100, vs an absurd ~1051% left
+            # as-is (which is what was actually stored and tripping the
+            # dislocation alert on every single Lighter reading).
+            rate = self._dec(f["rate"]) / 100
             if f.get("direction") == "short":
                 rate = -rate               # shorts pay -> negative funding
             out.append(

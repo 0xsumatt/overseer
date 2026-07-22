@@ -33,7 +33,7 @@ class RiseScraper(BaseExchangeScraper):
     exchange: ClassVar[Exchange] = Exchange.RISE
     # TESTNET server from the spec. At mainnet: confirm the production host
     # and flip this classvar; nothing else changes.
-    base_url: ClassVar[str] = "https://api.testnet.rise.trade"
+    base_url: ClassVar[str] = "https://api.rise.trade"
     market_type: ClassVar[MarketType] = MarketType.PERP       # perp-only venue
     supports_wide_liquidity: ClassVar[bool] = True
     capabilities: ClassVar[frozenset[Capability]] = frozenset(
