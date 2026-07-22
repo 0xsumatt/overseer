@@ -35,15 +35,12 @@ liquidity = true
 # liquidity = true
 
 
- [venues.rise]
- intervals = ["1m"]
- funding = true
- liquidity = true
+[venues.rise]
+intervals = ["1m"]
+funding = true
+liquidity = true
  
 [venues.bullet]
-# no candles endpoint on this venue (confirmed against its OpenAPI spec) —
-# empty intervals means no ohlcv:bullet:* jobs get created; funding/liquidity
-# below are independent of this list and still run normally.
 intervals = []
 funding = true
 liquidity = true
