@@ -67,7 +67,7 @@ class BulletScraper(BinanceFuturesScraper):
     def _build_http(self) -> HttpClient:
         return HttpClient(
             limiter=RateLimiter.per_minute(300, burst=20),   # unpublished limits
-            default_headers={"User-Agent": "cryptodash/0.1"},
+            default_headers={"User-Agent": "overseer/0.1"},
         )
 
     async def _funding_interval(self, native: str) -> int:
