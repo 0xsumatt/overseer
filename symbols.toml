@@ -3,31 +3,31 @@ intervals = ["1m"]
 
 [venues.binance_perp]
 intervals = ["1m"]
-funding = true
+funding = "all"
 liquidity = true
 
 [venues.hyperliquid]
 intervals = ["1m"]
-funding = true
-liquidity = true
+funding = "all"
+liquidity = "all"
 
 [venues.bybit_spot]
 intervals = ["1m"]
 
 [venues.bybit_perp]
 intervals = ["1m"]
-funding = true
-liquidity = true
+funding = "all"
+liquidity = "all"
 
 [venues.lighter]
 intervals = ["1m"]
-funding = true
-liquidity = true
+funding = "all"
+liquidity = "all"
 
 [venues.extended]
 intervals = ["1m"]
-funding = true
-liquidity = true
+funding = "all"
+liquidity = "all"
 
 # [venues.bulk]
 # intervals = ["1m"]
@@ -37,13 +37,13 @@ liquidity = true
 
 [venues.rise]
 intervals = ["1m"]
-funding = true
-liquidity = true
+funding = "all"
+liquidity = "all"
  
 [venues.bullet]
 intervals = []
-funding = true
-liquidity = true
+funding = "all"
+liquidity = "all"
 
 # -- assets --------------------------------------------------------------------
 
