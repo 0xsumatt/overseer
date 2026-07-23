@@ -61,7 +61,12 @@ class DiscordNotifier:
         if len(content) > _DISCORD_LIMIT:
             content = content[:_TRUNCATE] + "\n… (truncated)"
         try:
-            await self._http.request("post", self._url, json={"content": content})
+            # flags=4 (SUPPRESS_EMBEDS): trade links still render as clickable
+            # text, but Discord won't unfurl each URL into its own preview
+            # card — those cards were burying the actual alert in the channel.
+            await self._http.request(
+                "post", self._url, json={"content": content, "flags": 4}
+            )
         except Exception:
             # alerting is best-effort; a Discord outage must not break a scrape
             log.warning("discord notification failed to send", exc_info=True)

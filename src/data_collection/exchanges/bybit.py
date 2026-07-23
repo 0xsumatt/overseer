@@ -1,23 +1,3 @@
-"""Bybit adapters — v5 unified REST (GET), spot + USDT linear perps.
-
-One API serves both markets via a ``category`` parameter, so the perp class is
-classvar overrides on the spot one (the Binance pattern). All v5 responses ride
-a ``{retCode, retMsg, result}`` envelope — retCode != 0 is an API-level error
-even when HTTP is 200, so the unwrap helper raises on it.
-
-Shapes (verified against bybit-exchange.github.io/docs/v5):
-  * kline:   GET /v5/market/kline?category&symbol&interval&start&limit
-             -> result.list = [[startMs, o, h, l, c, volume(base), turnover]]
-             in DESCENDING time order — reversed on normalize.
-  * funding: GET /v5/market/funding/history (category=linear, limit<=200)
-             -> [{symbol, fundingRate, fundingRateTimestamp}] DESC.
-             Interval varies per symbol: /v5/market/instruments-info carries
-             fundingInterval in MINUTES (480 = 8h default); cached per symbol.
-  * tickers: GET /v5/market/tickers (category=linear) -> openInterest (base),
-             turnover24h (quote), markPrice — the whole liquidity snapshot in
-             one call per symbol.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Sequence

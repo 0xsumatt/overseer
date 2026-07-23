@@ -20,28 +20,16 @@ class BulletScraper(BinanceFuturesScraper):
     # verify on first live run — see module docstring
     DEFAULT_FUNDING_HOURS: ClassVar[int] = 8
 
-    # Binance's weight units (_klines_weight/_ticker24h_weight) mean nothing
-    # against Bullet's own limiter below — its real limits are unpublished, so
-    # _build_http picked a flat conservative rate, not a weight-budget one.
-    # Confirmed live: inheriting _ticker24h_weight=40 raised ValueError
-    # outright (40 > this limiter's burst=20 — ratelimit.py refuses a request
     # that could never be admitted). Both reset to 1 token per call.
     _klines_weight: ClassVar[int] = 1
     _ticker24h_weight: ClassVar[int] = 1
 
-    # -- symbols: hyphenated native format ("BTC-USD"), NOT Binance's
-    #    concatenated-pair convention — see module docstring ---------------------
 
     def to_symbol(self, native: str) -> str:
         return native
 
     def to_native(self, symbol: str) -> str:
         return symbol
-
-    # -- time: MICROSECOND epoch, not Binance's milliseconds — see module
-    #    docstring. Same names as the base class on purpose: every inherited
-    #    fetch_* method calls self._to_ms/self._from_ms, so overriding here
-    #    redirects all of them via polymorphism with no other changes needed.
 
     @staticmethod
     def _to_ms(dt: datetime) -> int:
