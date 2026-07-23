@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from core.symbols import SymbolRegistry
 from data_collection.base import BaseExchangeScraper, Capability
-from scheduler.notify import DiscordNotifier
+from scheduler.notify import DiscordNotifier, trade_link
 from scheduler.targets import FillsTarget, FundingTarget, LiquidityTarget, ScrapeTarget
 from storage.writers import Storage
 
@@ -236,13 +236,16 @@ async def check_dislocations(
     # a venue whose feed died still has a "latest" row; an old extreme rate is
     # not a live dislocation, so only rates settled in the last day count.
     cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-    legs: dict[str, list[tuple[str, float]]] = {}
+    # (exchange, apr, venue-native symbol) — the native symbol travels through
+    # so the alert can deep-link straight to that venue's trade page for it,
+    # not just name-drop the exchange.
+    legs: dict[str, list[tuple[str, float, str]]] = {}
     for r in rows:
         if r["ts"] < cutoff:
             continue
         asset = registry.asset_for(r["symbol"]) or r["symbol"]
         apr = float(r["rate"]) * (8760 / r["interval_hours"]) * 100
-        legs.setdefault(asset, []).append((r["exchange"], apr))
+        legs.setdefault(asset, []).append((r["exchange"], apr, r["symbol"]))
     for asset, venues in sorted(legs.items()):
         if len(venues) < 2:
             continue
@@ -255,7 +258,8 @@ async def check_dislocations(
             state[key] = "wide"
             await notifier.digest(
                 f"📈 **{asset}** funding spread {spread:.1f}% APR — "
-                f"{hi[0]} {hi[1]:+.1f}% vs {lo[0]} {lo[1]:+.1f}%"
+                f"{trade_link(hi[0], hi[2])} {hi[1]:+.1f}% vs "
+                f"{trade_link(lo[0], lo[2])} {lo[1]:+.1f}%"
             )
         elif spread < threshold_apr * 0.8 and prev == "wide":
             state[key] = "ok"

@@ -62,8 +62,10 @@ const TRADE_URLS = {
   bybit:       s => `https://www.bybit.com/trade/usdt/${s.replace('/','')}`,
   hyperliquid: s => `https://app.hyperliquid.xyz/trade/${s}`,
   lighter:     s => `https://app.lighter.xyz/trade/${s}`,
-  extended:    s => `https://app.extended.exchange/trade/${s}`,   // verify path once live
-  bulk:        s => `https://app.bulk.trade/trade/${s}`,          // verify at mainnet
+  extended:    s => `https://app.extended.exchange/trade/${s}`,
+  rise:        s => `https://www.rise.trade/en/trade/${s.split('/')[0]}`,  // base asset only, not the full pair
+  bullet:      s => `https://app.bullet.xyz/trade/${s}`,
+  bulk:        s => `https://app.bulk.trade/trade/${s}`,          // not yet enabled, no confirmed URL
 };
 const JOIN_URLS = {
   binance:     c => `https://accounts.binance.com/register?ref=${c}`,

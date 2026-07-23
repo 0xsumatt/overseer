@@ -1,3 +1,38 @@
+"""Rise (RISEx) adapter — perp-only, mainnet (api.rise.trade).
+
+Confirmed live 2026-07-22 against BOTH api.rise.trade (mainnet) and
+api.testnet.rise.trade (testnet) — same API shape on both, only the data
+differs. Was pointed at testnet until this date; switched to mainnet once
+live, since testnet funding swings into four-digit APR territory (genuine
+venue behavior, not a scraping bug — verified by comparing hour-by-hour
+history against the raw API directly).
+
+  * every response wraps its payload in {"data": {...}}. /v1/markets is
+    {"data": {"markets": [...]}}; funding-rate-history is
+    {"data": {"records": [...], "page", "has_next_page"}}; trading-view-data
+    is (confusingly) {"data": {"data": [...]}} — a candle array nested under
+    a second "data" key, not a typo here.
+  * market objects carry config.name ("BTC/USDC" — confirmed, matches
+    symbols.toml) alongside market_id, open_interest, quote_volume_24h,
+    mark_price, active, config.unlocked.
+  * funding-rate-history paginates (page/has_next_page); a window with more
+    settlements than one page silently truncates without it.
+  * /v1/markets is cached SERVER-SIDE for 5 minutes regardless of client
+    calls; force_refresh=true bypasses that cache.
+  * retired markets aren't removed from /v1/markets, just renamed with a
+    suffix (observed on testnet: "DOGE/USDC [deprecated-1779950366]") — a
+    symbol that used to resolve can start raising KeyError in _market_id
+    with no warning. None of the currently-configured assets are affected.
+  * mainnet is early-stage / thin liquidity (~130 BTC open interest as of
+    this writing) — expect real double-digit hourly APR swings from that
+    alone, not just from the (worse) testnet noise. The dislocation alert
+    threshold may trip on Rise more than on deeper venues; that's a
+    legitimate signal here, not a data-quality problem.
+  * API is under active development — endpoints have been deprecated /
+    changed without notice historically. Re-verify against
+    developer.rise.trade if fetches start failing.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -31,8 +66,6 @@ def _from_ns(ns: int | str) -> datetime:
 
 class RiseScraper(BaseExchangeScraper):
     exchange: ClassVar[Exchange] = Exchange.RISE
-    # TESTNET server from the spec. At mainnet: confirm the production host
-    # and flip this classvar; nothing else changes.
     base_url: ClassVar[str] = "https://api.rise.trade"
     market_type: ClassVar[MarketType] = MarketType.PERP       # perp-only venue
     supports_wide_liquidity: ClassVar[bool] = True
