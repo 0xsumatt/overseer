@@ -12,6 +12,12 @@ class Exchange(StrEnum):
     BULK = "bulk"
     RISE = "rise"
     BULLET = "bullet"
+    HYLO = "hylo"
+
+
+class QuoteCurrency(StrEnum):
+    USDT = "USDT"
+    USDC = "USDC"
 
 
 class Side(StrEnum):
@@ -24,6 +30,12 @@ class MarketType(StrEnum):
     PERP = "perp"          # perpetual swap
     FUTURE = "future"
     OPTION = "option"
+    # A tokenised leveraged position (Hylo xSOL/xBTC). Not a market in the
+    # matching-engine sense — there is no book, no funding and no liquidation
+    # engine; you mint and redeem against a collateral pool. It earns a
+    # market_type of its own so the perp-domain filters in scheduler/targets.py
+    # skip it automatically: funding and OI jobs are only ever built for PERP.
+    LEVERAGED_TOKEN = "leveraged_token"
 
 
 class Timeframe(StrEnum):

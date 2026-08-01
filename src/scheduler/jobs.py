@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
+from core.enums import MarketType, QuoteCurrency
+from core.models import TopOfBook
 from core.symbols import SymbolRegistry
 from data_collection.base import BaseExchangeScraper, Capability
 from scheduler.notify import DiscordNotifier, trade_link
@@ -216,55 +220,251 @@ async def run_venue_volume(scrapers: dict, storage, notifier, state) -> None:
     await _record_and_alert(outcome, storage, notifier, state)
 
 
+def _fmt_px(value: Decimal) -> str:
+    """Price at a readable precision across large and sub-dollar markets."""
+    if value >= 1000:
+        return f"{value:,.1f}"
+    if value >= 1:
+        return f"{value:,.3f}"
+    return f"{value:.6f}"
+
+
+def _fmt_size(value: Decimal) -> str:
+    if value >= 1000:
+        return f"{value:,.0f}"
+    if value >= 1:
+        return f"{value:,.3f}"
+    return f"{value:.6f}"
+
+
+@dataclass(frozen=True)
+class FundingLeg:
+    exchange: str
+    venue: str | None
+    symbol: str
+    apr: float
+
+
+class UsdcUsdtQuoteCache:
+    """One shared, side-aware USDC/USDT quote for event-driven alerts."""
+
+    def __init__(
+        self,
+        binance_spot: BaseExchangeScraper | None,
+        *,
+        fresh_for: timedelta = timedelta(minutes=1),
+        fallback_for: timedelta = timedelta(minutes=5),
+    ) -> None:
+        self._scraper = binance_spot
+        self._fresh_for = fresh_for
+        self._fallback_for = fallback_for
+        self._book: TopOfBook | None = None
+
+    async def get(self) -> tuple[TopOfBook, bool]:
+        now = datetime.now(timezone.utc)
+        if self._book is not None and now - self._book.ts <= self._fresh_for:
+            return self._book, False
+        try:
+            if self._scraper is None or Capability.BBO not in self._scraper.capabilities:
+                raise RuntimeError("binance spot BBO is unavailable")
+            self._book = await asyncio.wait_for(
+                self._scraper.fetch_bbo("USDC/USDT"), timeout=5
+            )
+            return self._book, False
+        except Exception:
+            if self._book is not None and now - self._book.ts <= self._fallback_for:
+                log.warning("USDC/USDT refresh failed; using cached quote", exc_info=True)
+                return self._book, True
+            raise
+
+
+def _venue_for_leg(
+    registry: SymbolRegistry,
+    scrapers: dict[str, BaseExchangeScraper],
+    asset: str,
+    exchange: str,
+    symbol: str,
+) -> str | None:
+    for venue, configured_symbol in registry.listings(asset).items():
+        scraper = scrapers.get(venue)
+        if (
+            scraper is not None
+            and configured_symbol == symbol
+            and scraper.exchange.value == exchange
+            and scraper.market_type_for(symbol) is MarketType.PERP
+        ):
+            return venue
+    return None
+
+
+async def _safe_bbo(
+    leg: FundingLeg, scrapers: dict[str, BaseExchangeScraper]
+) -> TopOfBook | None:
+    scraper = scrapers.get(leg.venue or "")
+    if scraper is None or Capability.BBO not in scraper.capabilities:
+        log.warning("no BBO adapter for %s %s", leg.exchange, leg.symbol)
+        return None
+    try:
+        book = await asyncio.wait_for(scraper.fetch_bbo(leg.symbol), timeout=5)
+        if (
+            book.bid_price <= 0
+            or book.ask_price <= 0
+            or book.bid_size <= 0
+            or book.ask_size <= 0
+            or book.bid_price > book.ask_price
+        ):
+            raise ValueError(f"invalid BBO: {book!r}")
+        return book
+    except Exception:
+        log.warning("BBO fetch failed for %s %s", leg.exchange, leg.symbol, exc_info=True)
+        return None
+
+async def _safe_fx(
+    cache: UsdcUsdtQuoteCache,
+) -> tuple[TopOfBook | None, bool]:
+    try:
+        return await cache.get()
+    except Exception:
+        log.warning("USDC/USDT quote unavailable", exc_info=True)
+        return None, False
+
+
+def _usdt_prices(
+    book: TopOfBook, fx: TopOfBook | None
+) -> tuple[Decimal, Decimal, str] | None:
+    if book.quote_currency is QuoteCurrency.USDT:
+        return book.bid_price, book.ask_price, QuoteCurrency.USDT.value
+    if fx is None:
+        return None
+    return (
+        book.bid_price * fx.bid_price,
+        book.ask_price * fx.ask_price,
+        QuoteCurrency.USDT.value,
+    )
+
+
+def _book_line(
+    side: str,
+    leg: FundingLeg,
+    book: TopOfBook | None,
+    fx: TopOfBook | None,
+) -> str:
+    link = trade_link(leg.exchange, leg.symbol)
+    header = f"**{side}** {link} {leg.apr:+.1f}% APR"
+    if book is None:
+        return header + "\nbook unavailable"
+    converted = _usdt_prices(book, fx)
+    if converted is None:
+        bid, ask, quote = book.bid_price, book.ask_price, book.quote_currency.value
+    else:
+        bid, ask, quote = converted
+    return (
+        f"{header}\n"
+        f"bid {_fmt_px(bid)} × {_fmt_size(book.bid_size)} | "
+        f"ask {_fmt_px(ask)} × {_fmt_size(book.ask_size)} {quote}"
+    )
+
+
+async def _execution_details(
+    hi: FundingLeg,
+    lo: FundingLeg,
+    scrapers: dict[str, BaseExchangeScraper],
+    fx_cache: UsdcUsdtQuoteCache,
+) -> str:
+    hi_task = asyncio.create_task(_safe_bbo(hi, scrapers))
+    lo_task = asyncio.create_task(_safe_bbo(lo, scrapers))
+    needs_fx = any(
+        (
+            scraper := scrapers.get(leg.venue or "")
+        ) is not None and getattr(
+            scraper, "quote_currency", None
+        ) is QuoteCurrency.USDC
+        for leg in (hi, lo)
+    )
+    if needs_fx:
+        hi_book, lo_book, fx_result = await asyncio.gather(
+            hi_task, lo_task, asyncio.create_task(_safe_fx(fx_cache))
+        )
+        fx, fx_cached = fx_result
+    else:
+        hi_book, lo_book = await asyncio.gather(hi_task, lo_task)
+        fx, fx_cached = None, False
+
+    lines = [
+        _book_line("SHORT", hi, hi_book, fx),
+        _book_line("LONG", lo, lo_book, fx),
+    ]
+    hi_usdt = _usdt_prices(hi_book, fx) if hi_book is not None else None
+    lo_usdt = _usdt_prices(lo_book, fx) if lo_book is not None else None
+    if fx is not None:
+        cached = " · cached" if fx_cached else ""
+        lines.append(
+            f"USDC/USDT {fx.bid_price:.6f} / {fx.ask_price:.6f}{cached}"
+        )
+    if hi_usdt is not None and lo_usdt is not None:
+        short_bid, long_ask = hi_usdt[0], lo_usdt[1]
+        mid = (short_bid + long_ask) / 2
+        if mid > 0:
+            edge_bps = (short_bid - long_ask) / mid * Decimal(10_000)
+            label = "entry edge" if edge_bps >= 0 else "entry cost"
+            lines.append(f"Gross {label}: {edge_bps:+.1f} bps")
+    books = [book for book in (hi_book, lo_book) if book is not None]
+    if books:
+        captured = max(book.ts for book in books)
+        lines.append(f"Books captured {captured:%H:%M:%S} UTC")
+    lines.append("Fees and slippage beyond displayed size excluded")
+    return "\n\n" + "\n\n".join(lines)
+
+
 async def check_dislocations(
     storage: Storage,
     notifier: DiscordNotifier,
     state: dict[str, str],
     registry: SymbolRegistry,
     threshold_apr: float,
+    scrapers: dict[str, BaseExchangeScraper],
+    fx_cache: UsdcUsdtQuoteCache,
 ) -> None:
-    """Ping Discord when a coin's cross-venue funding spread opens past the
-    threshold. Edge-triggered like the job alerts (one ping on crossing, one on
-    narrowing), with 20% hysteresis so a spread hovering at the line doesn't
-    flap. State keys are 'dislocation:<asset>' — same dict as job statuses,
-    disjoint keyspace."""
+    """Alert on fresh current funding, enriching new crossings with live BBOs."""
     try:
-        rows = await storage.latest_funding_rows()
+        rows = await storage.latest_current_funding_rows()
     except Exception:
-        log.exception("dislocation check failed")
+        log.exception("current funding dislocation check failed")
         return
-    # a venue whose feed died still has a "latest" row; an old extreme rate is
-    # not a live dislocation, so only rates settled in the last day count.
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-    # (exchange, apr, venue-native symbol) — the native symbol travels through
-    # so the alert can deep-link straight to that venue's trade page for it,
-    # not just name-drop the exchange.
-    legs: dict[str, list[tuple[str, float, str]]] = {}
-    for r in rows:
-        if r["ts"] < cutoff:
+
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=30)
+    legs: dict[str, list[FundingLeg]] = {}
+    for row in rows:
+        if row["ts"] < cutoff:
             continue
-        asset = registry.asset_for(r["symbol"]) or r["symbol"]
-        apr = float(r["rate"]) * (8760 / r["interval_hours"]) * 100
-        legs.setdefault(asset, []).append((r["exchange"], apr, r["symbol"]))
+        asset = registry.asset_for(row["symbol"]) or row["symbol"]
+        apr = float(row["rate"]) * (8760 / row["interval_hours"]) * 100
+        venue = _venue_for_leg(
+            registry, scrapers, asset, row["exchange"], row["symbol"]
+        )
+        legs.setdefault(asset, []).append(
+            FundingLeg(row["exchange"], venue, row["symbol"], apr)
+        )
+
     for asset, venues in sorted(legs.items()):
         if len(venues) < 2:
             continue
-        hi = max(venues, key=lambda v: v[1])
-        lo = min(venues, key=lambda v: v[1])
-        spread = hi[1] - lo[1]
+        hi = max(venues, key=lambda leg: leg.apr)
+        lo = min(venues, key=lambda leg: leg.apr)
+        spread = hi.apr - lo.apr
         key = f"dislocation:{asset}"
         prev = state.get(key, "ok")
         if spread >= threshold_apr and prev != "wide":
             state[key] = "wide"
+            execution = await _execution_details(hi, lo, scrapers, fx_cache)
             await notifier.digest(
-                f"📈 **{asset}** funding spread {spread:.1f}% APR — "
-                f"{trade_link(hi[0], hi[2])} {hi[1]:+.1f}% vs "
-                f"{trade_link(lo[0], lo[2])} {lo[1]:+.1f}%"
+                f"📈 **{asset}** current funding spread {spread:.1f}% APR"
+                + execution
             )
         elif spread < threshold_apr * 0.8 and prev == "wide":
             state[key] = "ok"
             await notifier.digest(
-                f"↩️ **{asset}** funding spread narrowed to {spread:.1f}% APR"
+                f"↩️ **{asset}** current funding spread narrowed to {spread:.1f}% APR"
             )
 
 

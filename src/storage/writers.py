@@ -7,7 +7,8 @@ from typing import Any
 import asyncpg
 
 from core.enums import Exchange, MarketType, Timeframe
-from core.models import OHLCV, FundingRate, LiquiditySnapshot, Trade, VenueVolume
+from core.models import (OHLCV, FundingRate, LeverageStats, LiquiditySnapshot,
+                         Trade, TradeFlow, VenueVolume)
 
 # (db column, postgres array cast, value extractor)
 _Col = tuple[str, str, Callable[[Any], Any]]
@@ -59,6 +60,11 @@ _LIQ_COLS: tuple[_Col, ...] = (
     ("open_interest", "numeric",     lambda r: r.open_interest),
     ("volume_24h",    "numeric",     lambda r: r.volume_24h),
     ("mark_price",    "numeric",     lambda r: r.mark_price),
+    ("index_price",                  "numeric",     lambda r: r.index_price),
+    ("current_funding_rate",         "numeric",     lambda r: r.current_funding_rate),
+    ("funding_interval_hours",       "int4",        lambda r: r.funding_interval_hours),
+    ("next_funding_at",              "timestamptz", lambda r: r.next_funding_at),
+    ("funding_premium",              "numeric",     lambda r: r.funding_premium),
 )
 _LIQ_CONFLICT = ("exchange", "symbol", "ts")
 
@@ -70,6 +76,37 @@ _VENUE_VOL_COLS: tuple[_Col, ...] = (
     ("volume_perp",  "numeric",     lambda r: r.volume_perp),
 )
 _VENUE_VOL_CONFLICT = ("exchange", "ts")
+
+_LEV_STATS_COLS: tuple[_Col, ...] = (
+    ("exchange",    "text",        lambda r: r.exchange.value),
+    ("symbol",      "text",        lambda r: r.symbol),
+    ("interval",    "text",        lambda r: r.interval.value),
+    ("ts",          "timestamptz", lambda r: r.ts),
+    ("total_value", "numeric",     lambda r: r.total_value),
+    ("leverage",    "numeric",     lambda r: r.leverage),
+)
+_LEV_STATS_CONFLICT = ("exchange", "symbol", "interval", "ts")
+
+_FLOW_COLS: tuple[_Col, ...] = (
+    ("exchange",    "text",        lambda r: r.exchange.value),
+    ("market_type", "text",        lambda r: r.market_type.value),
+    ("symbol",      "text",        lambda r: r.symbol),
+    ("bucket",      "timestamptz", lambda r: r.bucket),
+    ("trades",      "int4",        lambda r: r.trades),
+    ("volume",      "numeric",     lambda r: r.volume),
+    ("buy_volume",  "numeric",     lambda r: r.buy_volume),
+    ("sell_volume", "numeric",     lambda r: r.sell_volume),
+    ("notional",    "numeric",     lambda r: r.notional),
+    ("large_trades",       "int4",    lambda r: r.large_trades),
+    ("large_buy_volume",   "numeric", lambda r: r.large_buy_volume),
+    ("large_sell_volume",  "numeric", lambda r: r.large_sell_volume),
+    ("max_trade_notional", "numeric", lambda r: r.max_trade_notional),
+    ("open",        "numeric",     lambda r: r.open),
+    ("high",        "numeric",     lambda r: r.high),
+    ("low",         "numeric",     lambda r: r.low),
+    ("close",       "numeric",     lambda r: r.close),
+)
+_FLOW_CONFLICT = ("exchange", "market_type", "symbol", "bucket")
 
 
 class Storage:
@@ -191,13 +228,53 @@ class Storage:
             "venue_volume", _VENUE_VOL_COLS, _VENUE_VOL_CONFLICT, records
         )
 
+    async def write_trade_flow(self, records: Sequence[TradeFlow]) -> int:
+        # DO NOTHING, not UPDATE: a minute is written once, sealed, and the
+        # trades it was built from are mostly never stored — so a second write
+        # for the same bucket is a replay, and the first value is the complete
+        # one. Overwriting would let a partial replay clobber a good row.
+        return await self._bulk_upsert(
+            "trades_1m", _FLOW_COLS, _FLOW_CONFLICT, records
+        )
+
+    async def write_leverage_stats(self, records: Sequence[LeverageStats]) -> int:
+        # update=True so a re-fetch can correct a bar. Safe against half-erasing
+        # a row: the adapter fetches both series in one call and raises if
+        # either fails, so a NULL here means genuine timestamp misalignment,
+        # which is stable across fetches rather than intermittent.
+        return await self._bulk_upsert(
+            "leveraged_token_stats", _LEV_STATS_COLS, _LEV_STATS_CONFLICT,
+            records, update=True,
+        )
+
+    async def latest_leverage_stats_ts(
+        self, exchange: Exchange, symbol: str, interval: Timeframe
+    ) -> datetime | None:
+        return await self.pool.fetchval(
+            "SELECT max(ts) FROM leveraged_token_stats "
+            "WHERE exchange=$1 AND symbol=$2 AND interval=$3",
+            exchange.value, symbol, interval.value,
+        )
+
     async def latest_funding_rows(self) -> list[asyncpg.Record]:
-        """Newest settled funding per (exchange, symbol) — feeds the
-        dislocation alert job."""
+        """Newest settled funding per market; anchors settlement capture."""
         return await self.pool.fetch(
             "SELECT DISTINCT ON (exchange, symbol) "
             "exchange, symbol, ts, rate, interval_hours "
             "FROM funding_rates ORDER BY exchange, symbol, ts DESC"
+        )
+
+    async def latest_current_funding_rows(self) -> list[asyncpg.Record]:
+        """Newest venue-published funding rate per market for live alerts."""
+        return await self.pool.fetch(
+            "SELECT DISTINCT ON (exchange, symbol) "
+            "exchange, symbol, ts, current_funding_rate AS rate, "
+            "funding_interval_hours AS interval_hours "
+            "FROM liquidity "
+            "WHERE current_funding_rate IS NOT NULL "
+            "AND funding_interval_hours IS NOT NULL "
+            "AND funding_interval_hours > 0 "
+            "ORDER BY exchange, symbol, ts DESC"
         )
 
     async def latest_funding_ts(self, exchange: Exchange, symbol: str) -> datetime | None:

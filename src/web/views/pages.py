@@ -38,7 +38,13 @@ def logout():
 @bp.get("/")
 @login_required
 def dashboard():
-    return render_template("dashboard.html", series=_store().series_list())
+    # annotate each series with its canonical asset so the chart's token
+    # dropdown groups venue-native symbols ("BTC/USDT", "BTC", "BTC-USD")
+    # under one entry; unmapped symbols fall back to their raw name.
+    registry = current_app.extensions["symbols"]
+    series = [dict(s, asset=registry.asset_for(s["symbol"]) or s["symbol"])
+              for s in _store().series_list()]
+    return render_template("dashboard.html", series=series)
 
 
 @bp.get("/basis")
@@ -52,6 +58,14 @@ def basis():
 def funding():
     # data comes client-side from /api/funding; the page is just the shell
     return render_template("funding.html")
+
+
+@bp.get("/flow")
+@login_required
+def flow():
+    # data comes client-side from /api/trade-flow; the page is just the shell
+    registry = current_app.extensions["symbols"]
+    return render_template("flow.html", assets=registry.assets())
 
 
 @bp.get("/wallets")

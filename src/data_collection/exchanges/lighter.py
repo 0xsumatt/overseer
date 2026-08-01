@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any, ClassVar
+from typing import ClassVar
 
-from core.enums import Exchange, MarketType, Side, Timeframe
-from core.models import OHLCV, FundingRate, LiquiditySnapshot, Trade
+from core.enums import Exchange, MarketType, QuoteCurrency, Side, Timeframe
+from core.models import FundingRate, LiquiditySnapshot, OHLCV, TopOfBook, Trade
 from data_collection.base import BaseExchangeScraper, Capability
 from data_collection.http import HttpClient
 from data_collection.ratelimit import RateLimiter
@@ -29,9 +29,16 @@ class LighterScraper(BaseExchangeScraper):
     exchange: ClassVar[Exchange] = Exchange.LIGHTER
     base_url: ClassVar[str] = "https://mainnet.zklighter.elliot.ai"
     market_type: ClassVar[MarketType] = MarketType.PERP        # default/primary
+    quote_currency: ClassVar[QuoteCurrency] = QuoteCurrency.USDC
     capabilities: ClassVar[frozenset[Capability]] = frozenset(
-        {Capability.OHLCV, Capability.FUNDING, Capability.LIQUIDITY, Capability.FILLS,
-         Capability.VENUE_VOLUME}
+        {
+            Capability.OHLCV,
+            Capability.FUNDING,
+            Capability.LIQUIDITY,
+            Capability.FILLS,
+            Capability.VENUE_VOLUME,
+            Capability.BBO,
+        }
     )
 
     def __init__(self, http: HttpClient | None = None) -> None:
@@ -82,6 +89,27 @@ class LighterScraper(BaseExchangeScraper):
         if symbol not in markets:
             raise KeyError(f"lighter has no market {symbol!r}")
         return markets[symbol][0]
+
+    async def fetch_bbo(self, symbol: str) -> TopOfBook:
+        market_id = await self._market_id(symbol)
+        payload = await self.http.get_json(
+            f"{self.base_url}/api/v1/orderBookOrders",
+            params={"market_id": str(market_id), "limit": "1"},
+        )
+        bids, asks = payload.get("bids", []), payload.get("asks", [])
+        if not bids or not asks:
+            raise RuntimeError(f"lighter returned an empty book for {symbol}")
+        bid, ask = bids[0], asks[0]
+        return TopOfBook(
+            exchange=self.exchange,
+            symbol=symbol,
+            quote_currency=self.quote_currency,
+            ts=datetime.now(timezone.utc),
+            bid_price=self._dec(bid["price"]),
+            bid_size=self._dec(bid["remaining_base_amount"]),
+            ask_price=self._dec(ask["price"]),
+            ask_size=self._dec(ask["remaining_base_amount"]),
+        )
 
     # -- OHLCV ----------------------------------------------------------------------
 
@@ -165,15 +193,25 @@ class LighterScraper(BaseExchangeScraper):
     async def fetch_liquidity(
         self, symbols: Sequence[str]
     ) -> Sequence[LiquiditySnapshot]:
-        markets = await self._market_map(refresh=True)          # want fresh stats
+        markets = await self._market_map(refresh=True)
+        funding_payload = await self.http.get_json(
+            f"{self.base_url}/api/v1/funding-rates"
+        )
+        current_rates = {
+            r["symbol"]: r.get("rate")
+            for r in funding_payload.get("funding_rates", []) or []
+            if r.get("exchange") == "lighter"
+        }
         now = datetime.now(timezone.utc)
+        next_funding = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
         out: list[LiquiditySnapshot] = []
         for symbol in symbols:
             entry = markets.get(symbol)
             if entry is None:
                 continue
             _, _, stats = entry
-            mark = stats.get("last_trade_price", 0)             # no mark px on REST
+            mark = stats.get("mark_price") or stats.get("last_trade_price", 0)
+            current_rate = current_rates.get(symbol)
             out.append(
                 LiquiditySnapshot(
                     exchange=self.exchange,
@@ -182,6 +220,12 @@ class LighterScraper(BaseExchangeScraper):
                     open_interest=self._dec(stats.get("open_interest", 0)),
                     volume_24h=self._dec(stats.get("daily_quote_token_volume", 0)),
                     mark_price=self._dec(mark),
+                    index_price=self._dec(stats["index_price"]),
+                    current_funding_rate=(
+                        self._dec(current_rate) if current_rate is not None else None
+                    ),
+                    funding_interval_hours=1,
+                    next_funding_at=next_funding,
                 )
             )
         return out

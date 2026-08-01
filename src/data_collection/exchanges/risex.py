@@ -3,10 +3,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, ClassVar
+from typing import ClassVar
 
-from core.enums import Exchange, MarketType, Timeframe
-from core.models import OHLCV, FundingRate, LiquiditySnapshot
+from core.enums import Exchange, MarketType, QuoteCurrency, Timeframe
+from core.models import FundingRate, LiquiditySnapshot, OHLCV, TopOfBook
 from data_collection.base import BaseExchangeScraper, Capability
 from data_collection.http import HttpClient
 from data_collection.ratelimit import RateLimiter
@@ -33,10 +33,16 @@ class RiseScraper(BaseExchangeScraper):
     exchange: ClassVar[Exchange] = Exchange.RISE
     base_url: ClassVar[str] = "https://api.rise.trade"
     market_type: ClassVar[MarketType] = MarketType.PERP       # perp-only venue
+    quote_currency: ClassVar[QuoteCurrency] = QuoteCurrency.USDC
     supports_wide_liquidity: ClassVar[bool] = True
     capabilities: ClassVar[frozenset[Capability]] = frozenset(
-        {Capability.OHLCV, Capability.FUNDING, Capability.LIQUIDITY,
-         Capability.VENUE_VOLUME}
+        {
+            Capability.OHLCV,
+            Capability.FUNDING,
+            Capability.LIQUIDITY,
+            Capability.VENUE_VOLUME,
+            Capability.BBO,
+        }
     )
 
     _MARKET_MAP_TTL: ClassVar[float] = 1800.0
@@ -90,6 +96,28 @@ class RiseScraper(BaseExchangeScraper):
 
     def _is_live(self, m: dict) -> bool:
         return bool(m.get("active", True)) and bool((m.get("config") or {}).get("unlocked", True))
+
+    async def fetch_bbo(self, symbol: str) -> TopOfBook:
+        market_id = await self._market_id(symbol)
+        payload = await self.http.get_json(
+            f"{self.base_url}/v1/orderbook", params={"market_id": str(market_id)}
+        )
+        book = payload.get("data") or {}
+        bids, asks = book.get("bids", []), book.get("asks", [])
+        if not bids or not asks:
+            raise RuntimeError(f"rise returned an empty book for {symbol}")
+        bid = max(bids, key=lambda row: self._dec(row["price"]))
+        ask = min(asks, key=lambda row: self._dec(row["price"]))
+        return TopOfBook(
+            exchange=self.exchange,
+            symbol=symbol,
+            quote_currency=self.quote_currency,
+            ts=datetime.now(timezone.utc),
+            bid_price=self._dec(bid["price"]),
+            bid_size=self._dec(bid["quantity"]),
+            ask_price=self._dec(ask["price"]),
+            ask_size=self._dec(ask["quantity"]),
+        )
 
     # -- OHLCV: ns interval + ns window ---------------------------------------------
 
@@ -178,6 +206,10 @@ class RiseScraper(BaseExchangeScraper):
             m = markets.get(symbol)
             if m is None:
                 continue
+            interval_ns = int(m.get("funding_interval", 0) or 0)
+            interval_hours = max(1, interval_ns // (3600 * _NS)) if interval_ns else 1
+            current_rate = m.get("current_funding_rate")
+            next_funding = m.get("next_funding_time")
             out.append(
                 LiquiditySnapshot(
                     exchange=self.exchange,
@@ -186,6 +218,14 @@ class RiseScraper(BaseExchangeScraper):
                     open_interest=self._dec(m.get("open_interest", 0) or 0),
                     volume_24h=self._dec(m.get("quote_volume_24h", 0) or 0),
                     mark_price=self._dec(m.get("mark_price", 0) or 0),
+                    index_price=self._dec(m["index_price"]),
+                    current_funding_rate=(
+                        self._dec(current_rate) if current_rate not in (None, "") else None
+                    ),
+                    funding_interval_hours=interval_hours,
+                    next_funding_at=(
+                        _from_ns(next_funding) if next_funding else None
+                    ),
                 )
             )
         return out

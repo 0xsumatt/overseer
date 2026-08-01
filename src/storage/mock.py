@@ -58,6 +58,8 @@ _VENUES = [
     ("hyperliquid",   "hyperliquid", "perp", "{a}",      1),
     ("lighter",       "lighter",     "perp", "{a}",      1),
     ("extended",      "extended",    "perp", "{a}-USD",  1),
+    ("rise",          "rise",        "perp", "{a}/USDC", 1),
+    ("bullet",        "bullet",      "perp", "{a}-USD",  1),
 ]
 
 
@@ -163,6 +165,21 @@ class MockStorage:
 
     # -- funding table -------------------------------------------------------------
 
+    @staticmethod
+    def _last_settlement(now: datetime, interval_hours: int) -> datetime:
+        """Newest settlement boundary at or before `now`.
+
+        Real venues settle on fixed boundaries — hourly venues on the hour,
+        8h venues at 00/08/16 UTC — not at an arbitrary offset from now. It
+        matters beyond realism: the flow page derives settlement markers from
+        this timestamp, and the mock's flow generator builds its pre/post
+        pattern on the same boundaries, so a random offset would put the
+        markers where nothing happens.
+        """
+        period = interval_hours * 3600
+        return datetime.fromtimestamp(
+            (int(now.timestamp()) // period) * period, tz=UTC)
+
     def funding_table(self) -> list[Row]:
         now = datetime.now(UTC).replace(second=0, microsecond=0)
         rows: list[Row] = []
@@ -182,11 +199,23 @@ class MockStorage:
             missing_liq = _u(f"liq:{venue}:{asset}", 4) > 0.92     # a couple of '—' cells
             # ±30% swing, occasionally beyond ±20% to exercise the squeeze case
             oi_delta = 30.0 * _u(f"oidelta:{venue}:{asset}", 6)
+            settled_at = self._last_settlement(now, fh)
+            next_funding = settled_at + timedelta(hours=fh)
             rows.append({
                 "exchange": exchange, "symbol": symbol,
-                "funding_ts": now - timedelta(minutes=int(20 * abs(_u(f"ft:{venue}:{asset}", 5)))),
+                "funding_ts": settled_at,
                 "rate": rate, "interval_hours": fh,
                 "apr_pct": Decimal(f"{apr:.4f}"),
+                "rate_kind": "settled" if missing_liq else "current",
+                "rate_ts": settled_at if missing_liq else now,
+                "settled_rate": rate,
+                "settled_interval_hours": fh,
+                "settled_apr_pct": Decimal(f"{apr:.4f}"),
+                "current_funding_rate": None if missing_liq else rate,
+                "current_interval_hours": None if missing_liq else fh,
+                "next_funding_at": None if missing_liq else next_funding,
+                "funding_premium": None,
+                "index_price": None if missing_liq else mark * Decimal("1.0002"),
                 "open_interest": None if missing_liq else Decimal(f"{oi_base:.2f}"),
                 "oi_notional": None if missing_liq else Decimal(f"{oi_base:.2f}") * mark,
                 "volume_24h": None if missing_liq else Decimal(f"{float(mark) * oi_base * 2.4:.0f}"),
@@ -196,11 +225,22 @@ class MockStorage:
             })
         for exchange, symbol, fh, apr, oi_ntl in _WIDE_FUNDING:
             rate = Decimal(f"{apr / 100 / (8760 / fh):.10f}")
+            settled_at = self._last_settlement(now, fh)
             rows.append({
                 "exchange": exchange, "symbol": symbol,
-                "funding_ts": now - timedelta(minutes=9),
+                "funding_ts": self._last_settlement(now, fh),
                 "rate": rate, "interval_hours": fh,
                 "apr_pct": Decimal(f"{apr:.4f}"),
+                "rate_kind": "current",
+                "rate_ts": now,
+                "settled_rate": rate,
+                "settled_interval_hours": fh,
+                "settled_apr_pct": Decimal(f"{apr:.4f}"),
+                "current_funding_rate": rate,
+                "current_interval_hours": fh,
+                "next_funding_at": settled_at + timedelta(hours=fh),
+                "funding_premium": None,
+                "index_price": Decimal("1.0002"),
                 "open_interest": Decimal("1"),
                 "oi_notional": Decimal(str(oi_ntl)),
                 "volume_24h": Decimal(str(oi_ntl * 3.1)),
@@ -301,6 +341,149 @@ class MockStorage:
             rate = Decimal(f"{apr / 100 / (8760 / fh):.10f}")
             out.append({"ts": ts, "rate": rate, "interval_hours": fh,
                         "apr_pct": Decimal(f"{apr:.4f}")})
+        return out
+
+    def funding_series_multi(
+        self, symbols: list[str], hours: int = 48, limit: int = 5000
+    ) -> list[Row]:
+        wanted = set(symbols)
+        out: list[Row] = []
+        for venue, exchange, mt, pat, fh in _VENUES:
+            if fh is None:
+                continue                          # spot venues never fund
+            for asset in _BASES:
+                if venue == "binance_spot" and asset == "HYPE":
+                    continue
+                sym = pat.format(a=asset)
+                if sym not in wanted:
+                    continue
+                for r in self.funding_series(exchange, sym, hours=hours, limit=limit):
+                    out.append({"exchange": exchange, "symbol": sym, **r})
+        return out
+
+    def liquidity_series_multi(
+        self, symbols: list[str], hours: int = 48,
+        bucket_minutes: int | None = None, limit: int = 20_000,
+    ) -> list[Row]:
+        wanted = set(symbols)
+        bucket_min = bucket_minutes or (5 if hours <= 48 else 30 if hours <= 168 else 120)
+        now = datetime.now(UTC).replace(second=0, microsecond=0)
+        out: list[Row] = []
+        oi_bases = {"BTC": 48_000, "ETH": 310_000, "SOL": 2_400_000,
+                    "AAVE": 260_000, "HYPE": 4_100_000}
+        for venue, exchange, mt, pat, fh in _VENUES:
+            if fh is None:
+                continue                          # spot venues carry no OI here
+            for asset, base in _BASES.items():
+                if venue == "binance_spot" and asset == "HYPE":
+                    continue
+                sym = pat.format(a=asset)
+                if sym not in wanted:
+                    continue
+                oi_base = oi_bases.get(asset, 900_000_000 / base)
+                seed = f"oi:{exchange}:{sym}"
+                n = min(limit, (hours * 60) // bucket_min)
+                for k in range(n, 0, -1):
+                    ts = now - timedelta(minutes=k * bucket_min)
+                    i = int(ts.timestamp() // 60)
+                    oi = oi_base * (1 + 0.35 * math.sin(i / 500) + 0.15 * _u(seed, i))
+                    mark = Decimal(f"{_px(f'{exchange}:perp:{sym}', base, i):.4f}")
+                    out.append({"exchange": exchange, "symbol": sym, "ts": ts,
+                                "oi_notional": Decimal(f"{oi:.2f}") * mark})
+        return out
+
+    # Only venues with a websocket adapter produce flow, so the mock mirrors
+    # that rather than inventing it for all nine — and it keeps the page to the
+    # three-colour venue palette that validates cleanly on the dark surface.
+    _FLOW_VENUES = [
+        ("hyperliquid", "hyperliquid", "{a}",      1),
+        ("bybit_perp",  "bybit",       "{a}/USDT", 8),
+        ("binance_perp", "binance",    "{a}/USDT", 8),
+    ]
+
+    def trade_flow_multi(
+        self, symbols: list[str], hours: int = 6,
+        bucket_minutes: int | None = None, limit: int = 20_000,
+    ) -> list[Row]:
+        """Synthetic order flow that actually shows the behaviour the page is
+        for: takers flattening ahead of a funding settlement and re-entering
+        after it, with size participating more heavily than usual.
+
+        Flat noise would make the page look plausible while demonstrating
+        nothing, so the generator models the dodge explicitly — direction is
+        deterministic per (venue, asset) so a refresh never changes the story.
+        """
+        wanted = set(symbols)
+        bucket_min = bucket_minutes or (1 if hours <= 6 else 5 if hours <= 48 else 60)
+        now = datetime.now(UTC).replace(second=0, microsecond=0)
+        out: list[Row] = []
+
+        for venue, exchange, pattern, fh in self._FLOW_VENUES:
+            period = fh * 60                      # settlement cadence, minutes
+            for asset, base in _BASES.items():
+                sym = pattern.format(a=asset)
+                if sym not in wanted:
+                    continue
+                seed = f"flow:{exchange}:{sym}"
+                # which way this market dodges: deterministic, not random
+                direction = 1 if _u(seed, 7) > 0 else -1
+                liquidity = 1.0 if asset in ("BTC", "ETH") else 0.35
+
+                n = min(limit, (hours * 60) // bucket_min)
+                for k in range(n, 0, -1):
+                    ts = now - timedelta(minutes=k * bucket_min)
+                    i = int(ts.timestamp() // 60)
+                    offset = i % period
+                    to_next, since_last = period - offset, offset
+
+                    # intensity ramps into the settlement and decays out of it
+                    if to_next <= 12:
+                        phase, intensity = "pre", (13 - to_next) / 13
+                    elif since_last <= 6:
+                        phase, intensity = "post", (7 - since_last) / 7
+                    else:
+                        phase, intensity = "flat", 0.0
+
+                    burst = 1 + 3.2 * intensity
+                    trades = max(1, int((40 + 220 * liquidity) * burst
+                                        * (1 + 0.25 * _u(seed, i))))
+                    px = _px(f"{exchange}:perp:{sym}", base, i)
+                    volume = Decimal(f"{trades * (900 * liquidity / px) * (1 + 0.3 * _u(seed, i + 1)):.6f}")
+
+                    skew = 0.06 * _u(seed, i + 2)
+                    if phase == "pre":
+                        skew += -direction * 0.72 * intensity
+                    elif phase == "post":
+                        skew += direction * 0.61 * intensity
+                    skew = max(-0.95, min(0.95, skew))
+                    buy = volume * Decimal(str((1 + skew) / 2))
+                    sell = volume - buy
+
+                    # size shows up disproportionately around the settlement
+                    large_share = 0.10 + 0.34 * intensity
+                    large_n = int(trades * large_share * 0.22)
+                    large_vol = volume * Decimal(str(large_share))
+                    large_skew = max(-0.95, min(0.95, skew * 1.25))
+                    large_buy = large_vol * Decimal(str((1 + large_skew) / 2))
+                    large_sell = large_vol - large_buy
+
+                    notional = volume * Decimal(f"{px:.4f}")
+                    max_trade = Decimal(f"{(9_000 + 145_000 * intensity) * (1 + 0.4 * _u(seed, i + 3)):.2f}")
+                    total_large = large_buy + large_sell
+                    out.append({
+                        "exchange": exchange, "symbol": sym, "ts": ts,
+                        "trades": trades, "volume": volume,
+                        "buy_volume": buy, "sell_volume": sell,
+                        "notional": notional,
+                        "large_trades": large_n,
+                        "large_buy_volume": large_buy,
+                        "large_sell_volume": large_sell,
+                        "max_trade_notional": max_trade,
+                        "imbalance_pct": Decimal(f"{skew * 100:.4f}"),
+                        "large_imbalance_pct": (
+                            (large_buy - large_sell) / total_large * 100
+                            if total_large else None),
+                    })
         return out
 
     def fills_pulse(self) -> list[Row]:

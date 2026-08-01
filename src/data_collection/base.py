@@ -7,8 +7,15 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import ClassVar
 
-from core.enums import Exchange, MarketType, Timeframe
-from core.models import OHLCV, FundingRate, LiquiditySnapshot, Trade
+from core.enums import Exchange, MarketType, QuoteCurrency, Timeframe
+from core.models import (
+    FundingRate,
+    LeverageStats,
+    LiquiditySnapshot,
+    OHLCV,
+    TopOfBook,
+    Trade,
+)
 from data_collection.http import HttpClient
 
 
@@ -17,8 +24,10 @@ class Capability(StrEnum):
     FUNDING = "funding"    # settled funding-rate history (perps)
     LIQUIDITY = "liquidity"  # OI / 24h volume / mark snapshots (perps)
     VENUE_VOLUME = "venue_volume"  # venue-wide 24h volume, all markets
+    LEVERAGE_STATS = "leverage_stats"  # pool TVL / effective leverage (leveraged tokens)
     TRADES = "trades"      # public tape — a STREAM (websocket) capability, not REST
     FILLS = "fills"        # per-address fills; on-demand utility, not scheduled
+    BBO = "bbo"            # on-demand best bid/ask snapshot
 
 
 class UnsupportedCapability(NotImplementedError):
@@ -34,6 +43,7 @@ class BaseExchangeScraper(ABC):
     base_url: ClassVar[str]
     market_type: ClassVar[MarketType]          # the market this adapter covers
     capabilities: ClassVar[frozenset[Capability]] = frozenset()
+    quote_currency: ClassVar[QuoteCurrency]
 
     def __init__(self, http: HttpClient | None = None) -> None:
         # injectable for tests; otherwise the venue builds its own client with
@@ -83,9 +93,19 @@ class BaseExchangeScraper(ABC):
         (Binance) loop internally."""
         raise UnsupportedCapability(self.exchange, "fetch_liquidity")
 
+    async def fetch_bbo(self, symbol: str) -> TopOfBook:
+        """Current best bid/ask. Called on demand for alerting, never polled."""
+        raise UnsupportedCapability(self.exchange, "fetch_bbo")
+
     # Venues whose liquidity endpoint returns ALL markets in one call can serve
     # liquidity = "all" in config; per-symbol venues (binance OI) cannot.
     supports_wide_liquidity: ClassVar[bool] = False
+
+    async def fetch_leverage_stats(
+        self, symbol: str, interval: Timeframe, since: datetime
+    ) -> Sequence[LeverageStats]:
+        """Pool TVL + effective leverage bars for one leveraged token."""
+        raise UnsupportedCapability(self.exchange, "fetch_leverage_stats")
 
     async def list_perp_symbols(self) -> list[str]:
         """Every perp symbol the venue lists, in canonical form — powers

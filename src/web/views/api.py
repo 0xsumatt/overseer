@@ -21,6 +21,10 @@ def _store():
     return current_app.extensions["read_storage"]
 
 
+def _float_or_none(value):
+    return float(value) if value is not None else None
+
+
 def _maybe_csv(rows: list[dict], filename: str) -> Response | None:
     """?format=csv turns a list-of-dicts payload into a CSV download; None
     means the caller should jsonify as usual."""
@@ -58,8 +62,10 @@ def series():
 def candles():
     q = request.args
     try:
-        exchange = q["exchange"]; market_type = q["market_type"]
-        symbol = q["symbol"]; interval = q.get("interval", "1m")
+        exchange = q["exchange"]
+        market_type = q["market_type"]
+        symbol = q["symbol"]
+        interval = q.get("interval", "1m")
     except KeyError as missing:
         return jsonify(error=f"missing query param: {missing}"), 400
     limit = min(int(q.get("limit", 1000)), 5000)
@@ -86,8 +92,10 @@ def candles():
 def basis():
     q = request.args
     try:
-        spot_exchange = q["spot_exchange"]; spot_symbol = q["spot_symbol"]
-        perp_exchange = q["perp_exchange"]; perp_symbol = q["perp_symbol"]
+        spot_exchange = q["spot_exchange"]
+        spot_symbol = q["spot_symbol"]
+        perp_exchange = q["perp_exchange"]
+        perp_symbol = q["perp_symbol"]
     except KeyError as missing:
         return jsonify(error=f"missing query param: {missing}"), 400
     interval = q.get("interval", "1m")
@@ -123,7 +131,35 @@ def funding():
             "rate": float(r["rate"]),
             "interval_hours": r["interval_hours"],
             "apr_pct": float(r["apr_pct"]),
-            "funding_ts": r["funding_ts"].isoformat(),
+            "rate_kind": r.get("rate_kind", "settled"),
+            "rate_ts": (r.get("rate_ts") or r["funding_ts"]).isoformat(),
+            "funding_ts": (
+                r["funding_ts"].isoformat() if r.get("funding_ts") is not None else None
+            ),
+            "settled_rate": (
+                float(r["settled_rate"]) if r.get("settled_rate") is not None else None
+            ),
+            "settled_interval_hours": r.get("settled_interval_hours"),
+            "settled_apr_pct": (
+                float(r["settled_apr_pct"])
+                if r.get("settled_apr_pct") is not None else None
+            ),
+            "current_funding_rate": (
+                float(r["current_funding_rate"])
+                if r.get("current_funding_rate") is not None else None
+            ),
+            "current_interval_hours": r.get("current_interval_hours"),
+            "next_funding_at": (
+                r["next_funding_at"].isoformat()
+                if r.get("next_funding_at") is not None else None
+            ),
+            "funding_premium": (
+                float(r["funding_premium"])
+                if r.get("funding_premium") is not None else None
+            ),
+            "index_price": (
+                float(r["index_price"]) if r.get("index_price") is not None else None
+            ),
             "oi": float(r["open_interest"]) if r["open_interest"] is not None else None,
             "oi_notional": float(r["oi_notional"]) if r["oi_notional"] is not None else None,
             "oi_delta_pct": float(r["oi_delta_pct"]) if r["oi_delta_pct"] is not None else None,
@@ -136,7 +172,7 @@ def funding():
 @login_required
 def venue_volume():
     data = _store().venue_volume()
-    f = lambda v: float(v) if v is not None else None
+    f = _float_or_none
     return jsonify({
         "latest": [{"exchange": r["exchange"], "ts": r["ts"].isoformat(),
                     "total": f(r["volume_total"]), "spot": f(r["volume_spot"]),
@@ -170,6 +206,112 @@ def funding_history():
         for r in rows
     ]
     return _maybe_csv(payload, f"funding_{exchange}_{symbol}") or jsonify(payload)
+
+
+@bp.get("/funding-history-multi")
+@login_required
+def funding_history_multi():
+    """Settled funding history for one canonical asset, across every venue
+    that lists it — the multi-venue overlay chart on the funding page. Keyed
+    by exchange so the frontend can assign one line + color per venue."""
+    asset = request.args.get("asset", "")
+    hours = min(int(request.args.get("hours", 48)), 24 * 30)
+    registry = current_app.extensions["symbols"]
+    native_symbols = list(set(registry.listings(asset).values()))
+    rows = _store().funding_series_multi(native_symbols, hours=hours)
+    out: dict[str, list] = {}
+    for r in rows:
+        out.setdefault(r["exchange"], []).append({
+            "time": int(r["ts"].timestamp()), "apr_pct": float(r["apr_pct"]),
+        })
+    return jsonify(out)
+
+
+@bp.get("/liquidity-history-multi")
+@login_required
+def liquidity_history_multi():
+    """OI-notional history for one canonical asset, across every venue that
+    lists it — the bar pane under the funding history chart's line series."""
+    asset = request.args.get("asset", "")
+    hours = min(int(request.args.get("hours", 48)), 24 * 30)
+    bucket_arg = request.args.get("bucket")
+    bucket_minutes = min(max(int(bucket_arg), 1), 1440) if bucket_arg else None
+    registry = current_app.extensions["symbols"]
+    native_symbols = list(set(registry.listings(asset).values()))
+    rows = _store().liquidity_series_multi(native_symbols, hours=hours, bucket_minutes=bucket_minutes)
+    out: dict[str, list] = {}
+    for r in rows:
+        out.setdefault(r["exchange"], []).append({
+            "time": int(r["ts"].timestamp()), "oi_notional": float(r["oi_notional"]),
+        })
+    return jsonify(out)
+
+
+@bp.get("/trade-flow")
+@login_required
+def trade_flow():
+    """Per-minute order flow for one canonical asset, per venue, plus the
+    funding settlement times inside the window.
+
+    The settlements travel with the payload because they are the reason this
+    page exists: flow is only interesting here relative to when funding pays.
+    They are derived, not stored — settlement times are latest funding ts plus
+    whole multiples of that market's interval_hours, which is why the interval
+    rides on every funding row.
+    """
+    asset = request.args.get("asset", "")
+    hours = min(int(request.args.get("hours", 6)), 24 * 7)
+    bucket_arg = request.args.get("bucket")
+    bucket_minutes = min(max(int(bucket_arg), 1), 1440) if bucket_arg else None
+
+    registry = current_app.extensions["symbols"]
+    native_symbols = list(set(registry.listings(asset).values()))
+    store = _store()
+    rows = store.trade_flow_multi(
+        native_symbols, hours=hours, bucket_minutes=bucket_minutes)
+
+    f = _float_or_none
+    series: dict[str, list] = {}
+    for r in rows:
+        series.setdefault(r["exchange"], []).append({
+            "time": int(r["ts"].timestamp()),
+            "volume": f(r["volume"]),
+            "notional": f(r["notional"]),
+            "trades": int(r["trades"]),
+            "buy_volume": f(r["buy_volume"]),
+            "sell_volume": f(r["sell_volume"]),
+            "imbalance_pct": f(r["imbalance_pct"]),
+            "large_trades": int(r["large_trades"] or 0),
+            "large_imbalance_pct": f(r["large_imbalance_pct"]),
+            "max_trade_notional": f(r["max_trade_notional"]),
+        })
+
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(hours=hours)
+    settlements: dict[str, list[int]] = {}
+    for row in store.funding_table():
+        if row["symbol"] not in native_symbols:
+            continue
+        anchor = row.get("funding_ts") or row.get("next_funding_at")
+        if anchor is None:
+            continue
+        step = timedelta(hours=row["interval_hours"])
+        # walk back from the newest settlement to the window start, then
+        # forward again — covers the case where funding polling lags.
+        t = anchor
+        while t > start:
+            t -= step
+        marks = settlements.setdefault(row["exchange"], [])
+        while t <= now:
+            if t >= start:
+                marks.append(int(t.timestamp()))
+            t += step
+
+    return jsonify({
+        "asset": asset,
+        "series": series,
+        "settlements": {k: sorted(set(v)) for k, v in settlements.items()},
+    })
 
 
 @bp.get("/freshness")

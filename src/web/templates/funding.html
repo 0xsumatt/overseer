@@ -1,54 +1,98 @@
 {% extends "base.html" %}
 {% block title %}funding · overseer{% endblock %}
 {% block content %}
-<div class="mb-5 flex flex-wrap items-end justify-between gap-4">
+<div class="mb-5 flex flex-wrap items-end justify-between gap-3 sm:gap-4">
   <div>
-    <div class="font-mono text-xs tracking-label uppercase text-phosphor">carry / annualized</div>
-    <h1 class="mt-1 text-xl font-semibold text-body">Funding</h1>
+    <h1 class="text-title font-semibold text-body">Funding rates</h1>
+    <p class="mt-1 text-data text-dim">Compare annualized carry and liquidity across venues.</p>
   </div>
-  <div class="flex items-center gap-3">
-    <input id="ffilter" type="search" placeholder="filter coins…"
-           class="w-40 rounded border border-line bg-panel px-3 py-1.5 font-mono text-xs
-                  text-body placeholder-faint focus:border-phosphor focus:outline-none">
-    <div class="flex items-center gap-2 font-mono text-[11px] text-dim">
+  <div class="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:gap-3">
+    <div class="flex shrink-0 rounded-full border border-line bg-panel p-1 font-mono text-data"
+         role="tablist" aria-label="Funding view">
+      <button id="tab-table" data-view="table" role="tab" aria-selected="true"
+              aria-controls="view-table"
+              class="rounded-full px-3.5 py-1 tracking-label uppercase transition-colors text-ink bg-phosphor/85">table</button>
+      <button id="tab-history" data-view="history" role="tab" aria-selected="false"
+              aria-controls="view-history"
+              class="rounded-full px-3.5 py-1 tracking-label uppercase transition-colors text-dim hover:text-body">history</button>
+    </div>
+    <input id="ffilter" type="search" placeholder="filter coins…" aria-label="Filter assets"
+           class="input order-last w-full min-w-0 flex-none rounded-full sm:order-none sm:w-40">
+    <div class="flex items-center gap-2 font-mono text-label text-dim">
       <span id="refresh-dot" class="inline-block h-1.5 w-1.5 rounded-full bg-gain"></span>
       <span id="refresh-label">live · 60s</span>
     </div>
   </div>
 </div>
 
-<div id="highlights" class="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4"></div>
+<div id="highlights" class="mb-4 grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4"></div>
 
-<style>
-  /* compiled app.css carries no .sticky utility — pin the header here. The rule
-     targets th (not thead) so it also applies to the venue columns the JS
-     injects into #fhead on every refresh. */
-  #ftable thead th {
-    position: sticky; top: 0; z-index: 5;
-    background: rgb(17 22 36);                 /* bg-panel */
-    box-shadow: 0 1px 0 rgb(35 43 61);         /* border-b that survives scrolling */
-  }
-</style>
-<div class="flex h-[520px] flex-col overflow-hidden rounded-md border border-line bg-panel/50">
-  <div class="scroll-thin min-h-0 flex-1 overflow-x-auto overflow-y-auto">
-    <table class="w-full text-sm" id="ftable">
-      <thead>
-        <tr id="fhead" class="font-mono text-[10px] tracking-label uppercase text-dim">
-          <th class="px-4 py-2.5 text-left">coin</th></tr>
-      </thead>
-      <tbody id="fbody"></tbody>
-    </table>
+<div id="view-table" role="tabpanel" aria-labelledby="tab-table">
+  <div class="flex h-[30rem] flex-col overflow-hidden rounded-md border border-line bg-panel/50 sm:h-[32.5rem]">
+    <div class="scroll-thin min-h-0 flex-1 overflow-x-auto overflow-y-auto">
+      <table class="w-full min-w-[48rem] text-data" id="ftable">
+        <thead>
+          <tr id="fhead" class="font-mono text-label tracking-label uppercase text-dim">
+            <th class="px-4 py-2.5 text-left">coin</th></tr>
+        </thead>
+        <tbody id="fbody"></tbody>
+      </table>
+    </div>
+    <p class="border-t border-line px-3 py-2 font-mono text-label text-faint sm:hidden">
+      swipe horizontally to compare venues</p>
+    <p class="hidden border-t border-line px-4 py-2 font-mono text-label text-faint sm:block">
+      rates annualized across settlement intervals (1h / 4h / 8h) · sorted by widest venue spread ·
+      hover a cell for venue liquidity · green pays shorts, red pays longs</p>
   </div>
-  <p class="border-t border-line px-4 py-2 font-mono text-[11px] text-faint">
-    rates annualized across settlement intervals (1h / 4h / 8h) · sorted by widest venue spread ·
-    hover a cell for venue liquidity · green pays shorts, red pays longs</p>
 </div>
 
-<div id="tip" class="pointer-events-none fixed z-50 hidden w-72 rounded-md border border-line
-                     bg-panel p-3 font-mono text-xs shadow-2xl shadow-black/50"></div>
+<div id="view-history" class="hidden" role="tabpanel" aria-labelledby="tab-history">
+  <div class="mb-3 grid w-full grid-cols-[auto_minmax(0,1fr)] items-center gap-2 font-mono text-data sm:flex sm:w-auto">
+    <label for="hcoin" class="text-dim">Asset</label>
+    <select id="hcoin" class="select min-w-0 w-full sm:w-auto"></select>
+    <label for="hhours" class="text-dim">Window</label>
+    <select id="hhours" class="select min-w-0 w-full sm:w-auto">
+      <option value="24">24h</option>
+      <option value="48" selected>48h</option>
+      <option value="168">7d</option>
+      <option value="720">30d</option>
+    </select>
+    <label for="hbucket" class="text-dim">OI bars</label>
+    <select id="hbucket" title="OI bar width"
+            class="select min-w-0 w-full sm:w-auto">
+      <option value="5">5m bars</option>
+      <option value="15">15m bars</option>
+      <option value="60">1h bars</option>
+      <option value="240">4h bars</option>
+      <option value="1440">1d bars</option>
+    </select>
+    <div class="col-span-2 flex justify-self-start rounded-full border border-line bg-panel p-1 sm:col-auto"
+         role="group" aria-label="Funding smoothing">
+      <button id="smooth-raw" data-smooth="raw" aria-pressed="false"
+              class="rounded-full px-3 py-1 tracking-label uppercase transition-colors text-dim hover:text-body">raw</button>
+      <button id="smooth-ewma" data-smooth="ewma" aria-pressed="true"
+              class="rounded-full px-3 py-1 tracking-label uppercase transition-colors text-ink bg-phosphor/85">smoothed</button>
+    </div>
+  </div>
+  <div id="hlegend" class="scroll-thin mb-3 flex flex-nowrap gap-2 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible sm:pb-0"></div>
+  <div class="flex h-[28rem] flex-col rounded-md border border-line bg-panel/50 p-2 sm:h-[35rem] sm:p-4">
+    <div id="hchart" class="min-h-0 flex-1"></div>
+  </div>
+  <p class="mt-2 font-mono text-label text-faint">
+    annualized funding rate (APR, line) per venue, with open interest (notional) stacked as one
+    bar per timestamp — segment color = venue, segment height = that venue's own OI · click a
+    legend chip to isolate a venue · smoothed = EWMA over each venue's own settlements, not a
+    rolling average across venues · a venue absent from the legend doesn't list this coin, or
+    has no history in this window</p>
+</div>
+
+<div id="tip" role="tooltip" class="pointer-events-none fixed z-50 hidden w-72 max-w-[calc(100vw-2rem)] rounded-md border border-line
+                     bg-panel p-3 font-mono text-data shadow-2xl shadow-black/50"></div>
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='js/lightweight-charts.standalone.js') }}"></script>
+<script src="{{ url_for('static', filename='js/venues.js') }}"></script>
 <script>
 // ---- venue links --------------------------------------------------------------
 // Trade deep-links open the market directly. Referral attribution on most
@@ -89,7 +133,7 @@ const tip = document.getElementById('tip');
 function cell(v) {
   if (!v) return '<td class="px-4 py-2 font-mono text-faint">—</td>';
   const a = Math.min(Math.abs(v.apr_pct) / 30, 1) * 0.22;
-  const bg = v.apr_pct >= 0 ? `rgba(74,222,128,${a})` : `rgba(251,113,133,${a})`;
+  const bg = v.apr_pct >= 0 ? `rgba(100,214,154,${a})` : `rgba(255,113,133,${a})`;
   const cls = v.apr_pct > 0 ? 'text-gain' : v.apr_pct < 0 ? 'text-loss' : 'text-dim';
   const href = tradeUrl(v.exchange, v.symbol);
   return `<td class="px-1 py-1">
@@ -99,17 +143,31 @@ function cell(v) {
        data-tip='${JSON.stringify({
             symbol: v.symbol, exchange: v.exchange,
             rate: v.rate, hours: v.interval_hours,
+            kind: v.rate_kind, rateTs: v.rate_ts,
+            settledRate: v.settled_rate, settledHours: v.settled_interval_hours,
+            settledTs: v.funding_ts, nextFunding: v.next_funding_at,
+            premium: v.funding_premium, index: v.index_price,
             oi: v.oi_notional, oiDelta: v.oi_delta_pct,
-            vol: v.volume_24h, mark: v.mark_price,
-            ts: v.funding_ts })}'>
+            vol: v.volume_24h, mark: v.mark_price })}'>
       ${v.apr_pct >= 0 ? '+' : ''}${v.apr_pct.toFixed(2)}%
     </a></td>`;
 }
 
+const fundingFilters = Overseer.filterState('funding');
+document.getElementById('ffilter').value = fundingFilters.get('search') || '';
+let activeView = fundingFilters.get('view') === 'history' ? 'history' : 'table';
+let lastFundingData = null;   // reused by the history tab's coin selector
+const fundingState = Overseer.pageState();
+let historyRequest = 0;
+
 async function load() {
   const dot = document.getElementById('refresh-dot');
+  fundingState.loading('Loading current funding rates…');
   try {
-    const data = await (await fetch('/api/funding')).json();
+    const data = await Overseer.requestJSON('/api/funding');
+    lastFundingData = data;
+    populateCoinSelector(data);
+    if (activeView === 'history' && lastHistoryData === null) void loadHistory();
     // dislocation-first: sort by max-min APR spread so memecoin/new-listing
     // outliers surface at the top of a wide-universe table
     const spread = rows => {
@@ -132,8 +190,13 @@ async function load() {
       }).join('');
     const body = document.getElementById('fbody');
     if (!coins.length) {
-      body.innerHTML = `<tr><td class="px-4 py-6 font-mono text-xs text-dim">
-        No funding data yet — first settlements land within the hour.</td></tr>`;
+      const hasFunding = Object.keys(data).length > 0;
+      body.innerHTML = `<tr><td colspan="${Math.max(1, venues.length + 1)}"
+        class="px-4 py-6 font-mono text-data text-dim">${
+          hasFunding ? 'No assets match this filter.' : 'No funding data yet — first settlements land within the hour.'
+        }</td></tr>`;
+      if (hasFunding) fundingState.ready();
+      else fundingState.empty('No funding settlements have been recorded yet.', load);
       return;
     }
     body.innerHTML = coins.map(([coin, rows]) => {
@@ -163,9 +226,9 @@ async function load() {
       <a ${href ? `href="${href}" target="_blank" rel="noopener"` : ''}
          ${href2 ? `data-href2="${href2}"` : ''}
          class="block rounded-md border border-line bg-panel/50 p-3 hover:border-phosphor/50">
-        <div class="font-mono text-[10px] tracking-label uppercase text-dim">${label}</div>
-        <div class="mt-1 font-mono text-lg tabular-nums ${cls}">${big}</div>
-        <div class="mt-0.5 truncate font-mono text-[11px] text-faint">${sub}</div></a>`;
+        <div class="font-mono text-label tracking-label uppercase text-dim">${label}</div>
+        <div class="mt-1 font-mono text-hero tabular-nums ${cls}">${big}</div>
+        <div class="mt-0.5 truncate font-mono text-label text-faint">${sub}</div></a>`;
     const hl = document.getElementById('highlights');
     hl.innerHTML = [
       spreads2[0] && card('largest spread', `${spreads2[0].spread.toFixed(1)}%`, 'text-phosphor',
@@ -181,24 +244,70 @@ async function load() {
         tradeUrl(mostLiq.exchange, mostLiq.symbol)),
     ].filter(Boolean).join('');
 
+    fundingState.ready();
     dot.className = 'inline-block h-1.5 w-1.5 rounded-full bg-gain';
+    document.getElementById('refresh-label').textContent = 'live · 60s';
   } catch (e) {
     dot.className = 'inline-block h-1.5 w-1.5 rounded-full bg-loss';
     document.getElementById('refresh-label').textContent = 'refresh failed — retrying';
+    fundingState.error('Funding rates', load);
   }
 }
 
-document.addEventListener('mouseover', e => {
-  const el = e.target.closest('[data-tip]');
-  if (!el) { tip.classList.add('hidden'); return; }
+function fundingPaymentExample(rate, hours) {
+  if (!Number.isFinite(rate) || !Number.isFinite(hours) || hours <= 0) return null;
+  const hourly = Math.abs(rate) * 1000 / hours;
+  return {
+    hourly,
+    annualized: hourly * 8760,
+    direction: rate > 0 ? 'long pays · short earns'
+      : rate < 0 ? 'long earns · short pays'
+      : 'no payment',
+  };
+}
+function fmtFundingUsd(value) {
+  const digits = value > 0 && value < 0.01 ? 4 : 2;
+  return '$' + value.toLocaleString(undefined, {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+}
+function positionFundingTip(left, top) {
+  const edge = 16;
+  tip.style.left = Math.max(edge, Math.min(left, window.innerWidth - tip.offsetWidth - edge)) + 'px';
+  tip.style.top = Math.max(edge, Math.min(top, window.innerHeight - tip.offsetHeight - edge)) + 'px';
+}
+function showFundingTip(el) {
   const d = JSON.parse(el.dataset.tip);
+  const rateTone = d.rate > 0 ? 'text-gain' : d.rate < 0 ? 'text-loss' : 'text-dim';
+  const rateSign = d.rate > 0 ? '+' : '';
+  const payment = fundingPaymentExample(d.rate, d.hours);
+  const paymentHtml = payment ? `
+    <div class="my-2 border-y border-line py-2">
+      <div class="mb-0.5 text-body">$1,000 notional</div>
+      <div class="mb-1.5 text-faint">${payment.direction}</div>
+      <div class="grid grid-cols-2 gap-x-3 gap-y-1 text-dim">
+        <span>per hour</span>
+        <span class="text-right tabular-nums text-body">${fmtFundingUsd(payment.hourly)}</span>
+        <span>per year*</span>
+        <span class="text-right tabular-nums text-body">${fmtFundingUsd(payment.annualized)}</span>
+      </div>
+      <div class="mt-1 text-right text-label text-faint">* if the rate stayed unchanged</div>
+    </div>` : '';
   tip.innerHTML = `
     <div class="mb-2 flex items-baseline justify-between">
       <span class="font-semibold text-body">${d.exchange}</span>
       <span class="text-dim">${d.symbol}</span></div>
     <div class="grid grid-cols-2 gap-x-3 gap-y-1 text-dim">
-      <span>funding / ${d.hours}h</span>
-      <span class="text-right tabular-nums text-body">${(d.rate*100).toFixed(4)}%</span>
+      <span class="${rateTone}">${d.kind === 'current' ? 'current' : 'latest settled'} / ${d.hours}h</span>
+      <span class="text-right tabular-nums ${rateTone}">${rateSign}${(d.rate*100).toFixed(4)}%</span>
+    </div>
+    ${paymentHtml}
+    <div class="grid grid-cols-2 gap-x-3 gap-y-1 text-dim">
+      <span>index / oracle</span>
+      <span class="text-right tabular-nums text-body">${d.index == null ? '—' : d.index.toLocaleString()}</span>
+      <span>mark</span>
+      <span class="text-right tabular-nums text-body">${d.mark == null ? '—' : d.mark.toLocaleString()}</span>
       <span>open interest</span>
       <span class="text-right tabular-nums text-body">${fmtUsd(d.oi)}</span>
       <span>OI Δ24h</span>
@@ -206,18 +315,37 @@ document.addEventListener('mouseover', e => {
         d.oiDelta == null ? '—' : (d.oiDelta >= 0 ? '+' : '') + d.oiDelta.toFixed(1) + '%'}</span>
       <span>24h volume</span>
       <span class="text-right tabular-nums text-body">${fmtUsd(d.vol)}</span>
-      <span>mark</span>
-      <span class="text-right tabular-nums text-body">${d.mark == null ? '—' : d.mark.toLocaleString()}</span>
     </div>
-    <div class="mt-2 border-t border-line pt-1.5 text-[10px] text-faint">
-      settled ${new Date(d.ts).toLocaleString()}</div>`;
+    <div class="mt-2 border-t border-line pt-1.5 text-label text-faint">
+      ${d.kind === 'current'
+        ? 'updated ' + new Date(d.rateTs).toLocaleString() + (d.nextFunding ? ' · next ' + new Date(d.nextFunding).toLocaleString() : '')
+        : 'settled ' + new Date(d.settledTs).toLocaleString()}</div>`;
+  el.setAttribute('aria-describedby', 'tip');
   tip.classList.remove('hidden');
+}
+function hideFundingTip(el) {
+  el?.removeAttribute('aria-describedby');
+  tip.classList.add('hidden');
+}
+document.addEventListener('mouseover', e => {
+  const el = e.target.closest('[data-tip]');
+  if (!el) { hideFundingTip(); return; }
+  showFundingTip(el);
+});
+document.addEventListener('focusin', e => {
+  const el = e.target.closest('[data-tip]');
+  if (!el) return;
+  showFundingTip(el);
+  const rect = el.getBoundingClientRect();
+  positionFundingTip(rect.left, rect.bottom + 8);
+});
+document.addEventListener('focusout', e => {
+  const el = e.target.closest('[data-tip]');
+  if (el) hideFundingTip(el);
 });
 document.addEventListener('mousemove', e => {
   if (tip.classList.contains('hidden')) return;
-  const pad = 14;
-  tip.style.left = Math.min(e.clientX + pad, window.innerWidth - 300) + 'px';
-  tip.style.top  = Math.min(e.clientY + pad, window.innerHeight - 170) + 'px';
+  positionFundingTip(e.clientX + 14, e.clientY + 14);
 });
 
 // spread card: open the second venue alongside the anchor's own navigation.
@@ -229,8 +357,261 @@ document.getElementById('highlights').addEventListener('click', e => {
   window.open(el.dataset.href2, '_blank', 'noopener');
 });
 
-document.getElementById('ffilter').addEventListener('input', () => load());
-load();
-setInterval(load, 60_000);
+document.getElementById('ffilter').addEventListener('input', event => {
+  fundingFilters.set('search', event.target.value);
+  load();
+});
+Overseer.poll(load, 60);
+
+// ---- historic view: one funding-APR line per venue, per coin ----------------
+// Fixed hue per venue — brand-matched where possible (see notify.py's
+// TRADE_URLS-adjacent color map; this is Discord/JS-independent so it's a
+// separate literal, not shared code). Colors are validated for CVD
+// separation and contrast against this page's dark surface — "lighter" is
+// deliberately light steel-grey, not literal black, since black is the
+// achromatic *background* here, not a visible foreground color; a truly
+// black line would be invisible rather than reading as "brand black".
+// (VENUE_COLORS now lives in static/js/venues.js — one definition shared by
+// every page, validated for all 21 pairs against this surface.)
+
+function populateCoinSelector(data) {
+  const sel = document.getElementById('hcoin');
+  const prev = sel.value;
+  const saved = fundingFilters.get('asset');
+  const coins = Object.keys(data).sort();
+  sel.innerHTML = coins.map(c => `<option value="${c}">${c}</option>`).join('');
+  if (coins.includes(prev)) sel.value = prev;
+  else if (coins.includes(saved)) sel.value = saved;
+  fundingFilters.set('asset', sel.value);
+}
+
+let hChart = null;
+let hHandles = [];        // funding-rate line series
+let hOiHandles = [];      // OI-notional bar series (bottom pane)
+let hiddenVenues = new Set(fundingFilters.getList('venues'));
+let smoothMode = fundingFilters.get('smoothing') === 'raw' ? 'raw' : 'ewma';
+let lastHistoryData = null;      // cached fetches, so toggling/smoothing re-renders without a round trip
+let lastOiData = null;
+
+function ensureHistoryChart() {
+  if (hChart) return hChart;
+  hChart = LightweightCharts.createChart(document.getElementById('hchart'), {
+    layout: { background: { color: 'transparent' }, textColor: CHART_THEME.text,
+              fontFamily: CHART_THEME.font, fontSize: 12 },
+    grid: { vertLines: { color: CHART_THEME.grid }, horzLines: { color: CHART_THEME.grid } },
+    // guide lines off, axis value labels stay — the dashed crosshair lines
+    // were more visual noise than signal; the hover value is what matters.
+    crosshair: {
+      vertLine: { color: CHART_THEME.crosshair, visible: false, labelVisible: true },
+      horzLine: { color: CHART_THEME.crosshair, visible: false, labelVisible: true },
+    },
+    timeScale: { timeVisible: true, secondsVisible: false, borderColor: CHART_THEME.border },
+    // reserve the bottom ~30% for the OI pane so funding lines don't run
+    // through it — same layout idea as volume-under-price on a candle chart.
+    rightPriceScale: { borderColor: CHART_THEME.border, scaleMargins: { top: 0.05, bottom: 0.3 } },
+    autoSize: true,
+  });
+  return hChart;
+}
+
+// EWMA over each venue's OWN settlement sequence (not across venues) — a
+// venue on an 8h funding cadence and one on 1h each smooth over their own
+// prints, so a sparser series doesn't get dragged toward a denser one's pace.
+function ewma(points, alpha = 0.35) {
+  let s = null;
+  return points.map(p => {
+    s = s === null ? p.apr_pct : alpha * p.apr_pct + (1 - alpha) * s;
+    return { time: p.time, value: s };
+  });
+}
+
+// suggested bar width per window — the user can still override via #hbucket
+// directly; this only fires when #hhours itself changes, so a manual choice
+// sticks until they pick a different window.
+const DEFAULT_BUCKET = { 24: 5, 48: 5, 168: 60, 720: 240 };
+
+async function loadHistory() {
+  const asset = document.getElementById('hcoin').value;
+  const hours = document.getElementById('hhours').value;
+  const bucket = document.getElementById('hbucket').value;
+  if (!asset) return;
+  const request = ++historyRequest;
+  const qs = new URLSearchParams({ asset, hours, bucket });
+  try {
+    const [history, liquidity] = await Promise.all([
+      Overseer.requestJSON(`/api/funding-history-multi?${new URLSearchParams({ asset, hours })}`),
+      Overseer.requestJSON(`/api/liquidity-history-multi?${qs}`),
+    ]);
+    if (request !== historyRequest) return;
+    lastHistoryData = history;
+    lastOiData = liquidity;
+    renderHistoryChart();
+    fundingState.ready('history');
+  } catch (error) {
+    if (request === historyRequest) {
+      fundingState.error('Funding history', loadHistory, 'history');
+    }
+  }
+}
+
+// Lightweight Charts has no native stacked-histogram type. The standard
+// workaround: one full-opacity series per venue, each plotting the RUNNING
+// CUMULATIVE total through that venue (in a fixed order), added back-to-front
+// — largest cumulative (last venue) first, smallest (first venue's own raw
+// value) last. Each later series draws on top and fully covers the bottom of
+// the one behind it, so only the *difference* — that venue's own segment —
+// stays visible. Net effect: a real stacked bar, bottom segment = first
+// venue in VENUE_COLORS order, top segment = last, at solid color (no alpha
+// blending needed once segments no longer overlap).
+function renderOiStack(chart, oiData, venueOrder) {
+  const venues = venueOrder.filter(v => oiData[v] && oiData[v].length);
+  if (!venues.length) return [];
+
+  const byTime = new Map();      // time -> { venue: oi_notional }
+  for (const venue of venues) {
+    for (const p of oiData[venue]) {
+      if (!byTime.has(p.time)) byTime.set(p.time, {});
+      byTime.get(p.time)[venue] = p.oi_notional;
+    }
+  }
+  const times = [...byTime.keys()].sort((a, b) => a - b);
+
+  const cumSeries = venues.map(() => []);
+  for (const t of times) {
+    const row = byTime.get(t);
+    let running = 0;
+    venues.forEach((venue, i) => {
+      if (row[venue] != null) running += row[venue];
+      cumSeries[i].push({ time: t, value: running });
+    });
+  }
+
+  const handles = [];
+  for (let i = venues.length - 1; i >= 0; i--) {
+    const series = chart.addHistogramSeries({
+      color: VENUE_COLORS[venues[i]], priceScaleId: 'oi',
+      priceFormat: { type: 'volume' },
+    });
+    series.setData(cumSeries[i]);
+    handles.push(series);
+  }
+  return handles;
+}
+
+function renderHistoryChart() {
+  const chart = ensureHistoryChart();
+  hHandles.forEach(h => chart.removeSeries(h));
+  hOiHandles.forEach(h => chart.removeSeries(h));
+  hHandles = []; hOiHandles = [];
+  const data = lastHistoryData || {};
+  const oiData = lastOiData || {};
+
+  const legend = [];
+  // fixed iteration order (VENUE_COLORS' own order), not the response's key
+  // order — color/identity must stay stable regardless of which venues
+  // happen to have data for this coin, or which are currently toggled off.
+  const visibleVenues = [];
+  for (const venue of Object.keys(VENUE_COLORS)) {
+    const pts = data[venue];
+    if (!pts || !pts.length) continue;
+    const color = VENUE_COLORS[venue];
+    const visible = !hiddenVenues.has(venue);
+    if (visible) {
+      const line = chart.addLineSeries({
+        color, lineWidth: 2, priceScaleId: 'right',
+        priceFormat: { type: 'custom', formatter: v => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%` },
+      });
+      line.setData(smoothMode === 'ewma' ? ewma(pts)
+                                          : pts.map(p => ({ time: p.time, value: p.apr_pct })));
+      hHandles.push(line);
+      visibleVenues.push(venue);
+    }
+    legend.push({ venue, color, last: pts[pts.length - 1].apr_pct, visible });
+  }
+  hOiHandles = renderOiStack(chart, oiData, visibleVenues);
+  if (hOiHandles.length) {
+    chart.priceScale('oi').applyOptions({ scaleMargins: { top: 0.75, bottom: 0 } });
+  }
+  document.getElementById('hlegend').innerHTML = legend.length
+    ? legend.map(e => `
+      <button data-venue="${e.venue}" aria-pressed="${e.visible}"
+        title="click to ${e.visible ? 'hide' : 'show'} ${e.venue}"
+        class="inline-flex items-center gap-2 rounded-full border px-3 py-1 font-mono text-data transition
+               ${e.visible ? 'border-line bg-panel hover:border-phosphor/50'
+                           : 'border-line/50 bg-panel/30 opacity-40 hover:opacity-70'}">
+        <span class="h-2 w-2 rounded-full" style="background:${e.color}"></span>
+        <span class="text-body">${e.venue}</span>
+        <span class="tabular-nums ${e.last >= 0 ? 'text-gain' : 'text-loss'}">${e.last >= 0 ? '+' : ''}${e.last.toFixed(1)}%</span>
+      </button>`).join('')
+    : '<div class="font-mono text-data text-dim">no funding history for this coin yet</div>';
+  chart.timeScale().fitContent();
+}
+
+document.getElementById('hlegend').addEventListener('click', e => {
+  const btn = e.target.closest('[data-venue]');
+  if (!btn) return;
+  const venue = btn.dataset.venue;
+  hiddenVenues.has(venue) ? hiddenVenues.delete(venue) : hiddenVenues.add(venue);
+  fundingFilters.setList('venues', hiddenVenues);
+  renderHistoryChart();
+});
+
+function setSmooth(mode, redraw = true) {
+  smoothMode = mode;
+  fundingFilters.set('smoothing', mode);
+  document.getElementById('smooth-raw').className =
+    `rounded-full px-3 py-1 tracking-label uppercase transition-colors ${mode === 'raw' ? 'text-ink bg-phosphor/85' : 'text-dim hover:text-body'}`;
+  document.getElementById('smooth-ewma').className =
+    `rounded-full px-3 py-1 tracking-label uppercase transition-colors ${mode === 'ewma' ? 'text-ink bg-phosphor/85' : 'text-dim hover:text-body'}`;
+  document.getElementById('smooth-raw').setAttribute('aria-pressed', String(mode === 'raw'));
+  document.getElementById('smooth-ewma').setAttribute('aria-pressed', String(mode === 'ewma'));
+  if (redraw) renderHistoryChart();
+}
+document.getElementById('smooth-raw').addEventListener('click', () => setSmooth('raw'));
+document.getElementById('smooth-ewma').addEventListener('click', () => setSmooth('ewma'));
+
+for (const id of ['hhours', 'hbucket']) {
+  fundingFilters.restoreSelect(document.getElementById(id));
+}
+document.getElementById('hcoin').addEventListener('change', event => {
+  fundingFilters.set('asset', event.target.value);
+  loadHistory();
+});
+document.getElementById('hhours').addEventListener('change', event => {
+  fundingFilters.set('hhours', event.target.value);
+  const suggested = DEFAULT_BUCKET[event.target.value];
+  if (suggested) {
+    document.getElementById('hbucket').value = suggested;
+    fundingFilters.set('hbucket', suggested);
+  }
+  loadHistory();
+});
+document.getElementById('hbucket').addEventListener('change', event => {
+  fundingFilters.set('hbucket', event.target.value);
+  loadHistory();
+});
+
+function setView(view) {
+  activeView = view;
+  fundingFilters.set('view', view);
+  const isTable = view === 'table';
+  document.getElementById('view-table').classList.toggle('hidden', !isTable);
+  if (isTable) fundingState.ready('history');
+  document.getElementById('view-history').classList.toggle('hidden', isTable);
+  document.getElementById('tab-table').className =
+    `rounded-full px-3.5 py-1 tracking-label uppercase transition-colors ${isTable ? 'text-ink bg-phosphor/85' : 'text-dim hover:text-body'}`;
+  document.getElementById('tab-history').className =
+    `rounded-full px-3.5 py-1 tracking-label uppercase transition-colors ${!isTable ? 'text-ink bg-phosphor/85' : 'text-dim hover:text-body'}`;
+  document.getElementById('tab-table').setAttribute('aria-selected', String(isTable));
+  document.getElementById('tab-history').setAttribute('aria-selected', String(!isTable));
+  if (!isTable && lastFundingData) {
+    populateCoinSelector(lastFundingData);
+    loadHistory();
+  }
+}
+document.getElementById('tab-table').addEventListener('click', () => setView('table'));
+document.getElementById('tab-history').addEventListener('click', () => setView('history'));
+setSmooth(smoothMode, false);
+setView(activeView);
 </script>
 {% endblock %}

@@ -11,11 +11,21 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from core.config import settings
 from core.symbols import SymbolRegistry
-from data_collection.exchanges.registry import REGISTRY
-from scheduler.jobs import (check_dislocations, post_digest, run_fills,
-                            run_funding, run_liquidity, run_ohlcv, run_venue_volume)
+from data_collection.exchanges.registry import REGISTRY, STREAM_REGISTRY
+from scheduler.capture import SettlementCapture
+from scheduler.jobs import (
+    UsdcUsdtQuoteCache,
+    check_dislocations,
+    post_digest,
+    run_fills,
+    run_funding,
+    run_liquidity,
+    run_ohlcv,
+    run_venue_volume,
+)
 from scheduler.notify import DiscordNotifier
-from scheduler.targets import load_targets
+from scheduler.streams import run_stream
+from scheduler.targets import load_stream_targets, load_targets
 from storage.writers import Storage
 
 log = logging.getLogger("overseer.scheduler")
@@ -64,12 +74,22 @@ def build_scheduler(
         args=[scrapers, storage, notifier, state],
         id="venue_volume:daily", name="venue_volume:daily", replace_existing=True,
     )
-    # funding-dislocation alerts: only meaningful if funding is being collected
+    # Current-funding dislocations are checked against the latest 5-minute
+    # liquidity snapshots. Only a new threshold crossing fetches live books.
     if funding_targets and registry is not None:
+        fx_cache = UsdcUsdtQuoteCache(scrapers.get("binance_spot"))
         sched.add_job(
             check_dislocations,
-            trigger=IntervalTrigger(seconds=900),
-            args=[storage, notifier, state, registry, settings.spread_alert_apr],
+            trigger=IntervalTrigger(seconds=300),
+            args=[
+                storage,
+                notifier,
+                state,
+                registry,
+                settings.spread_alert_apr,
+                scrapers,
+                fx_cache,
+            ],
             id="alert:dislocations", name="alert:dislocations",
             replace_existing=True,
         )
@@ -118,11 +138,54 @@ async def main() -> None:
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, stop.set)
 
+    # -- websocket streams (plain asyncio tasks, not APScheduler jobs) ---------
+    # A stream is a long-lived connection, not something to trigger on an
+    # interval, so it lives beside the scheduler rather than inside it. Both
+    # share `stop`, so one SIGTERM winds down everything.
+    stream_targets = load_stream_targets(settings.symbols_file)
+    stream_tasks: list[asyncio.Task] = []
+    capture: SettlementCapture | None = None
+
+    if any(t.capture for t in stream_targets):
+        capture = SettlementCapture()
+        # Seed before any stream starts, so a settlement in the first few
+        # minutes is not missed while waiting on the first refresh tick.
+        capture.refresh(await storage.latest_funding_rows())
+        log.info("settlement capture: %d symbol(s) scheduled, window -%.0fs/+%.0fs",
+                 capture.tracked, capture.pre_seconds, capture.post_seconds)
+        stream_tasks.append(
+            asyncio.create_task(capture.run(storage, stop), name="capture:schedule")
+        )
+
+    for target in stream_targets:
+        stream = STREAM_REGISTRY[target.venue](
+            symbols=target.symbols, venue=target.venue
+        )
+        mode = "settlement-capture" if target.capture else "continuous tape"
+        log.info("stream %s: %d symbol(s), mode=%s",
+                 stream.stream_id, len(target.symbols), mode)
+        stream_tasks.append(
+            asyncio.create_task(
+                run_stream(stream, storage, notifier, state, stop,
+                           gate=capture if target.capture else None),
+                name=stream.stream_id,
+            )
+        )
+
     try:
         await stop.wait()
     finally:
         log.info("shutting down…")
         sched.shutdown(wait=False)
+        # Streams flush their buffers on stop, so give them a moment to land
+        # rather than cancelling straight into a closing database pool.
+        if stream_tasks:
+            done, pending = await asyncio.wait(stream_tasks, timeout=10)
+            for task in pending:
+                log.warning("stream task %s did not stop in time; cancelling",
+                            task.get_name())
+                task.cancel()
+            await asyncio.gather(*stream_tasks, return_exceptions=True)
         for s in scrapers.values():
             await s.aclose()
         await notifier.aclose()

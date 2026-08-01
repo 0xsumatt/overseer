@@ -1,16 +1,48 @@
 {% extends "base.html" %}
 {% block title %}login · overseer{% endblock %}
 {% block content %}
-<div class="mx-auto mt-24 max-w-sm">
-  <h1 class="mb-6 text-xl font-semibold text-slate-100">overseer</h1>
-  <form method="post" class="space-y-4">
-    <input name="email" type="email" required placeholder="email"
-           class="w-full rounded bg-slate-900 border border-slate-700 px-3 py-2 text-sm focus:outline-none focus:border-slate-500">
-    <input name="password" type="password" required placeholder="password"
-           class="w-full rounded bg-slate-900 border border-slate-700 px-3 py-2 text-sm focus:outline-none focus:border-slate-500">
-    <button class="w-full rounded bg-slate-100 px-3 py-2 text-sm font-medium text-slate-900 hover:bg-white">
+{# The nav is hidden when unauthenticated, so this page carries the wordmark
+   itself — otherwise the first screen anyone sees has no brand on it at all. #}
+<div class="mx-auto mt-20 max-w-xs">
+  <div class="mb-8 text-center">
+    {# The wordmark IS this page's heading — as a div it left the login page
+       with no h1 at all. Visual size stays small; semantic level doesn't have
+       to follow it. #}
+    <h1 class="font-mono text-title font-semibold tracking-label text-phosphor">
+      OVERSEER<span class="cursor" aria-hidden="true"></span>
+    </h1>
+    <p class="mt-1.5 font-mono text-label tracking-label uppercase text-faint">
+      market operations console
+    </p>
+  </div>
+
+  <form method="post" class="space-y-3">
+    {# Real labels, not placeholders. A placeholder vanishes the moment you
+       type, isn't announced reliably by screen readers, and leaves nothing to
+       click. The uppercase mono label is also the house style elsewhere. #}
+    <label class="block">
+      <span class="font-mono text-label tracking-label uppercase text-faint">email</span>
+      <input name="email" type="email" required autofocus autocomplete="username"
+             class="input mt-1 w-full">
+    </label>
+    <label class="block">
+      <span class="font-mono text-label tracking-label uppercase text-faint">password</span>
+      <input name="password" type="password" required autocomplete="current-password"
+             class="input mt-1 w-full">
+    </label>
+    {# The one primary action on the page, so it gets the solid high-contrast
+       treatment. Was bg-slate-100 — a near-white block in a dark console. #}
+    <button type="submit"
+            class="mt-1 w-full rounded bg-phosphor px-3 py-2 font-mono text-data font-semibold
+                   tracking-label uppercase text-ink hover:bg-phosphor/90
+                   focus-visible:outline focus-visible:outline-2
+                   focus-visible:outline-offset-2 focus-visible:outline-phosphor">
       sign in
     </button>
   </form>
+
+  <p class="mt-6 text-center font-mono text-label text-faint">
+    accounts are created from the CLI
+  </p>
 </div>
 {% endblock %}

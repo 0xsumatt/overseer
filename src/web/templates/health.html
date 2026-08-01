@@ -1,47 +1,101 @@
 {% extends "base.html" %}
 {% block title %}health · overseer{% endblock %}
 {% block content %}
-<h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-400">job heartbeat</h2>
-<table class="mb-8 w-full text-sm">
-  <thead class="text-left text-slate-500">
-    <tr><th class="py-1 pr-4">job</th><th class="pr-4">status</th>
-        <th class="pr-4">last success</th><th class="pr-4">fetched</th>
-        <th class="pr-4">new</th><th>last error</th></tr>
-  </thead>
-  <tbody>
-    {% for j in jobs %}
-    <tr class="border-t border-slate-800 {{ 'bg-red-950/40' if j.last_status == 'fail' }}">
-      <td class="py-1.5 pr-4 font-mono text-xs">{{ j.job_id }}</td>
-      <td class="pr-4">
-        <span class="{{ 'text-red-400' if j.last_status == 'fail' else 'text-emerald-400' }}">
-          {{ j.last_status }}</span>
-      </td>
-      <td class="pr-4 text-slate-400">{{ j.last_success_at }}</td>
-      <td class="pr-4">{{ j.fetched }}</td>
-      <td class="pr-4">{{ j.new_rows }}</td>
-      <td class="max-w-md truncate text-xs text-slate-500">{{ j.last_error or '' }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+{% set failing = jobs | selectattr('last_status', 'equalto', 'fail') | list %}
+{% set stale = freshness | selectattr('stale_factor', 'gt', 3) | list %}
 
-<h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-400">series freshness</h2>
-<table class="w-full text-sm">
-  <thead class="text-left text-slate-500">
-    <tr><th class="py-1 pr-4">series</th><th class="pr-4">last bar</th>
-        <th class="pr-4">age</th><th>stale ×interval</th></tr>
-  </thead>
-  <tbody>
-    {% for f in freshness %}
-    <tr class="border-t border-slate-800 {{ 'bg-red-950/40' if f.stale_factor > 3 }}">
-      <td class="py-1.5 pr-4 font-mono text-xs">
-        {{ f.exchange }} {{ f.market_type }} {{ f.symbol }} {{ f.interval }}</td>
-      <td class="pr-4 text-slate-400">{{ f.last_ts }}</td>
-      <td class="pr-4">{{ f.age }}</td>
-      <td class="{{ 'text-red-400' if f.stale_factor > 3 else 'text-emerald-400' }}">
-        {{ '%.1f' % f.stale_factor }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+{# Same header shape as every other page: phosphor eyebrow, then the h1. This
+   page previously started at h2 with no h1 at all. #}
+<div class="mb-5 flex flex-wrap items-end justify-between gap-3 sm:gap-4">
+  <div>
+    <div class="font-mono text-label tracking-label uppercase text-phosphor">internal</div>
+    <h1 class="mt-1 text-title font-semibold text-body">Health</h1>
+  </div>
+  <div class="flex w-full flex-wrap items-center gap-2 font-mono text-data sm:w-auto">
+    <span class="rounded border px-2 py-1
+                 {{ 'border-loss/40 bg-loss/10 text-loss' if failing
+                    else 'border-line bg-panel text-dim' }}">
+      {{ failing | length }} / {{ jobs | length }} jobs failing
+    </span>
+    <span class="rounded border px-2 py-1
+                 {{ 'border-loss/40 bg-loss/10 text-loss' if stale
+                    else 'border-line bg-panel text-dim' }}">
+      {{ stale | length }} / {{ freshness | length }} series stale
+    </span>
+  </div>
+</div>
+
+<h2 class="mb-2 font-mono text-label tracking-label uppercase text-dim">job heartbeat</h2>
+<div class="scroll-thin mb-8 max-h-[32rem] overflow-auto rounded border border-line sm:max-h-none">
+  <table class="w-full min-w-[48rem] border-collapse text-data">
+    <caption class="sr-only">Current state of every scheduled job</caption>
+    <thead class="sticky top-0 z-10">
+      <tr class="border-b border-line bg-panel text-left font-mono text-label
+                 tracking-label uppercase text-faint">
+        <th scope="col" class="px-3 py-2">job</th>
+        <th scope="col" class="px-3 py-2">status</th>
+        <th scope="col" class="px-3 py-2">last success</th>
+        <th scope="col" class="px-3 py-2 text-right">fetched</th>
+        <th scope="col" class="px-3 py-2 text-right">new</th>
+        <th scope="col" class="px-3 py-2">last error</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for j in jobs %}
+      <tr class="border-b border-line/50 {{ 'bg-loss/5' if j.last_status == 'fail' }}">
+        <td class="px-3 py-1.5 font-mono text-data text-body">{{ j.job_id }}</td>
+        <td class="px-3 py-1.5 font-mono text-data">
+          {# Status carries a word, not just a colour — never colour alone. #}
+          <span class="{{ 'text-loss' if j.last_status == 'fail' else 'text-gain' }}">
+            {{ '● fail' if j.last_status == 'fail' else '● ok' }}</span>
+        </td>
+        <td class="px-3 py-1.5 font-mono text-data text-dim tabular-nums">
+          {{ j.last_success_at or '—' }}</td>
+        <td class="px-3 py-1.5 text-right font-mono text-data text-dim tabular-nums">
+          {{ j.fetched }}</td>
+        <td class="px-3 py-1.5 text-right font-mono text-data text-dim tabular-nums">
+          {{ j.new_rows }}</td>
+        <td class="max-w-md truncate px-3 py-1.5 font-mono text-data text-faint"
+            title="{{ j.last_error or '' }}">{{ j.last_error or '' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="px-3 py-6 text-center font-mono text-data text-faint">
+        no jobs have reported yet</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h2 class="mb-2 font-mono text-label tracking-label uppercase text-dim">series freshness</h2>
+<div class="scroll-thin max-h-[32rem] overflow-auto rounded border border-line sm:max-h-none">
+  <table class="w-full min-w-[40rem] border-collapse text-data">
+    <caption class="sr-only">
+      Age of the newest bar per series, as a multiple of the bar interval</caption>
+    <thead class="sticky top-0 z-10">
+      <tr class="border-b border-line bg-panel text-left font-mono text-label
+                 tracking-label uppercase text-faint">
+        <th scope="col" class="px-3 py-2">series</th>
+        <th scope="col" class="px-3 py-2">last bar</th>
+        <th scope="col" class="px-3 py-2">age</th>
+        <th scope="col" class="px-3 py-2 text-right">stale ×interval</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for f in freshness %}
+      <tr class="border-b border-line/50 {{ 'bg-loss/5' if f.stale_factor > 3 }}">
+        <td class="px-3 py-1.5 font-mono text-data text-body">
+          {{ f.exchange }} · {{ f.market_type }} · {{ f.symbol }} · {{ f.interval }}</td>
+        <td class="px-3 py-1.5 font-mono text-data text-dim tabular-nums">{{ f.last_ts }}</td>
+        <td class="px-3 py-1.5 font-mono text-data text-dim tabular-nums">{{ f.age }}</td>
+        <td class="px-3 py-1.5 text-right font-mono text-data tabular-nums
+                   {{ 'text-loss' if f.stale_factor > 3 else 'text-gain' }}">
+          {{ '%.1f' % f.stale_factor }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="px-3 py-6 text-center font-mono text-data text-faint">
+        no bars ingested yet</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
 {% endblock %}

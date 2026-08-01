@@ -5,11 +5,19 @@ intervals = ["1m"]
 intervals = ["1m"]
 funding = "all"
 liquidity = true
+# aggTrade tape, settlement-windowed. Adapter is written and parse-verified,
+# but fstream.binance.com delivered no data from the dev machine (spot streams
+# and REST fapi both fine) — likely a jurisdiction block on the futures socket.
+# Smoke-test from the soak server, then uncomment.
+# stream = true
 
 [venues.hyperliquid]
 intervals = ["1m"]
 funding = "all"
 liquidity = "all"
+# Public trade tape over websocket. true = raw trades kept only around funding
+# settlements; the per-minute flow aggregate is continuous regardless.
+stream = true
 
 [venues.bybit_spot]
 intervals = ["1m"]
@@ -18,6 +26,10 @@ intervals = ["1m"]
 intervals = ["1m"]
 funding = "all"
 liquidity = "all"
+# publicTrade tape. true = raw trades kept only around funding settlements;
+# per-minute flow (trades_1m) is aggregated continuously either way, so the
+# flow series has no gaps. "tape" would keep every trade — ~1.35 GB/day.
+stream = true
 
 [venues.lighter]
 intervals = ["1m"]

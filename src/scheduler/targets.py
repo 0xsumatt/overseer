@@ -7,7 +7,7 @@ from pathlib import Path
 from core.enums import MarketType, Timeframe
 from core.symbols import SymbolConfigError, SymbolRegistry
 from data_collection.base import Capability
-from data_collection.exchanges.registry import REGISTRY
+from data_collection.exchanges.registry import REGISTRY, STREAM_REGISTRY
 
 
 @dataclass(frozen=True)
@@ -69,6 +69,67 @@ class FillsTarget:
     @property
     def job_id(self) -> str:
         return f"fills:{self.venue}:{self.label}"
+
+
+@dataclass(frozen=True)
+class StreamTarget:
+    """One websocket feed. `capture` means the stream stays connected but only
+    writes inside funding-settlement windows (scheduler/capture.py); False is
+    the continuous tape, which is a much larger storage commitment."""
+
+    venue: str
+    symbols: tuple[str, ...]
+    capture: bool = True
+
+    @property
+    def job_id(self) -> str:
+        return f"stream:{self.venue}"
+
+
+def load_stream_targets(path: str | Path) -> list[StreamTarget]:
+    """Build stream targets from `stream = true` / `stream = "capture"` on a
+    [venues.*] section.
+
+    Kept separate from load_targets() rather than widening its return tuple:
+    the polling targets and the streams are consumed by different machinery,
+    and most venues will have polling long before they have a stream.
+
+    Perp-only, via the same adapter filter the funding and liquidity targets
+    use — settlement windows are a perp-domain concept, and a spot symbol has
+    no funding to anchor them to.
+    """
+    p = Path(path)
+    with p.open("rb") as f:
+        data = tomllib.load(f)
+
+    registry = SymbolRegistry.from_config(data)
+    errors: list[str] = []
+    out: list[StreamTarget] = []
+
+    for venue, section in data.get("venues", {}).items():
+        mode = section.get("stream")
+        if not mode:
+            continue
+        if venue not in STREAM_REGISTRY:
+            errors.append(
+                f"[venues.{venue}] has stream = {mode!r} but no websocket adapter "
+                f"is registered (have: {sorted(STREAM_REGISTRY)})"
+            )
+            continue
+        perp_syms = tuple(
+            sym for sym in registry.venue_symbols(venue)
+            if REGISTRY[venue].market_type_for(sym) == MarketType.PERP
+        )
+        if not perp_syms:
+            errors.append(f"[venues.{venue}] has stream enabled but lists no perps")
+            continue
+        # stream = "tape" opts into the continuous feed; anything else truthy
+        # is the (much cheaper) settlement-window capture.
+        out.append(StreamTarget(venue, perp_syms, capture=(mode != "tape")))
+
+    if errors:
+        raise ValueError(f"invalid stream config ({p}):\n  - " + "\n  - ".join(errors))
+    return out
 
 
 def load_targets(path: str | Path) -> tuple[

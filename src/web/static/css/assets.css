@@ -1,3 +1,66 @@
+/* IBM Plex Mono — self-hosted, SIL Open Font License 1.1.
+ *
+ * Self-hosted rather than loaded from a CDN: no third-party request on every
+ * page view, no external dependency that can fail or change, and it matches
+ * how lightweight-charts is already vendored. latin + latin-ext subsets only,
+ * three weights, 72 KB total.
+ *
+ * Weights: 400 body/data, 500 spare for hierarchy work, 600 headings and the
+ * wordmark. Only 400 and 600 are used today; 500 is here because weight — not
+ * just size — is what should carry emphasis once the type scale is tightened.
+ *
+ * font-display: swap so text paints immediately in the fallback and reflows
+ * when Plex lands, rather than leaving the dashboard blank.
+ */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/static/fonts/ibm-plex-mono-400-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/static/fonts/ibm-plex-mono-400-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/static/fonts/ibm-plex-mono-500-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/static/fonts/ibm-plex-mono-500-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/static/fonts/ibm-plex-mono-600-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/static/fonts/ibm-plex-mono-600-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -8,8 +71,84 @@
      harsh white dropdown lists. */
   html { color-scheme: dark; }
   select option {
-    background-color: #111624;   /* panel */
-    color: #C8D0E0;              /* body */
+    background-color: #111721;
+    color: #EEF2F7;
   }
-  ::selection { background: rgba(255, 180, 84, 0.25); }
+  ::selection {
+    background: rgba(230, 184, 92, 0.3);
+    color: #EEF2F7;
+  }
+}
+
+@layer components {
+  /* Form controls.
+   *
+   * Was four different padding/focus combinations across five templates for
+   * the same <select>, and two of them had no focus style at all. One
+   * definition plus one size variant IS a system; four ad-hoc paddings is
+   * not. Sizes stay explicit here rather than inheriting, so a control never
+   * changes size because of the container it landed in.
+   */
+  .select,
+  .input {
+    min-height: 2.375rem;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.38);
+    @apply rounded border border-line-strong bg-ink px-3 py-1.5
+           font-mono text-data text-body
+           focus:border-phosphor focus:outline-none;
+  }
+  .select:focus,
+  .input:focus {
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.38),
+                0 0 0 3px rgba(230, 184, 92, 0.18);
+  }
+  .input { @apply placeholder:text-faint; }
+
+  /* Dense filter rows remain compact without returning to 22px controls. */
+  .select-sm { min-height: 2rem; @apply px-2 py-1; }
+
+  /* funding.html's table header.
+   *
+   * A rule rather than utility classes because the venue columns are injected
+   * into #fhead by JS on every refresh, so there is no markup to put classes
+   * on. theme() keeps it tracking the tokens — it previously hardcoded
+   * rgb(17 22 36) in an inline <style> block, alongside a comment claiming
+   * app.css had no .sticky utility, which stopped being true once other pages
+   * started using it.
+   */
+  #ftable thead th {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: theme('colors.panel');
+    box-shadow: 0 1px 0 theme('colors.line');
+  }
+}
+
+/* Phone controls use the same visual scale as desktop but expose a full
+   finger-sized hit area. The breakpoint matches the navigation cutover. */
+button,
+a,
+input,
+select {
+  touch-action: manipulation;
+}
+
+@media (max-width: 1279px) {
+  button {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+  .select,
+  .input,
+  .select-sm {
+    min-height: 2.75rem;
+  }
+  footer a,
+  #tv-attr-logo {
+    display: inline-flex !important;
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    align-items: center;
+  }
 }

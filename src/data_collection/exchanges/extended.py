@@ -4,8 +4,8 @@ from collections.abc import Sequence
 from datetime import datetime, timezone
 from typing import Any, ClassVar
 
-from core.enums import Exchange, MarketType, Timeframe
-from core.models import OHLCV, FundingRate, LiquiditySnapshot
+from core.enums import Exchange, MarketType, QuoteCurrency, Timeframe
+from core.models import FundingRate, LiquiditySnapshot, OHLCV, TopOfBook
 from data_collection.base import BaseExchangeScraper, Capability
 from data_collection.http import HttpClient
 from data_collection.ratelimit import RateLimiter
@@ -36,8 +36,15 @@ class ExtendedScraper(BaseExchangeScraper):
     exchange: ClassVar[Exchange] = Exchange.EXTENDED
     base_url: ClassVar[str] = "https://api.starknet.extended.exchange"
     market_type: ClassVar[MarketType] = MarketType.PERP        # default/primary
+    quote_currency: ClassVar[QuoteCurrency] = QuoteCurrency.USDC
     capabilities: ClassVar[frozenset[Capability]] = frozenset(
-        {Capability.OHLCV, Capability.FUNDING, Capability.LIQUIDITY, Capability.VENUE_VOLUME}
+        {
+            Capability.OHLCV,
+            Capability.FUNDING,
+            Capability.LIQUIDITY,
+            Capability.VENUE_VOLUME,
+            Capability.BBO,
+        }
     )
 
     def _build_http(self) -> HttpClient:
@@ -58,6 +65,27 @@ class ExtendedScraper(BaseExchangeScraper):
     def market_type_for(cls, symbol: str) -> MarketType:
         # perps are "BTC-USD"; spot markets are "BTCSPOT"
         return MarketType.SPOT if symbol.upper().endswith("SPOT") else MarketType.PERP
+
+    async def fetch_bbo(self, symbol: str) -> TopOfBook:
+        payload = await self.http.get_json(
+            f"{self.base_url}/api/v1/info/markets/{symbol}/orderbook"
+        )
+        book = _unwrap(payload)
+        bids, asks = book.get("bid", []), book.get("ask", [])
+        if not bids or not asks:
+            raise RuntimeError(f"extended returned an empty book for {symbol}")
+        bid = max(bids, key=lambda row: self._dec(row["price"]))
+        ask = min(asks, key=lambda row: self._dec(row["price"]))
+        return TopOfBook(
+            exchange=self.exchange,
+            symbol=symbol,
+            quote_currency=self.quote_currency,
+            ts=datetime.now(timezone.utc),
+            bid_price=self._dec(bid["price"]),
+            bid_size=self._dec(bid["qty"]),
+            ask_price=self._dec(ask["price"]),
+            ask_size=self._dec(ask["qty"]),
+        )
 
     # -- OHLCV (no startTime param: filter client-side for resume) ------------------
 
@@ -139,6 +167,8 @@ class ExtendedScraper(BaseExchangeScraper):
             if m["name"] not in wanted or m.get("type") != "PERPETUAL":
                 continue
             stats = m.get("marketStats", {})
+            current_rate = stats.get("fundingRate")
+            next_funding = stats.get("nextFundingRate")
             out.append(
                 LiquiditySnapshot(
                     exchange=self.exchange,
@@ -147,6 +177,14 @@ class ExtendedScraper(BaseExchangeScraper):
                     open_interest=self._dec(stats.get("openInterestBase", 0)),
                     volume_24h=self._dec(stats.get("dailyVolume", 0)),
                     mark_price=self._dec(stats.get("markPrice", 0)),
+                    index_price=self._dec(stats["indexPrice"]),
+                    current_funding_rate=(
+                        self._dec(current_rate) if current_rate not in (None, "") else None
+                    ),
+                    funding_interval_hours=1,
+                    next_funding_at=(
+                        _from_ts_flexible(int(next_funding)) if next_funding else None
+                    ),
                 )
             )
         return out

@@ -4,8 +4,8 @@ from collections.abc import Sequence
 from datetime import datetime, timezone
 from typing import Any, ClassVar
 
-from core.enums import Exchange, MarketType, Timeframe
-from core.models import OHLCV, FundingRate, LiquiditySnapshot
+from core.enums import Exchange, MarketType, QuoteCurrency, Timeframe
+from core.models import FundingRate, LiquiditySnapshot, OHLCV, TopOfBook
 from data_collection.base import BaseExchangeScraper, Capability
 from data_collection.http import HttpClient
 from data_collection.ratelimit import RateLimiter
@@ -46,13 +46,25 @@ _RATE_LIMIT_BACKOFF = 30.0             # seconds to stall the bucket when bybit 
 
 
 
+def to_canonical(native: str) -> str:
+    """'BTCUSDT' -> 'BTC/USDT'. Module-level so the websocket adapter shares
+    this rule exactly — stream rows must carry the same canonical symbol as the
+    REST rows or they won't join, and the capture gate looks symbols up by it."""
+    native = native.upper()
+    for quote in _QUOTES:
+        if native.endswith(quote) and len(native) > len(quote):
+            return f"{native[: -len(quote)]}/{quote}"
+    return native
+
+
 class BybitSpotScraper(BaseExchangeScraper):
     exchange: ClassVar[Exchange] = Exchange.BYBIT
     base_url: ClassVar[str] = "https://api.bybit.com"
     market_type: ClassVar[MarketType] = MarketType.SPOT
     category: ClassVar[str] = "spot"
+    quote_currency: ClassVar[QuoteCurrency] = QuoteCurrency.USDT
     capabilities: ClassVar[frozenset[Capability]] = frozenset(
-        {Capability.OHLCV, Capability.VENUE_VOLUME}
+        {Capability.OHLCV, Capability.VENUE_VOLUME, Capability.BBO}
     )
 
     def _build_http(self) -> HttpClient:
@@ -76,14 +88,31 @@ class BybitSpotScraper(BaseExchangeScraper):
         raise RuntimeError(f"bybit error {code}: {payload.get('retMsg')}")
 
     def to_symbol(self, native: str) -> str:
-        native = native.upper()
-        for quote in _QUOTES:
-            if native.endswith(quote) and len(native) > len(quote):
-                return f"{native[: -len(quote)]}/{quote}"
-        return native
+        return to_canonical(native)
 
     def to_native(self, symbol: str) -> str:
         return symbol.replace("/", "").upper()
+
+    async def fetch_bbo(self, symbol: str) -> TopOfBook:
+        native = self.to_native(symbol)
+        payload = await self.http.get_json(
+            f"{self.base_url}/v5/market/tickers",
+            params={"category": self.category, "symbol": native},
+        )
+        rows = self._unwrap(payload)["list"]
+        if not rows:
+            raise RuntimeError(f"bybit returned no BBO for {native}")
+        row = rows[0]
+        return TopOfBook(
+            exchange=self.exchange,
+            symbol=self.to_symbol(native),
+            quote_currency=self.quote_currency,
+            ts=datetime.now(timezone.utc),
+            bid_price=self._dec(row["bid1Price"]),
+            bid_size=self._dec(row["bid1Size"]),
+            ask_price=self._dec(row["ask1Price"]),
+            ask_size=self._dec(row["ask1Size"]),
+        )
 
     # -- OHLCV ----------------------------------------------------------------------
 
@@ -139,7 +168,13 @@ class BybitPerpScraper(BybitSpotScraper):
     market_type: ClassVar[MarketType] = MarketType.PERP
     category: ClassVar[str] = "linear"
     capabilities: ClassVar[frozenset[Capability]] = frozenset(
-        {Capability.OHLCV, Capability.FUNDING, Capability.LIQUIDITY, Capability.VENUE_VOLUME}
+        {
+            Capability.OHLCV,
+            Capability.FUNDING,
+            Capability.LIQUIDITY,
+            Capability.VENUE_VOLUME,
+            Capability.BBO,
+        }
     )
 
     _funding_intervals: dict[str, int] | None = None   # native -> hours
@@ -202,14 +237,28 @@ class BybitPerpScraper(BybitSpotScraper):
             if not items:
                 continue
             t = items[0]
+            hours = int(
+                t.get("fundingIntervalHour")
+                or await self._funding_interval(t["symbol"])
+            )
+            next_funding = t.get("nextFundingTime")
+            current_rate = t.get("fundingRate")
             out.append(
                 LiquiditySnapshot(
                     exchange=self.exchange,
                     symbol=self.to_symbol(t["symbol"]),
                     ts=now,
-                    open_interest=self._dec(t["openInterest"]),    # base units
-                    volume_24h=self._dec(t["turnover24h"]),        # quote notional
+                    open_interest=self._dec(t["openInterest"]),
+                    volume_24h=self._dec(t["turnover24h"]),
                     mark_price=self._dec(t["markPrice"]),
+                    index_price=self._dec(t["indexPrice"]),
+                    current_funding_rate=(
+                        self._dec(current_rate) if current_rate not in (None, "") else None
+                    ),
+                    funding_interval_hours=hours,
+                    next_funding_at=(
+                        self._from_ms(int(next_funding)) if next_funding else None
+                    ),
                 )
             )
         return out

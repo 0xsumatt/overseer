@@ -24,7 +24,7 @@ file; export the vars or use `uv run --env-file .env`):
 | var | purpose |
 |---|---|
 | `DATABASE_URL` | Timescale DSN, both processes |
-| `DISCORD_WEBHOOK_URL` | failure/recovery alerts + daily digest (optional but strongly recommended for soak runs) |
+| `DISCORD_WEBHOOK_URL` | job health, current-funding dislocations with executable BBOs, and daily digest (optional) |
 | `FLASK_SECRET_KEY` | web session signing; set for any non-dev deploy |
 | `OVERSEER_SYMBOLS_FILE` | path to symbols.toml (default: ./symbols.toml, cwd-relative) |
 
@@ -77,8 +77,9 @@ Notes:
 
 ## Monitoring a soak
 
-* Discord: alerts fire on a job's ok→fail and fail→ok transitions only, plus
-  a daily digest at 08:00 UTC.
+* Discord: job alerts fire on ok→fail and fail→ok transitions. Current-funding
+  spreads alert on a new threshold crossing with live BBOs normalized to USDT.
+  A daily digest posts at 08:00 UTC.
 * `job_runs` table: per-job heartbeat (`last_status`, `last_error`,
   `last_success_at`) — `SELECT * FROM job_runs WHERE last_status='fail'`.
 * Freshness (catches jobs that "succeed" while a venue quietly returns

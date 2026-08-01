@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import ClassVar
 
-from core.enums import Exchange, MarketType, Side, Timeframe
-from core.models import OHLCV, FundingRate, LiquiditySnapshot, Trade
+from core.enums import Exchange, MarketType, QuoteCurrency, Side, Timeframe
+from core.models import FundingRate, LiquiditySnapshot, OHLCV, TopOfBook, Trade
 from data_collection.base import BaseExchangeScraper, Capability
 from data_collection.http import HttpClient
 from data_collection.ratelimit import RateLimiter
@@ -15,11 +15,18 @@ class HyperliquidScraper(BaseExchangeScraper):
     exchange: ClassVar[Exchange] = Exchange.HYPERLIQUID
     base_url: ClassVar[str] = "https://api.hyperliquid.xyz"
     market_type: ClassVar[MarketType] = MarketType.PERP        # default/primary
+    quote_currency: ClassVar[QuoteCurrency] = QuoteCurrency.USDC
     # FILLS is scheduled for specific known addresses (e.g. the HLP vault), not
     # as a market-wide tape — that's still WS's job. See scheduler/targets.py.
     capabilities: ClassVar[frozenset[Capability]] = frozenset(
-        {Capability.OHLCV, Capability.FILLS, Capability.FUNDING, Capability.LIQUIDITY,
-         Capability.VENUE_VOLUME}
+        {
+            Capability.OHLCV,
+            Capability.FILLS,
+            Capability.FUNDING,
+            Capability.LIQUIDITY,
+            Capability.VENUE_VOLUME,
+            Capability.BBO,
+        }
     )
 
     def _build_http(self) -> HttpClient:
@@ -52,6 +59,26 @@ class HyperliquidScraper(BaseExchangeScraper):
     @classmethod
     def market_type_for(cls, symbol: str) -> MarketType:
         return cls._market_for_coin(symbol)
+
+    async def fetch_bbo(self, symbol: str) -> TopOfBook:
+        coin = self.to_native(symbol)
+        payload = await self.http.post_json(
+            f"{self.base_url}/info", json={"type": "l2Book", "coin": coin}
+        )
+        bids, asks = payload.get("levels", ([], []))
+        if not bids or not asks:
+            raise RuntimeError(f"hyperliquid returned an empty book for {coin}")
+        bid, ask = bids[0], asks[0]
+        return TopOfBook(
+            exchange=self.exchange,
+            symbol=self.to_symbol(coin),
+            quote_currency=self.quote_currency,
+            ts=datetime.now(timezone.utc),
+            bid_price=self._dec(bid["px"]),
+            bid_size=self._dec(bid["sz"]),
+            ask_price=self._dec(ask["px"]),
+            ask_size=self._dec(ask["sz"]),
+        )
 
     # -- OHLCV: POST /info candleSnapshot -----------------------------------------
 
@@ -155,17 +182,20 @@ class HyperliquidScraper(BaseExchangeScraper):
     async def fetch_liquidity(
         self, symbols: Sequence[str]
     ) -> Sequence[LiquiditySnapshot]:
-        from datetime import datetime as _dt, timezone as _tz
+        from datetime import datetime as _dt, timedelta as _td, timezone as _tz
         meta, ctxs = await self.http.post_json(
             f"{self.base_url}/info", json={"type": "metaAndAssetCtxs"}
         )
         wanted = {self.to_native(s) for s in symbols}
         now = _dt.now(_tz.utc)
+        next_funding = now.replace(minute=0, second=0, microsecond=0) + _td(hours=1)
         out: list[LiquiditySnapshot] = []
         for asset, ctx in zip(meta["universe"], ctxs):
             if asset["name"] not in wanted:
                 continue
             mark = ctx.get("markPx") or ctx.get("oraclePx")
+            current_rate = ctx.get("funding")
+            premium = ctx.get("premium")
             out.append(
                 LiquiditySnapshot(
                     exchange=self.exchange,
@@ -174,6 +204,15 @@ class HyperliquidScraper(BaseExchangeScraper):
                     open_interest=self._dec(ctx["openInterest"]),
                     volume_24h=self._dec(ctx["dayNtlVlm"]),
                     mark_price=self._dec(mark),
+                    index_price=self._dec(ctx["oraclePx"]),
+                    current_funding_rate=(
+                        self._dec(current_rate) if current_rate not in (None, "") else None
+                    ),
+                    funding_interval_hours=1,
+                    next_funding_at=next_funding,
+                    funding_premium=(
+                        self._dec(premium) if premium not in (None, "") else None
+                    ),
                 )
             )
         return out

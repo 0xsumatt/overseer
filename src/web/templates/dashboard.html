@@ -5,31 +5,29 @@
   /* panel chrome states (toggled by JS; compound styles live here, not utilities) */
   .panel-collapsed { height: auto !important; }
   .panel-maxed {
-    position: fixed; inset: 1.25rem; z-index: 40;
-    height: auto !important; background: #0D1119;
-    box-shadow: 0 0 0 100vmax rgba(11,14,22,.7);   /* dims everything behind */
+    position: fixed; inset: .75rem; z-index: 40;
+    height: auto !important; background: #111721;
+    box-shadow: 0 0 0 100vmax rgba(8,11,18,.78);   /* dims everything behind */
+  }
+  @media (min-width: 640px) {
+    .panel-maxed { inset: 1.25rem; }
   }
 </style>
-<div class="mb-5 flex flex-wrap items-end justify-between gap-4">
+<div class="mb-5 flex flex-wrap items-end justify-between gap-3 sm:gap-4">
   <div>
-    <div class="font-mono text-xs tracking-label uppercase text-phosphor">price / ohlcv</div>
-    <h1 class="mt-1 text-xl font-semibold text-body">Charts</h1>
+    <h1 class="text-title font-semibold text-body">Cross-venue prices</h1>
+    <p class="mt-1 text-data text-dim">Compare prices across tracked venues.</p>
   </div>
-  <div class="flex flex-wrap items-center gap-2">
-    <select id="series" class="rounded border border-line bg-panel px-3 py-1.5 font-mono text-xs text-body focus:border-phosphor focus:outline-none">
-      {% for s in series %}
-      <option value="{{ s.exchange }}|{{ s.market_type }}|{{ s.symbol }}|{{ s.interval }}">
-        {{ s.exchange }} · {{ s.market_type }} · {{ s.symbol }} · {{ s.interval }}</option>
-      {% endfor %}
-    </select>
-    <select id="compare-add" class="rounded border border-line bg-panel px-3 py-1.5 font-mono text-xs text-dim focus:border-phosphor focus:outline-none">
-      <option value="">+ compare…</option>
-      {% for s in series %}
-      <option value="{{ s.exchange }}|{{ s.market_type }}|{{ s.symbol }}|{{ s.interval }}">
-        {{ s.exchange }} · {{ s.market_type }} · {{ s.symbol }} · {{ s.interval }}</option>
-      {% endfor %}
-    </select>
-    <select id="hours" class="rounded border border-line bg-panel px-3 py-1.5 font-mono text-xs text-body focus:border-phosphor focus:outline-none">
+  <div class="flex w-full items-center gap-2 sm:w-auto">
+    <div class="flex shrink-0 rounded-full border border-line bg-panel p-1 font-mono text-data"
+         role="group" aria-label="Market type">
+      <button id="mkt-perp" data-market="perp" aria-pressed="true"
+              class="rounded-full px-3.5 py-1 tracking-label uppercase transition-colors text-ink bg-phosphor/85">perp</button>
+      <button id="mkt-spot" data-market="spot" aria-pressed="false"
+              class="rounded-full px-3.5 py-1 tracking-label uppercase transition-colors text-dim hover:text-body">spot</button>
+    </div>
+    <select id="token" class="select min-w-0 flex-1 sm:flex-none" aria-label="Asset"></select>
+    <select id="hours" class="select shrink-0" aria-label="Time window">
       <option value="24">24h</option>
       <option value="48" selected>48h</option>
       <option value="168">7d</option>
@@ -37,67 +35,67 @@
   </div>
 </div>
 
-<div id="legend" class="mb-3 hidden flex-wrap items-center gap-2"></div>
+<div id="legend" class="scroll-thin mb-3 hidden flex-nowrap gap-2 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible sm:pb-0"></div>
 <div id="stats" class="mb-4 grid grid-cols-2 gap-px overflow-hidden rounded-md border border-line bg-line sm:grid-cols-4"></div>
 
-<section data-panel="chart" class="flex h-[25rem] flex-col overflow-hidden rounded-md border border-line bg-panel/50">
+<section data-panel="chart" class="flex h-[22rem] flex-col overflow-hidden rounded-md border border-line bg-panel/50 sm:h-[25rem]">
   <div class="flex items-center justify-between border-b border-line/60 px-3 py-1.5">
-    <span class="font-mono text-[10px] tracking-label uppercase text-dim">price chart</span>
-    <div class="flex items-center gap-1">
-      <button data-max class="rounded px-1 font-mono text-xs text-dim hover:text-body">⛶</button>
-      <button data-collapse class="rounded px-1 font-mono text-xs text-dim hover:text-body">−</button>
+    <span class="font-mono text-label tracking-label uppercase text-dim">price chart</span>
+    <div class="hidden items-center gap-1 sm:flex">
+      <button data-max class="rounded px-1 font-mono text-data text-dim hover:text-body">⛶</button>
+      <button data-collapse class="rounded px-1 font-mono text-data text-dim hover:text-body">−</button>
     </div>
   </div>
   <div data-panel-body class="min-h-0 flex-1">
     <div id="chart" class="h-full w-full"></div>
   </div>
 </section>
-<p id="compare-note" class="mt-2 hidden font-mono text-[11px] text-faint">
-  compare mode · each series rebased to 0% at window start</p>
+<p class="mt-2 text-data text-dim">
+  Toggle venues; line gaps show basis.</p>
 
 <div class="mt-4 grid gap-4 lg:grid-cols-3">
 
-  <section data-panel="volume" class="flex h-[21rem] flex-col rounded-md border border-line bg-panel/50 p-4">
+  <section data-panel="volume" class="flex h-[18rem] flex-col rounded-md border border-line bg-panel/50 p-4 sm:h-[21rem]">
     <div class="mb-1 flex items-baseline justify-between">
-      <h2 class="font-mono text-xs tracking-label uppercase text-dim">24h volume by venue</h2>
+      <h2 class="font-mono text-label tracking-label uppercase text-dim">24h volume by venue</h2>
       <div class="flex items-center gap-3">
-        <span id="cex-share" class="font-mono text-sm tabular-nums text-phosphor">—</span>
-        <div class="flex items-center gap-1">
-          <button data-max class="rounded px-1 font-mono text-xs text-dim hover:text-body">⛶</button>
-          <button data-collapse class="rounded px-1 font-mono text-xs text-dim hover:text-body">−</button>
+        <span id="cex-share" class="font-mono text-data tabular-nums text-phosphor">—</span>
+        <div class="hidden items-center gap-1 sm:flex">
+          <button data-max class="rounded px-1 font-mono text-data text-dim hover:text-body">⛶</button>
+          <button data-collapse class="rounded px-1 font-mono text-data text-dim hover:text-body">−</button>
         </div>
       </div>
     </div>
     <div data-panel-body class="flex min-h-0 flex-1 flex-col">
-      <div class="mb-3 font-mono text-[10px] text-faint">cex share of tracked venues</div>
+      <div class="mb-3 font-mono text-label text-faint">cex share of tracked venues</div>
       <div id="vol-bars" class="scroll-thin min-h-0 flex-1 space-y-2 overflow-y-auto pr-3"></div>
     </div>
   </section>
 
-  <section data-panel="oi" class="flex h-[21rem] flex-col rounded-md border border-line bg-panel/50 p-4">
+  <section data-panel="oi" class="flex h-[18rem] flex-col rounded-md border border-line bg-panel/50 p-4 sm:h-[21rem]">
     <div class="mb-1 flex items-baseline justify-between">
-      <h2 class="font-mono text-xs tracking-label uppercase text-dim">open interest by asset</h2>
-      <div class="flex items-center gap-1">
-        <button data-max class="rounded px-1 font-mono text-xs text-dim hover:text-body">⛶</button>
-        <button data-collapse class="rounded px-1 font-mono text-xs text-dim hover:text-body">−</button>
+      <h2 class="font-mono text-label tracking-label uppercase text-dim">open interest by asset</h2>
+      <div class="hidden items-center gap-1 sm:flex">
+        <button data-max class="rounded px-1 font-mono text-data text-dim hover:text-body">⛶</button>
+        <button data-collapse class="rounded px-1 font-mono text-data text-dim hover:text-body">−</button>
       </div>
     </div>
     <div data-panel-body class="flex min-h-0 flex-1 flex-col">
-      <div class="mb-3 font-mono text-[10px] text-faint">summed across perp venues, notional</div>
+      <div class="mb-3 font-mono text-label text-faint">summed across perp venues, notional</div>
       <div id="oi-bars" class="scroll-thin min-h-0 flex-1 space-y-2 overflow-y-auto pr-3"></div>
     </div>
   </section>
 
-  <section data-panel="basis" class="flex h-[21rem] flex-col rounded-md border border-line bg-panel/50 p-4">
+  <section data-panel="basis" class="flex h-[18rem] flex-col rounded-md border border-line bg-panel/50 p-4 sm:h-[21rem]">
     <div class="mb-1 flex items-baseline justify-between">
-      <h2 class="font-mono text-xs tracking-label uppercase text-dim">basis snapshot</h2>
-      <div class="flex items-center gap-1">
-        <button data-max class="rounded px-1 font-mono text-xs text-dim hover:text-body">⛶</button>
-        <button data-collapse class="rounded px-1 font-mono text-xs text-dim hover:text-body">−</button>
+      <h2 class="font-mono text-label tracking-label uppercase text-dim">basis snapshot</h2>
+      <div class="hidden items-center gap-1 sm:flex">
+        <button data-max class="rounded px-1 font-mono text-data text-dim hover:text-body">⛶</button>
+        <button data-collapse class="rounded px-1 font-mono text-data text-dim hover:text-body">−</button>
       </div>
     </div>
     <div data-panel-body class="flex min-h-0 flex-1 flex-col">
-      <div class="mb-3 font-mono text-[10px] text-faint">same-venue spot vs perp, latest bar, bps</div>
+      <div class="mb-3 font-mono text-label text-faint">same-venue spot vs perp, latest bar, bps</div>
       <div id="basis-rows" class="scroll-thin min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-3"></div>
     </div>
   </section>
@@ -105,7 +103,8 @@
 </div>
 <script id="series-data" type="application/json">[
   {%- for s in series -%}
-    {"exchange":"{{ s.exchange }}","market_type":"{{ s.market_type }}","symbol":"{{ s.symbol }}"}
+    {"exchange":"{{ s.exchange }}","market_type":"{{ s.market_type }}","symbol":"{{ s.symbol }}",
+     "interval":"{{ s.interval }}","asset":"{{ s.asset }}"}
     {{- "," if not loop.last -}}
   {%- endfor -%}
 ]</script>
@@ -113,36 +112,41 @@
 
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/lightweight-charts.standalone.js') }}"></script>
+<script src="{{ url_for('static', filename='js/venues.js') }}"></script>
 <script>
-const PALETTE = ['#FFB454', '#7DD3FC', '#C4B5FD', '#F9A8D4', '#86EFAC', '#FCA5A5'];
+// VENUE_COLORS / VENUE_ORDER / colorFor come from venues.js — one definition
+// for every page, rather than three hand-synced copies that drifted.
+
+const SERIES = JSON.parse(document.getElementById('series-data').textContent);
 
 const chart = LightweightCharts.createChart(document.getElementById('chart'), {
-  layout: { background: { color: 'transparent' }, textColor: '#667089',
-            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' },
-  grid: { vertLines: { color: '#161D2E' }, horzLines: { color: '#161D2E' } },
-  crosshair: { vertLine: { color: '#3D465C' }, horzLine: { color: '#3D465C' } },
-  timeScale: { timeVisible: true, secondsVisible: false, borderColor: '#232B3D' },
-  rightPriceScale: { borderColor: '#232B3D' },
+  layout: { background: { color: 'transparent' }, textColor: CHART_THEME.text,
+            fontFamily: CHART_THEME.font, fontSize: 12 },
+  grid: { vertLines: { color: CHART_THEME.grid }, horzLines: { color: CHART_THEME.grid } },
+  crosshair: { vertLine: { color: CHART_THEME.crosshair },
+               horzLine: { color: CHART_THEME.crosshair } },
+  timeScale: { timeVisible: true, secondsVisible: false, borderColor: CHART_THEME.border },
+  rightPriceScale: { borderColor: CHART_THEME.border },
   autoSize: true,
 });
 
-let compares = [];        // series keys beyond the primary
-let handles = [];         // live series objects, removed on every redraw
+const dashboardFilters = Overseer.filterState('charts');
+let handles = [];             // live chart series, removed on every redraw
+let market = dashboardFilters.get('market') === 'spot' ? 'spot' : 'perp';
+let dashData = {};            // venue -> candle array for the current selection
+let dashHidden = new Set(dashboardFilters.getList('venues'));
+const dashboardState = Overseer.pageState();
 
 const fmt = n => n >= 1000 ? n.toLocaleString(undefined, {maximumFractionDigits: 1})
                            : n.toPrecision(5).replace(/\.?0+$/, '');
-const label = key => {
-  const [ex, mt, sym] = key.split('|');
-  return `${ex} ${sym}${mt === 'perp' ? ' ⊥' : ''}`;
-};
 const stat = (l, v, cls) => `<div class="bg-panel px-4 py-3">
-    <div class="font-mono text-[10px] tracking-label uppercase text-dim">${l}</div>
-    <div class="mt-0.5 font-mono text-base tabular-nums ${cls || 'text-body'}">${v}</div></div>`;
+    <div class="font-mono text-label tracking-label uppercase text-dim">${l}</div>
+    <div class="mt-0.5 font-mono text-hero tabular-nums ${cls || 'text-body'}">${v}</div></div>`;
 
-async function fetchCandles(key, hours) {
-  const [exchange, market_type, symbol, interval] = key.split('|');
-  const qs = new URLSearchParams({ exchange, market_type, symbol, interval, hours, limit: 5000 });
-  return (await fetch(`/api/candles?${qs}`)).json();
+async function fetchCandles(s, hours) {
+  const qs = new URLSearchParams({ exchange: s.exchange, market_type: s.market_type,
+                                   symbol: s.symbol, interval: s.interval, hours, limit: 5000 });
+  return Overseer.requestJSON(`/api/candles?${qs}`);
 }
 
 function clearSeries() {
@@ -150,93 +154,138 @@ function clearSeries() {
   handles = [];
 }
 
-function renderLegend(entries) {
-  const el = document.getElementById('legend');
-  if (!entries.length) { el.classList.add('hidden'); el.classList.remove('flex'); return; }
-  el.classList.remove('hidden'); el.classList.add('flex');
-  el.innerHTML = entries.map((e, i) => `
-    <span class="inline-flex items-center gap-2 rounded border border-line bg-panel px-2.5 py-1 font-mono text-xs">
-      <span class="h-2 w-2 rounded-full" style="background:${e.color}"></span>
-      <span class="text-body">${e.label}</span>
-      <span class="tabular-nums ${e.delta >= 0 ? 'text-gain' : 'text-loss'}">
-        ${e.delta >= 0 ? '+' : ''}${e.delta.toFixed(2)}%</span>
-      ${i > 0 ? `<button data-remove="${i-1}" class="ml-1 text-dim hover:text-loss" aria-label="Remove ${e.label}">×</button>` : ''}
-    </span>`).join('');
+function populateTokens() {
+  const sel = document.getElementById('token');
+  const prev = sel.value;
+  const saved = dashboardFilters.get('token');
+  const tokens = [...new Set(SERIES.filter(s => s.market_type === market).map(s => s.asset))].sort();
+  sel.innerHTML = tokens.map(t => `<option value="${t}">${t}</option>`).join('');
+  if (tokens.includes(prev)) sel.value = prev;
+  else if (tokens.includes(saved)) sel.value = saved;
+  else if (tokens.includes('BTC')) sel.value = 'BTC';
+  dashboardFilters.set('token', sel.value);
 }
 
 async function load() {
-  const primary = document.getElementById('series').value;
+  const token = document.getElementById('token').value;
   const hours = document.getElementById('hours').value;
-  const keys = [primary, ...compares];
-  const all = await Promise.all(keys.map(k => fetchCandles(k, hours)));
-  clearSeries();
-
-  const stats = document.getElementById('stats');
-  const note = document.getElementById('compare-note');
-
-  if (compares.length === 0) {
-    // single-series: candles + stat strip
-    note.classList.add('hidden');
-    renderLegend([]);
-    stats.classList.remove('hidden');
-    const data = all[0];
-    const s = chart.addCandlestickSeries({
-      upColor: '#4ADE80', downColor: '#FB7185',
-      wickUpColor: '#4ADE80', wickDownColor: '#FB7185', borderVisible: false,
-    });
-    s.setData(data); handles.push(s);
-    if (data.length) {
-      const last = data[data.length-1], first = data[0];
-      const d = (last.close - first.close) / first.close * 100;
-      stats.innerHTML =
-        stat('last', fmt(last.close)) +
-        stat(`Δ ${hours}h`, `${d >= 0 ? '+' : ''}${d.toFixed(2)}%`, d >= 0 ? 'text-gain' : 'text-loss') +
-        stat('high', fmt(Math.max(...data.map(x => x.high)))) +
-        stat('low',  fmt(Math.min(...data.map(x => x.low))));
-    } else {
-      stats.innerHTML = stat('status', 'no bars in window', 'text-dim');
+  if (!token) return;
+  dashboardState.loading('Loading price series…');
+  try {
+    // one series per venue for this (market, token); prefer 1m when duplicated
+    const byVenue = {};
+    for (const s of SERIES.filter(s => s.market_type === market && s.asset === token)) {
+      if (!byVenue[s.exchange] || s.interval === '1m') byVenue[s.exchange] = s;
     }
-  } else {
-    // compare mode: normalized close lines, one color per series
-    note.classList.remove('hidden');
-    stats.classList.add('hidden');
-    const legend = [];
-    keys.forEach((key, i) => {
-      const data = all[i];
-      if (!data.length) { legend.push({label: label(key), color: PALETTE[i % PALETTE.length], delta: 0}); return; }
-      const base = data[0].close;
-      const line = chart.addLineSeries({
-        color: PALETTE[i % PALETTE.length], lineWidth: 2,
-        priceFormat: { type: 'custom', formatter: v => `${v >= 0 ? '+' : ''}${v.toFixed(2)}%` },
-      });
-      line.setData(data.map(d => ({ time: d.time, value: (d.close / base - 1) * 100 })));
-      handles.push(line);
-      legend.push({ label: label(key), color: PALETTE[i % PALETTE.length],
-                    delta: (data[data.length-1].close / base - 1) * 100 });
+    const venues = Object.keys(byVenue);
+    const results = await Promise.all(venues.map(v => fetchCandles(byVenue[v], hours)));
+    dashData = Object.fromEntries(venues.map((v, i) => [v, results[i]]));
+    render();
+    if (results.some(rows => rows.length)) dashboardState.ready();
+    else dashboardState.empty('No price bars exist for this market and window.', load);
+  } catch (error) {
+    dashboardState.error('Price series', load);
+  }
+}
+
+function render() {
+  clearSeries();
+  const hours = document.getElementById('hours').value;
+  const stats = document.getElementById('stats');
+  const legendEl = document.getElementById('legend');
+
+  // fixed venue order (color-map order first, then any stragglers) so colors
+  // and legend positions never shuffle as data or toggles change
+  const ordered = [...Object.keys(VENUE_COLORS), ...Object.keys(dashData)]
+    .filter((v, i, a) => a.indexOf(v) === i && dashData[v]?.length);
+  const visible = ordered.filter(v => !dashHidden.has(v));
+
+  if (visible.length === 1) {
+    // a single venue gets the full candlestick treatment
+    const s = chart.addCandlestickSeries({
+      upColor: CHART_THEME.gain, downColor: CHART_THEME.loss,
+      wickUpColor: CHART_THEME.gain, wickDownColor: CHART_THEME.loss, borderVisible: false,
     });
-    renderLegend(legend);
+    s.setData(dashData[visible[0]]);
+    handles.push(s);
+  } else {
+    for (const venue of visible) {
+      const line = chart.addLineSeries({ color: colorFor(venue), lineWidth: 2 });
+      line.setData(dashData[venue].map(d => ({ time: d.time, value: d.close })));
+      handles.push(line);
+    }
+  }
+
+  // legend: every venue with data, dimmed when hidden, click to toggle
+  legendEl.classList.toggle('hidden', !ordered.length);
+  legendEl.classList.toggle('flex', !!ordered.length);
+  legendEl.innerHTML = ordered.map(venue => {
+    const data = dashData[venue];
+    const delta = (data[data.length-1].close - data[0].close) / data[0].close * 100;
+    const on = !dashHidden.has(venue);
+    return `
+    <button data-venue="${venue}" aria-pressed="${on}"
+      title="click to ${on ? 'hide' : 'show'} ${venue}"
+      class="inline-flex items-center gap-2 rounded-full border px-3 py-1 font-mono text-data transition
+             ${on ? 'border-line bg-panel hover:border-phosphor/50'
+                  : 'border-line/50 bg-panel/30 opacity-40 hover:opacity-70'}">
+      <span class="h-2 w-2 rounded-full" style="background:${colorFor(venue)}"></span>
+      <span class="text-body">${venue}</span>
+      <span class="tabular-nums ${delta >= 0 ? 'text-gain' : 'text-loss'}">${delta >= 0 ? '+' : ''}${delta.toFixed(2)}%</span>
+    </button>`;
+  }).join('');
+
+  // stat strip from a reference venue: the visible one with the most bars
+  const ref = visible.sort((a, b) => dashData[b].length - dashData[a].length)[0];
+  if (ref) {
+    const data = dashData[ref];
+    const last = data[data.length-1], first = data[0];
+    const d = (last.close - first.close) / first.close * 100;
+    stats.innerHTML =
+      stat(`last · ${ref}`, fmt(last.close)) +
+      stat(`Δ ${hours}h`, `${d >= 0 ? '+' : ''}${d.toFixed(2)}%`, d >= 0 ? 'text-gain' : 'text-loss') +
+      stat('high', fmt(Math.max(...data.map(x => x.high)))) +
+      stat('low',  fmt(Math.min(...data.map(x => x.low))));
+  } else {
+    stats.innerHTML = stat('status', 'no bars in window', 'text-dim');
   }
   chart.timeScale().fitContent();
 }
 
-document.getElementById('series').addEventListener('change', load);
-document.getElementById('hours').addEventListener('change', load);
-document.getElementById('compare-add').addEventListener('change', e => {
-  const v = e.target.value;
-  e.target.value = '';
-  const primary = document.getElementById('series').value;
-  if (!v || v === primary || compares.includes(v) || compares.length >= 5) return;
-  compares.push(v);
+function setMarket(m, reload = true) {
+  market = m;
+  dashboardFilters.set('market', m);
+  document.getElementById('mkt-perp').className =
+    `rounded-full px-3.5 py-1 tracking-label uppercase transition-colors ${m === 'perp' ? 'text-ink bg-phosphor/85' : 'text-dim hover:text-body'}`;
+  document.getElementById('mkt-spot').className =
+    `rounded-full px-3.5 py-1 tracking-label uppercase transition-colors ${m === 'spot' ? 'text-ink bg-phosphor/85' : 'text-dim hover:text-body'}`;
+  document.getElementById('mkt-perp').setAttribute('aria-pressed', String(m === 'perp'));
+  document.getElementById('mkt-spot').setAttribute('aria-pressed', String(m === 'spot'));
+  populateTokens();
+  if (reload) load();
+}
+document.getElementById('mkt-perp').addEventListener('click', () => setMarket('perp'));
+document.getElementById('mkt-spot').addEventListener('click', () => setMarket('spot'));
+document.getElementById('token').addEventListener('change', event => {
+  dashboardFilters.set('token', event.target.value);
+  load();
+});
+document.getElementById('hours').addEventListener('change', event => {
+  dashboardFilters.set('hours', event.target.value);
   load();
 });
 document.getElementById('legend').addEventListener('click', e => {
-  const btn = e.target.closest('[data-remove]');
+  const btn = e.target.closest('[data-venue]');
   if (!btn) return;
-  compares.splice(Number(btn.dataset.remove), 1);
-  load();
+  const venue = btn.dataset.venue;
+  dashHidden.has(venue) ? dashHidden.delete(venue) : dashHidden.add(venue);
+  dashboardFilters.setList('venues', dashHidden);
+  render();
 });
 
-load();
+dashboardFilters.restoreSelect(document.getElementById('hours'));
+setMarket(market, false);
+Overseer.poll(load, 60);
 
 // ---- panel chrome: collapse (persisted) + maximize (transient) --------------
 // Collapse folds a panel to its title row and survives reloads via localStorage.
@@ -291,7 +340,7 @@ const fmtB = n => n == null ? '—'
 function bar(label, value, max, color, extra) {
   const w = max > 0 ? Math.max(1.5, value / max * 100) : 0;
   return `<div>
-    <div class="mb-0.5 flex items-baseline justify-between font-mono text-xs">
+    <div class="mb-0.5 flex items-baseline justify-between font-mono text-data">
       <span class="text-body">${label}</span>
       <span class="tabular-nums text-dim">${extra || fmtB(value)}</span></div>
     <div class="h-1.5 rounded bg-panel2">
@@ -301,7 +350,7 @@ function bar(label, value, max, color, extra) {
 
 async function loadOverview() {
   try {
-    const vv = await (await fetch('/api/venue-volume')).json();
+    const vv = await Overseer.requestJSON('/api/venue-volume');
     const latest = vv.latest.sort((a, b) => b.total - a.total);
     const max = latest[0]?.total || 0;
     const cexTotal = latest.filter(v => ['binance','bybit'].includes(v.exchange))
@@ -311,25 +360,30 @@ async function loadOverview() {
       all ? `cex ${ (cexTotal / all * 100).toFixed(1) }%` : '—';
     document.getElementById('vol-bars').innerHTML = latest.length
       ? latest.map(v => bar(v.exchange, v.total, max,
-          ['binance','bybit'].includes(v.exchange) ? '#FFB454' : '#7DD3FC')).join('')
-      : '<div class="font-mono text-xs text-dim">no sweep yet — first run lands at 00:37 UTC</div>';
-  } catch (e) { /* panel stays empty */ }
+          ['binance','bybit'].includes(v.exchange) ? CHART_THEME.accent : '#7DD3FC')).join('')
+      : '<div class="font-mono text-data text-dim">no sweep yet — first run lands at 00:37 UTC</div>';
+    dashboardState.ready('venue-volume');
+  } catch (error) {
+    dashboardState.error('Venue-volume summary', loadOverview, 'venue-volume');
+  }
 
   try {
-    const fu = await (await fetch('/api/funding')).json();
+    const fu = await Overseer.requestJSON('/api/funding');
     const oi = Object.entries(fu).map(([coin, rows]) => [coin,
         rows.reduce((s, r) => s + (r.oi_notional || 0), 0)])
       .filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
     const oimax = oi[0]?.[1] || 0;
     document.getElementById('oi-bars').innerHTML = oi.length
       ? oi.map(([c, v]) => bar(c, v, oimax, '#C4B5FD')).join('')
-      : '<div class="font-mono text-xs text-dim">no liquidity data yet</div>';
+      : '<div class="font-mono text-data text-dim">no liquidity data yet</div>';
+    dashboardState.ready('open-interest');
 
-  } catch (e) { /* panels stay empty */ }
+  } catch (error) {
+    dashboardState.error('Open-interest summary', loadOverview, 'open-interest');
+  }
 }
 
-loadOverview();
-setInterval(loadOverview, 120_000);
+Overseer.poll(loadOverview, 120);
 
 // ---- basis snapshot: same-venue spot/perp pairs, latest bar -----------------
 async function loadBasis() {
@@ -340,25 +394,29 @@ async function loadBasis() {
       pairs.push(s);
   }
   const shown = pairs.filter(p => p.exchange === 'binance').slice(0, 8);
-  const results = await Promise.all(shown.map(async p => {
-    const qs = new URLSearchParams({ spot_exchange: p.exchange, spot_symbol: p.symbol,
-      perp_exchange: p.exchange, perp_symbol: p.symbol, interval: '1m', limit: 1 });
-    const d = await (await fetch(`/api/basis?${qs}`)).json();
-    return d.length ? { symbol: p.symbol, bps: d[d.length-1].basis_pct * 100 } : null;
-  }));
-  const rows = results.filter(Boolean).sort((a, b) => Math.abs(b.bps) - Math.abs(a.bps));
-  document.getElementById('basis-rows').innerHTML = rows.length
-    ? rows.map(r => `
-      <div class="flex items-baseline justify-between rounded bg-panel2/60 px-2.5 py-1.5 font-mono text-xs">
-        <span class="text-body">${r.symbol}</span>
-        <span class="tabular-nums ${r.bps >= 0 ? 'text-gain' : 'text-loss'}">
-          ${r.bps >= 0 ? '+' : ''}${r.bps.toFixed(1)} bp</span></div>`).join('')
-    : '<div class="font-mono text-xs text-dim">no joined bars yet</div>';
+  try {
+    const results = await Promise.all(shown.map(async p => {
+      const qs = new URLSearchParams({ spot_exchange: p.exchange, spot_symbol: p.symbol,
+        perp_exchange: p.exchange, perp_symbol: p.symbol, interval: '1m', limit: 1 });
+      const d = await Overseer.requestJSON(`/api/basis?${qs}`);
+      return d.length ? { symbol: p.symbol, bps: d[d.length-1].basis_pct * 100 } : null;
+    }));
+    const rows = results.filter(Boolean).sort((a, b) => Math.abs(b.bps) - Math.abs(a.bps));
+    document.getElementById('basis-rows').innerHTML = rows.length
+      ? rows.map(r => `
+        <div class="flex items-baseline justify-between rounded bg-panel2/60 px-2.5 py-1.5 font-mono text-data">
+          <span class="text-body">${r.symbol}</span>
+          <span class="tabular-nums ${r.bps >= 0 ? 'text-gain' : 'text-loss'}">
+            ${r.bps >= 0 ? '+' : ''}${r.bps.toFixed(1)} bp</span></div>`).join('')
+      : '<div class="font-mono text-data text-dim">no joined bars yet</div>';
+    dashboardState.ready('basis-snapshot');
+  } catch (error) {
+    dashboardState.error('Basis snapshot', loadBasis, 'basis-snapshot');
+  }
 }
 
 
-loadBasis();
-setInterval(loadBasis, 120_000);
+Overseer.poll(loadBasis, 120);
 
 </script>
 {% endblock %}

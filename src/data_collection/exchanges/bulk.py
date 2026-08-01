@@ -105,14 +105,20 @@ class BulkScraper(BaseExchangeScraper):
         out: list[LiquiditySnapshot] = []
         for symbol in symbols:
             tick = await self.http.get_json(f"{self.base_url}/ticker/{symbol}")
+            current_rate = tick.get("fundingRate")
             out.append(
                 LiquiditySnapshot(
                     exchange=self.exchange,
                     symbol=symbol,
                     ts=now,
-                    open_interest=self._dec(tick.get("openInterest", 0)),   # base
-                    volume_24h=self._dec(tick.get("quoteVolume", 0)),       # quote
+                    open_interest=self._dec(tick.get("openInterest", 0)),
+                    volume_24h=self._dec(tick.get("quoteVolume", 0)),
                     mark_price=self._dec(tick.get("markPrice", 0)),
+                    index_price=self._dec(tick["oraclePrice"]),
+                    current_funding_rate=(
+                        self._dec(current_rate) if current_rate is not None else None
+                    ),
+                    funding_interval_hours=_FUNDING_INTERVAL_HOURS,
                 )
             )
         return out

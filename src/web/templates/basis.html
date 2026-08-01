@@ -1,67 +1,90 @@
 {% extends "base.html" %}
 {% block title %}basis · overseer{% endblock %}
+{#
+  SINGLE-CHART / DUAL-AXIS version, restored for side-by-side comparison.
+  The two-pane version is parked at:
+    scratchpad/basis.twopane.html
+  Everything else on this page (type scale, .select controls, drawn swatches,
+  radius) is current — the ONLY difference between the two files is how the
+  two measures share a plot, so the comparison is about that and nothing else.
+
+  Note this is NOT what `git checkout HEAD -- basis.html` would give you: the
+  committed version still uses text-xs / text-[11px] / text-xl, none of which
+  exist in the compiled CSS any more, so it would render unstyled.
+#}
 {% block content %}
-<div class="mb-5 flex flex-wrap items-end justify-between gap-4">
+<div class="mb-5 flex flex-wrap items-end justify-between gap-3 sm:gap-4">
   <div>
-    <div class="font-mono text-xs tracking-label uppercase text-phosphor">spot – perp spread</div>
-    <h1 class="mt-1 text-xl font-semibold text-body">Basis</h1>
+    <h1 class="text-title font-semibold text-body">Spot–perpetual basis</h1>
+    <p class="mt-1 text-data text-dim">Track price spread and funding carry for a selected pair.</p>
   </div>
-  <div class="flex flex-wrap items-center gap-2 font-mono text-xs">
-    <span class="text-dim">spot</span>
-    <select id="spot" class="rounded border border-line bg-panel px-3 py-1.5 text-body focus:border-phosphor focus:outline-none">
+  <div class="grid w-full grid-cols-[auto_minmax(0,1fr)] items-center gap-2 font-mono text-data sm:flex sm:w-auto">
+    <label for="spot" class="text-dim">Spot</label>
+    <select id="spot" class="select min-w-0 w-full sm:w-auto">
       {% for s in series if s.market_type == 'spot' %}
       <option value="{{ s.exchange }}|{{ s.symbol }}">{{ s.exchange }} · {{ s.symbol }}</option>
       {% endfor %}
     </select>
-    <span class="text-dim">perp</span>
-    <select id="perp" class="rounded border border-line bg-panel px-3 py-1.5 text-body focus:border-phosphor focus:outline-none">
+    <label for="perp" class="text-dim">Perp</label>
+    <select id="perp" class="select min-w-0 w-full sm:w-auto">
       {% for s in series if s.market_type == 'perp' %}
       <option value="{{ s.exchange }}|{{ s.symbol }}">{{ s.exchange }} · {{ s.symbol }}</option>
       {% endfor %}
     </select>
-    <select id="hours" class="rounded border border-line bg-panel px-3 py-1.5 text-body focus:border-phosphor focus:outline-none">
+    <label for="hours" class="text-dim">Window</label>
+    <select id="hours" class="select min-w-0 w-full sm:w-auto">
       <option value="24">24h</option>
       <option value="48" selected>48h</option>
       <option value="168">7d</option>
     </select>
   </div>
 </div>
-<div id="chart" class="h-[480px] w-full rounded-md border border-line bg-panel/50"></div>
+
+<div id="chart" class="h-[22rem] w-full rounded-md border border-line bg-panel/50 sm:h-[30rem]"></div>
+
 <div class="mt-2 flex flex-wrap items-baseline justify-between gap-2">
-  <p class="font-mono text-[11px] text-faint">
+  <p class="font-mono text-label text-faint">
     <span class="text-phosphor">—</span> basis % (right) ·
-    <span class="text-gain">▮</span><span class="text-loss">▮</span> funding APR of the perp leg (left) ·
+    <span class="inline-block h-2.5 w-1.5 align-middle bg-gain"></span><span
+          class="inline-block h-2.5 w-1.5 align-middle bg-loss"></span>
+    funding APR of the perp leg (left) ·
     long spot / short perp collects positive funding</p>
-  <p id="carry-stat" class="font-mono text-[11px] text-dim"></p>
+  <p id="carry-stat" class="font-mono text-label text-dim"></p>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/lightweight-charts.standalone.js') }}"></script>
+<script src="{{ url_for('static', filename='js/venues.js') }}"></script>
 <script>
 const chart = LightweightCharts.createChart(document.getElementById('chart'), {
-  layout: { background: { color: 'transparent' }, textColor: '#667089',
-            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' },
-  grid: { vertLines: { color: '#161D2E' }, horzLines: { color: '#161D2E' } },
-  crosshair: { vertLine: { color: '#3D465C' }, horzLine: { color: '#3D465C' } },
-  timeScale: { timeVisible: true, secondsVisible: false, borderColor: '#232B3D' },
-  rightPriceScale: { borderColor: '#232B3D' },
-  leftPriceScale: { visible: true, borderColor: '#232B3D' },
+  layout: { background: { color: 'transparent' }, textColor: CHART_THEME.text,
+            fontFamily: CHART_THEME.font, fontSize: 12 },
+  grid: { vertLines: { color: CHART_THEME.grid }, horzLines: { color: CHART_THEME.grid } },
+  crosshair: { vertLine: { color: CHART_THEME.crosshair },
+               horzLine: { color: CHART_THEME.crosshair } },
+  timeScale: { timeVisible: true, secondsVisible: false, borderColor: CHART_THEME.border },
+  rightPriceScale: { borderColor: CHART_THEME.border },
+  leftPriceScale: { visible: true, borderColor: CHART_THEME.border },
   autoSize: true,
 });
 const line = chart.addLineSeries({
-  color: '#FFB454', lineWidth: 2,
+  color: CHART_THEME.accent, lineWidth: 2,
   priceFormat: { type: 'custom', formatter: v => v.toFixed(4) + '%' },
 });
-const zero = chart.addLineSeries({ color: '#232B3D', lineWidth: 1,
+const zero = chart.addLineSeries({ color: CHART_THEME.zero, lineWidth: 1,
   priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
 const funding = chart.addHistogramSeries({
   priceScaleId: 'left',
   priceFormat: { type: 'custom', formatter: v => v.toFixed(1) + '%' },
   base: 0,
 });
+const basisFilters = Overseer.filterState('basis');
+const basisState = Overseer.pageState();
+let basisRequest = 0;
 
 async function load() {
+  const request = ++basisRequest;
   const [se, ss] = document.getElementById('spot').value.split('|');
   const [pe, ps] = document.getElementById('perp').value.split('|');
   const hours = document.getElementById('hours').value;
@@ -70,32 +93,49 @@ async function load() {
     interval: '1m', hours, limit: 10000,
   });
   const fqs = new URLSearchParams({ exchange: pe, symbol: ps, hours });
-  const [data, fdata] = await Promise.all([
-    (await fetch(`/api/basis?${qs}`)).json(),
-    (await fetch(`/api/funding-history?${fqs}`)).json(),
-  ]);
-  line.setData(data.map(d => ({ time: d.time, value: d.basis_pct })));
-  zero.setData(data.map(d => ({ time: d.time, value: 0 })));
-  funding.setData(fdata.map(f => ({
-    time: f.time, value: f.apr_pct,
-    color: f.apr_pct >= 0 ? 'rgba(74,222,128,.45)' : 'rgba(251,113,133,.45)',
-  })));
+  basisState.loading('Loading basis and funding history…');
+  try {
+    const [data, fdata] = await Promise.all([
+      Overseer.requestJSON(`/api/basis?${qs}`),
+      Overseer.requestJSON(`/api/funding-history?${fqs}`),
+    ]);
+    if (request !== basisRequest) return;
+    line.setData(data.map(d => ({ time: d.time, value: d.basis_pct })));
+    zero.setData(data.map(d => ({ time: d.time, value: 0 })));
+    funding.setData(fdata.map(f => ({
+      time: f.time, value: f.apr_pct,
+      color: f.apr_pct >= 0 ? 'rgba(100,214,154,.5)' : 'rgba(255,113,133,.5)',
+    })));
 
-  const stat = document.getElementById('carry-stat');
-  if (fdata.length) {
-    const cum = fdata.reduce((s2, f) => s2 + f.rate, 0) * 100;
-    const avg = fdata.reduce((s2, f) => s2 + f.apr_pct, 0) / fdata.length;
-    stat.innerHTML = `Σ funding over window
-      <span class="tabular-nums ${cum >= 0 ? 'text-gain' : 'text-loss'}">${cum >= 0 ? '+' : ''}${cum.toFixed(3)}%</span>
-      · avg <span class="tabular-nums ${avg >= 0 ? 'text-gain' : 'text-loss'}">${avg >= 0 ? '+' : ''}${avg.toFixed(1)}% APR</span>
-      · ${fdata.length} settlements`;
-  } else {
-    stat.textContent = 'no funding history for this perp in window';
+    const stat = document.getElementById('carry-stat');
+    if (!data.length) {
+      stat.textContent = 'no overlapping bars for this pair in window';
+      basisState.empty('No overlapping bars exist for this pair and window.', load);
+    } else if (fdata.length) {
+      const cum = fdata.reduce((s2, f) => s2 + f.rate, 0) * 100;
+      const avg = fdata.reduce((s2, f) => s2 + f.apr_pct, 0) / fdata.length;
+      stat.innerHTML = `Σ funding over window
+        <span class="tabular-nums ${cum >= 0 ? 'text-gain' : 'text-loss'}">${cum >= 0 ? '+' : ''}${cum.toFixed(3)}%</span>
+        · avg <span class="tabular-nums ${avg >= 0 ? 'text-gain' : 'text-loss'}">${avg >= 0 ? '+' : ''}${avg.toFixed(1)}% APR</span>
+        · ${fdata.length} settlements`;
+      basisState.ready();
+    } else {
+      stat.textContent = 'no funding history for this perp in window';
+      basisState.ready();
+    }
+    chart.timeScale().fitContent();
+  } catch (error) {
+    if (request === basisRequest) basisState.error('Basis data', load);
   }
-  chart.timeScale().fitContent();
 }
-for (const id of ['spot', 'perp', 'hours'])
-  document.getElementById(id).addEventListener('change', load);
+for (const id of ['spot', 'perp', 'hours']) {
+  const control = document.getElementById(id);
+  basisFilters.restoreSelect(control);
+  control.addEventListener('change', () => {
+    basisFilters.set(id, control.value);
+    load();
+  });
+}
 load();
 </script>
 {% endblock %}

@@ -122,19 +122,14 @@ class ReadStorage:
     # -- funding table (funding vs liquidity, per coin per venue) ---------------
 
     def funding_table(self) -> list[Row]:
-        """One row per (venue, perp): the latest settled funding — annualized so
-        hourly (HL) and 8h/4h (Binance) rates are comparable — with the latest
-        liquidity snapshot alongside.
+        """Latest venue-published funding with settled funding as the fallback.
 
-        Rows come back keyed by (exchange, symbol); grouping venue rows under a
-        canonical asset is the API layer's job via core.symbols.SymbolRegistry
-        (declared mapping — a string heuristic would mis-key e.g. "BTC-USD").
+        Current rates ride on the five-minute liquidity snapshot and are the
+        trader-facing value. Settled funding remains available in explicit
+        columns and continues to anchor cadence/history consumers.
 
         apr_pct = rate * (8760 / interval_hours) * 100
         oi_notional = open_interest (base units) * mark_price
-        oi_delta_pct = OI now vs the closest snapshot >= 24h old (liquidity
-        polls every 5min, so "ts = now - 24h" exactly rarely exists) — building
-        OI + rich funding is the squeeze setup the dislocation alerts can't see.
         """
         return self._fetch(
             """
@@ -146,7 +141,9 @@ class ReadStorage:
             ),
             latest_liq AS (
                 SELECT DISTINCT ON (exchange, symbol)
-                       exchange, symbol, ts, open_interest, volume_24h, mark_price
+                       exchange, symbol, ts, open_interest, volume_24h, mark_price,
+                       index_price, current_funding_rate, funding_interval_hours,
+                       next_funding_at, funding_premium
                 FROM liquidity
                 ORDER BY exchange, symbol, ts DESC
             ),
@@ -158,23 +155,46 @@ class ReadStorage:
                 ORDER BY exchange, symbol, ts DESC
             )
             SELECT
-                f.exchange, f.symbol,
+                COALESCE(f.exchange, l.exchange)                 AS exchange,
+                COALESCE(f.symbol, l.symbol)                     AS symbol,
                 f.ts                                            AS funding_ts,
-                f.rate, f.interval_hours,
-                f.rate * (8760.0 / f.interval_hours) * 100      AS apr_pct,
+                COALESCE(l.current_funding_rate, f.rate)         AS rate,
+                COALESCE(l.funding_interval_hours,
+                         f.interval_hours)                       AS interval_hours,
+                COALESCE(
+                    l.current_funding_rate
+                        * (8760.0 / l.funding_interval_hours) * 100,
+                    f.rate * (8760.0 / f.interval_hours) * 100
+                )                                               AS apr_pct,
+                CASE WHEN l.current_funding_rate IS NOT NULL
+                          AND l.funding_interval_hours IS NOT NULL
+                     THEN 'current' ELSE 'settled' END           AS rate_kind,
+                CASE WHEN l.current_funding_rate IS NOT NULL
+                          AND l.funding_interval_hours IS NOT NULL
+                     THEN l.ts ELSE f.ts END                     AS rate_ts,
+                f.rate                                          AS settled_rate,
+                f.interval_hours                                AS settled_interval_hours,
+                f.rate * (8760.0 / f.interval_hours) * 100      AS settled_apr_pct,
                 l.open_interest,
                 l.open_interest * l.mark_price                  AS oi_notional,
-                l.volume_24h, l.mark_price,
+                l.volume_24h, l.mark_price, l.index_price,
+                l.next_funding_at, l.funding_premium,
+                l.current_funding_rate,
+                l.funding_interval_hours                        AS current_interval_hours,
                 l.ts                                            AS liq_ts,
                 CASE WHEN a.oi_24h_ago IS NOT NULL AND a.oi_24h_ago != 0
                      THEN (l.open_interest - a.oi_24h_ago) / a.oi_24h_ago * 100
                      ELSE NULL END                               AS oi_delta_pct
             FROM latest_funding f
-            LEFT JOIN latest_liq l
+            FULL OUTER JOIN latest_liq l
               ON l.exchange = f.exchange AND l.symbol = f.symbol
             LEFT JOIN liq_24h_ago a
-              ON a.exchange = f.exchange AND a.symbol = f.symbol
-            ORDER BY f.symbol, f.exchange
+              ON a.exchange = COALESCE(f.exchange, l.exchange)
+             AND a.symbol = COALESCE(f.symbol, l.symbol)
+            WHERE (l.current_funding_rate IS NOT NULL
+                   AND l.funding_interval_hours IS NOT NULL)
+               OR f.rate IS NOT NULL
+            ORDER BY symbol, exchange
             """
         )
 
@@ -196,6 +216,112 @@ class ReadStorage:
             LIMIT %s
             """,
             (exchange, symbol, hours, limit),
+        )
+
+    def funding_series_multi(
+        self, symbols: list[str], hours: int = 48, limit: int = 5000
+    ) -> list[Row]:
+        """Settled funding history across every venue that lists any of the
+        given native symbols — the historic multi-venue overlay on the
+        funding page. Unscoped by exchange: the caller (api layer) already
+        resolved which native symbols belong to one asset via SymbolRegistry,
+        so any (exchange, symbol) match here IS a real series for that asset."""
+        if not symbols:
+            return []
+        return self._fetch(
+            """
+            SELECT exchange, symbol, ts, rate, interval_hours,
+                   (rate * (8760.0 / interval_hours) * 100)::numeric AS apr_pct
+            FROM funding_rates
+            WHERE symbol = ANY(%s)
+              AND ts >= now() - make_interval(hours => %s)
+            ORDER BY exchange, symbol, ts
+            LIMIT %s
+            """,
+            (symbols, hours, limit),
+        )
+
+    def liquidity_series_multi(
+        self, symbols: list[str], hours: int = 48,
+        bucket_minutes: int | None = None, limit: int = 20_000,
+    ) -> list[Row]:
+        """OI-notional history across every venue that lists any of the given
+        native symbols — the volume-style bar pane under the funding history
+        chart. Liquidity samples every 5min, so long windows at fine bucket
+        sizes get dense fast; bucket_minutes is caller-controlled (the funding
+        page exposes it directly) so a 30d view can ask for hourly/daily bars
+        instead of drowning in 5min noise. Falls back to an hours-based
+        default when the caller doesn't specify one."""
+        if not symbols:
+            return []
+        if bucket_minutes is None:
+            bucket_minutes = 5 if hours <= 48 else 30 if hours <= 168 else 120
+        bucket = f"{bucket_minutes} minutes"
+        return self._fetch(
+            """
+            SELECT exchange, symbol, time_bucket(%s::interval, ts) AS ts,
+                   avg(open_interest * mark_price) AS oi_notional
+            FROM liquidity
+            WHERE symbol = ANY(%s)
+              AND ts >= now() - make_interval(hours => %s)
+            GROUP BY exchange, symbol, 3
+            ORDER BY exchange, symbol, 3
+            LIMIT %s
+            """,
+            (bucket, symbols, hours, limit),
+        )
+
+    def trade_flow_multi(
+        self, symbols: list[str], hours: int = 48,
+        bucket_minutes: int | None = None, limit: int = 20_000,
+    ) -> list[Row]:
+        """Per-venue order flow for one canonical asset, from the trades_1m
+        continuous aggregate (migration 007) — never from the raw tape, which
+        is millions of rows a day.
+
+        Re-buckets the 1m aggregate up to `bucket_minutes`; the caller resolves
+        which venue-native symbols belong to one asset via SymbolRegistry, same
+        contract as funding_series_multi and liquidity_series_multi.
+
+        imbalance_pct is (buys - sells) / total volume: the directional
+        pressure measure, positive when takers are lifting offers. It is the
+        headline number for settlement behaviour, so it is computed here rather
+        than left to every caller to get right.
+        """
+        if not symbols:
+            return []
+        if bucket_minutes is None:
+            bucket_minutes = 1 if hours <= 6 else 5 if hours <= 48 else 60
+        bucket = f"{bucket_minutes} minutes"
+        return self._fetch(
+            """
+            SELECT exchange, symbol,
+                   time_bucket(%s::interval, bucket) AS ts,
+                   sum(trades)       AS trades,
+                   sum(volume)       AS volume,
+                   sum(buy_volume)   AS buy_volume,
+                   sum(sell_volume)  AS sell_volume,
+                   sum(notional)     AS notional,
+                   sum(large_trades) AS large_trades,
+                   sum(large_buy_volume)  AS large_buy_volume,
+                   sum(large_sell_volume) AS large_sell_volume,
+                   max(max_trade_notional) AS max_trade_notional,
+                   CASE WHEN sum(volume) > 0
+                        THEN (sum(buy_volume) - sum(sell_volume))
+                             / sum(volume) * 100
+                        ELSE NULL END AS imbalance_pct,
+                   CASE WHEN sum(large_buy_volume) + sum(large_sell_volume) > 0
+                        THEN (sum(large_buy_volume) - sum(large_sell_volume))
+                             / (sum(large_buy_volume) + sum(large_sell_volume)) * 100
+                        ELSE NULL END AS large_imbalance_pct
+            FROM trades_1m
+            WHERE symbol = ANY(%s)
+              AND bucket >= now() - make_interval(hours => %s)
+            GROUP BY exchange, symbol, 3
+            ORDER BY exchange, symbol, 3
+            LIMIT %s
+            """,
+            (bucket, symbols, hours, limit),
         )
 
     def fills_pulse(self) -> list[Row]:

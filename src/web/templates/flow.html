@@ -1,0 +1,370 @@
+{% extends "base.html" %}
+{% block title %}flow · overseer{% endblock %}
+
+{% block content %}
+{# Mobile is a normal scrolling document; the desktop workspace keeps its
+   viewport-height charts and internally scrolling detail pane. #}
+<div class="flex h-auto min-h-0 flex-col gap-3 overflow-visible md:h-[calc(100vh-9.5rem)] md:min-h-[34rem] md:overflow-hidden">
+
+  <div class="flex shrink-0 flex-wrap items-end gap-3 sm:gap-4">
+    <div>
+      <h1 class="text-title font-semibold text-body">Trade flow</h1>
+      <p class="mt-1 text-data text-dim">Compare taker pressure and large trades by venue.</p>
+    </div>
+    <div class="grid w-full grid-cols-2 items-end gap-2 sm:ml-auto sm:flex sm:w-auto">
+      <label class="flex flex-col gap-1">
+        <span class="font-mono text-label tracking-label uppercase text-faint">asset</span>
+        <select id="asset" class="select">
+          {% for a in assets %}<option value="{{ a }}">{{ a }}</option>{% endfor %}
+        </select>
+      </label>
+      <label class="flex flex-col gap-1">
+        <span class="font-mono text-label tracking-label uppercase text-faint">window</span>
+        <select id="hours" class="select">
+          <option value="3">3h</option><option value="6" selected>6h</option>
+          <option value="12">12h</option><option value="24">24h</option>
+        </select>
+      </label>
+    </div>
+  </div>
+
+  <div id="tiles" class="grid shrink-0 grid-cols-2 gap-2 sm:grid-cols-4"></div>
+
+  {# Filters in one row above the charts. Venue toggles affect everything;
+     the numeric ones narrow the detail table, because dropping buckets out of
+     a time series would read as "nothing traded" rather than "filtered". #}
+  <div class="flex shrink-0 flex-wrap items-center gap-2 rounded border border-line
+              bg-panel/40 px-3 py-2 sm:gap-x-4">
+    <span id="venue-filter-label" class="font-mono text-label tracking-label uppercase text-faint">venues</span>
+    <div id="venue-filters" class="scroll-thin flex w-full flex-nowrap items-center gap-1.5 overflow-x-auto pb-1 sm:w-auto sm:flex-wrap sm:overflow-visible sm:pb-0"
+         role="group" aria-labelledby="venue-filter-label"></div>
+    <label for="f-imb" class="font-mono text-label tracking-label uppercase text-faint sm:ml-2">|imbalance| ≥</label>
+    <select id="f-imb" class="select select-sm">
+      <option value="0">any</option><option value="10">10%</option>
+      <option value="25">25%</option><option value="50">50%</option>
+    </select>
+    <label for="f-lrg" class="font-mono text-label tracking-label uppercase text-faint">large ≥</label>
+    <select id="f-lrg" class="select select-sm">
+      <option value="0">any</option><option value="5">5</option>
+      <option value="20">20</option><option value="50">50</option>
+    </select>
+    <button id="table-toggle" aria-expanded="false" aria-controls="table-wrap"
+            class="w-full rounded border border-line bg-panel px-2 py-0.5 font-mono text-data text-dim hover:text-body sm:ml-auto sm:w-auto">
+      detail <span id="match-count" class="text-faint"></span>
+    </button>
+  </div>
+
+  <div class="relative h-[22rem] shrink-0 rounded border border-line bg-panel/40 md:h-auto md:min-h-[140px] md:flex-1">
+    <div class="absolute left-3 top-2 z-10 font-mono text-label tracking-label uppercase text-dim">
+      taker imbalance <span class="text-faint normal-case tracking-normal">(buys−sells)÷volume</span>
+    </div>
+    <div id="chart-imb" class="h-full w-full"></div>
+    <div id="tip-imb" class="pointer-events-none absolute z-20 hidden rounded border border-line
+                             bg-ink/95 px-2.5 py-1.5 font-mono text-label shadow-lg"></div>
+  </div>
+
+  <div class="relative h-[13rem] shrink-0 rounded border border-line bg-panel/40 md:h-[130px]">
+    <div class="absolute left-3 top-2 z-10 font-mono text-label tracking-label uppercase text-dim">
+      large trades <span class="text-faint normal-case tracking-normal">≥$10k notional</span>
+    </div>
+    <div id="chart-lrg" class="h-full w-full"></div>
+    <div id="tip-lrg" class="pointer-events-none absolute z-20 hidden rounded border border-line
+                             bg-ink/95 px-2.5 py-1.5 font-mono text-label shadow-lg"></div>
+  </div>
+
+  <div id="legend" class="scroll-thin flex shrink-0 flex-nowrap items-center gap-x-5 gap-y-1 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible sm:pb-0"></div>
+
+  {# Mobile gets a bounded two-axis table scroller; desktop keeps the pane
+     inside the fixed-height workspace. #}
+  <div id="table-wrap" class="scroll-thin hidden max-h-[28rem] shrink-0 overflow-auto
+                              rounded border border-line md:min-h-0 md:max-h-none md:basis-[36%]">
+    <table class="w-full min-w-[46rem] border-collapse font-mono text-data">
+      <caption class="sr-only">Order flow per venue per minute, filtered</caption>
+      <thead class="sticky top-0 z-10 bg-panel">
+        <tr class="border-b border-line text-left text-label tracking-label uppercase text-faint">
+          <th scope="col" class="px-3 py-1.5">time</th>
+          <th scope="col" class="px-3 py-1.5">venue</th>
+          <th scope="col" class="px-3 py-1.5 text-right">trades</th>
+          <th scope="col" class="px-3 py-1.5 text-right">volume</th>
+          <th scope="col" class="px-3 py-1.5 text-right">imbalance</th>
+          <th scope="col" class="px-3 py-1.5 text-right">large</th>
+          <th scope="col" class="px-3 py-1.5 text-right">large imb.</th>
+          <th scope="col" class="px-3 py-1.5 text-right">max trade</th>
+        </tr>
+      </thead>
+      <tbody id="table-body" class="text-dim"></tbody>
+    </table>
+  </div>
+
+  <p id="empty" class="hidden shrink-0 rounded border border-line bg-panel/40 px-4 py-4 text-center text-data text-dim">
+    No flow recorded for this asset yet — the websocket streams write
+    <code class="text-faint">trades_1m</code> once the scheduler is running.
+  </p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/lightweight-charts.standalone.js') }}"></script>
+<script src="{{ url_for('static', filename='js/venues.js') }}"></script>
+<script>
+// VENUE_COLORS / VENUE_ORDER / colorFor come from venues.js.
+const CHART_OPTS = {
+  layout: { background: { color: 'transparent' }, textColor: CHART_THEME.text,
+            fontFamily: CHART_THEME.font, fontSize: 12 },
+  grid: { vertLines: { color: CHART_THEME.grid }, horzLines: { color: CHART_THEME.grid } },
+  crosshair: { mode: 0,
+    vertLine: { color: CHART_THEME.crosshair, width: 1, style: 3, labelVisible: true },
+    horzLine: { color: CHART_THEME.crosshair, width: 1, style: 3, labelVisible: true } },
+  timeScale: { timeVisible: true, secondsVisible: false, borderColor: CHART_THEME.border },
+  rightPriceScale: { borderColor: CHART_THEME.border, scaleMargins: { top: 0.18, bottom: 0.08 } },
+  handleScale: { axisPressedMouseMove: false },
+};
+
+const imbChart = LightweightCharts.createChart(document.getElementById('chart-imb'), CHART_OPTS);
+const lrgChart = LightweightCharts.createChart(document.getElementById('chart-lrg'), CHART_OPTS);
+const zeroLine = imbChart.addLineSeries({ color: CHART_THEME.zero, lineWidth: 1,
+  priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+
+const flowFilters = Overseer.filterState('flow');
+let imbSeries = {}, lrgSeries = {};
+let data = { series: {}, settlements: {} };
+let hidden = new Set(flowFilters.getList('venues'));
+const flowState = Overseer.pageState();
+let flowRequest = 0;
+
+const fmtVol = (v) => {
+  if (v == null) return '—';
+  const a = Math.abs(v);
+  if (a >= 1e6) return (v / 1e6).toFixed(2) + 'M';
+  if (a >= 1e3) return (v / 1e3).toFixed(2) + 'k';
+  return v.toFixed(a >= 1 ? 2 : 4);
+};
+const fmtUsd = (v) => v == null ? '—' : '$' + fmtVol(v);
+const fmtPct = (v) => v == null ? '—' : (v >= 0 ? '+' : '') + v.toFixed(1) + '%';
+const hhmm = (t) => new Date(t * 1000).toISOString().slice(11, 16);
+
+const activeVenues = () =>
+  VENUE_ORDER.filter(v => data.series[v] && data.series[v].length && !hidden.has(v));
+
+async function load() {
+  const request = ++flowRequest;
+  const asset = document.getElementById('asset').value;
+  const hours = document.getElementById('hours').value;
+  flowState.loading('Loading streamed trade flow…');
+  try {
+    const next = await Overseer.requestJSON(
+      `/api/trade-flow?asset=${encodeURIComponent(asset)}&hours=${hours}`);
+    if (request !== flowRequest) return;
+    data = next;
+    data.series = data.series || {};
+    renderFilters();
+    render();
+    const hasRows = Object.values(data.series).some(rows => rows.length);
+    if (hasRows) flowState.ready();
+    else flowState.empty('No trade-flow buckets exist for this asset and window.', load);
+  } catch (error) {
+    if (request === flowRequest) flowState.error('Trade flow', load);
+  }
+}
+
+function renderFilters() {
+  // A venue keeps its colour whether or not it is selected, so toggling never
+  // reassigns hues to the survivors.
+  const present = VENUE_ORDER.filter(v => data.series[v] && data.series[v].length);
+  document.getElementById('venue-filters').innerHTML = present.map(v => {
+    const off = hidden.has(v);
+    return `<button data-venue="${v}" aria-pressed="${!off}"
+      class="venue-chip flex items-center gap-1.5 rounded border px-1.5 py-0.5 font-mono text-label
+             ${off ? 'border-line text-faint' : 'border-line bg-panel2 text-body'}">
+      <span class="inline-block h-2 w-2 rounded-full ${off ? 'opacity-30' : ''}"
+            style="background:${colorFor(v)}"></span>${v}</button>`;
+  }).join('') || '<span class="font-mono text-label text-faint">none streaming</span>';
+  document.querySelectorAll('.venue-chip').forEach(b => b.onclick = () => {
+    const v = b.dataset.venue;
+    hidden.has(v) ? hidden.delete(v) : hidden.add(v);
+    flowFilters.setList('venues', hidden);
+    renderFilters(); render();
+  });
+}
+
+function clearSeries() {
+  Object.values(imbSeries).forEach(s => imbChart.removeSeries(s));
+  Object.values(lrgSeries).forEach(s => lrgChart.removeSeries(s));
+  imbSeries = {}; lrgSeries = {};
+}
+
+function render() {
+  clearSeries();
+  const venues = activeVenues();
+  document.getElementById('empty').classList.toggle('hidden', venues.length > 0);
+
+  for (const venue of venues) {
+    const rows = data.series[venue], color = colorFor(venue);
+    imbSeries[venue] = imbChart.addLineSeries({
+      color, lineWidth: 2, priceLineVisible: false, title: venue,
+      lastValueVisible: true, crosshairMarkerRadius: 4,
+      priceFormat: { type: 'custom', formatter: v => v.toFixed(0) + '%' },
+    });
+    imbSeries[venue].setData(rows.filter(d => d.imbalance_pct != null)
+      .map(d => ({ time: d.time, value: d.imbalance_pct })));
+
+    lrgSeries[venue] = lrgChart.addLineSeries({
+      color, lineWidth: 2, priceLineVisible: false, title: venue,
+      lastValueVisible: true, crosshairMarkerRadius: 4,
+      priceFormat: { type: 'custom', formatter: v => v.toFixed(0) },
+    });
+    lrgSeries[venue].setData(rows.map(d => ({ time: d.time, value: d.large_trades })));
+
+    const marks = (data.settlements || {})[venue] || [];
+    if (marks.length) imbSeries[venue].setMarkers(marks.map(t => ({
+      time: t, position: 'inBar', color, shape: 'arrowDown', size: 0, text: '⋮' })));
+  }
+  // keep the zero baseline spanning whatever is visible
+  const anyRows = venues.length ? data.series[venues[0]] : [];
+  zeroLine.setData(anyRows.map(d => ({ time: d.time, value: 0 })));
+
+  renderTiles(venues);
+  renderLegend(venues);
+  renderTable(venues);
+  imbChart.timeScale().fitContent();
+  lrgChart.timeScale().fitContent();
+}
+
+function renderTiles(venues) {
+  let vol = 0, large = 0, maxTrade = 0, buy = 0, sell = 0;
+  for (const v of venues) for (const d of data.series[v]) {
+    vol += d.volume || 0; large += d.large_trades || 0;
+    buy += d.buy_volume || 0; sell += d.sell_volume || 0;
+    maxTrade = Math.max(maxTrade, d.max_trade_notional || 0);
+  }
+  const imb = (buy + sell) ? (buy - sell) / (buy + sell) * 100 : null;
+  const tone = imb == null ? 'text-body' : imb >= 0 ? 'text-gain' : 'text-loss';
+  const tiles = [['window volume', fmtVol(vol), 'text-body'],
+                 ['net imbalance', fmtPct(imb), tone],
+                 ['large trades', large.toLocaleString(), 'text-body'],
+                 ['largest trade', fmtUsd(maxTrade), 'text-phosphor']];
+  document.getElementById('tiles').innerHTML = tiles.map(([l, v, c]) => `
+    <div class="rounded border border-line bg-panel/40 px-3 py-1.5">
+      <div class="font-mono text-label tracking-label uppercase text-faint">${l}</div>
+      <div class="font-mono text-hero tabular-nums ${c}">${v}</div>
+    </div>`).join('');
+}
+
+function renderLegend(venues) {
+  // Present for >= 2 series and direct-labelled with current values, so the
+  // reading never depends on telling two hues apart.
+  document.getElementById('legend').innerHTML = venues.map(v => {
+    const rows = data.series[v], d = rows[rows.length - 1] || {};
+    return `<span class="flex items-center gap-2">
+      <span class="inline-block h-0.5 w-4 rounded" style="background:${colorFor(v)}"></span>
+      <span class="font-mono text-data text-body">${v}</span>
+      <span class="font-mono text-label tabular-nums text-dim">
+        ${fmtPct(d.imbalance_pct)} · ${d.large_trades ?? 0} large</span></span>`;
+  }).join('') || '<span class="font-mono text-data text-faint">all venues hidden</span>';
+}
+
+function matchingRows(venues) {
+  const minImb = +document.getElementById('f-imb').value;
+  const minLrg = +document.getElementById('f-lrg').value;
+  const out = [];
+  for (const v of venues) for (const d of data.series[v]) {
+    if (Math.abs(d.imbalance_pct ?? 0) < minImb) continue;
+    if ((d.large_trades || 0) < minLrg) continue;
+    out.push([v, d]);
+  }
+  out.sort((a, b) => b[1].time - a[1].time);
+  return out;
+}
+
+function renderTable(venues) {
+  const rows = matchingRows(venues);
+  document.getElementById('match-count').textContent =
+    rows.length ? `(${rows.length})` : '(0)';
+  document.getElementById('table-body').innerHTML = rows.slice(0, 400).map(([v, d]) => `
+    <tr class="border-b border-line/50">
+      <td class="px-3 py-1 text-faint">${hhmm(d.time)}</td>
+      <td class="px-3 py-1"><span class="inline-block h-2 w-2 rounded-full align-middle"
+            style="background:${colorFor(v)}"></span>
+        <span class="ml-2 align-middle text-body">${v}</span></td>
+      <td class="px-3 py-1 text-right tabular-nums">${d.trades}</td>
+      <td class="px-3 py-1 text-right tabular-nums">${fmtVol(d.volume)}</td>
+      <td class="px-3 py-1 text-right tabular-nums ${d.imbalance_pct >= 0 ? 'text-gain' : 'text-loss'}">
+        ${fmtPct(d.imbalance_pct)}</td>
+      <td class="px-3 py-1 text-right tabular-nums">${d.large_trades}</td>
+      <td class="px-3 py-1 text-right tabular-nums">${fmtPct(d.large_imbalance_pct)}</td>
+      <td class="px-3 py-1 text-right tabular-nums">${fmtUsd(d.max_trade_notional)}</td>
+    </tr>`).join('') ||
+    `<tr><td colspan="8" class="px-3 py-6 text-center text-faint">no buckets match these filters</td></tr>`;
+}
+
+function wireTooltip(chart, tipId, seriesMap, format) {
+  const tip = document.getElementById(tipId);
+  chart.subscribeCrosshairMove(param => {
+    if (!param.time || !param.point) { tip.classList.add('hidden'); return; }
+    const lines = [];
+    for (const venue of VENUE_ORDER) {
+      const s = seriesMap[venue]; if (!s) continue;
+      const v = param.seriesData.get(s); if (v == null) continue;
+      lines.push(`<div class="flex items-center gap-2">
+        <span class="inline-block h-0.5 w-3 rounded" style="background:${colorFor(venue)}"></span>
+        <span class="text-dim">${venue}</span>
+        <span class="ml-auto tabular-nums text-body">${format(v.value)}</span></div>`);
+    }
+    if (!lines.length) { tip.classList.add('hidden'); return; }
+    tip.innerHTML = `<div class="mb-1 text-faint">${hhmm(param.time)} UTC</div>
+                     <div class="min-w-[9rem] space-y-0.5">${lines.join('')}</div>`;
+    tip.classList.remove('hidden');
+    const box = tip.getBoundingClientRect();
+    const host = tip.parentElement.clientWidth;
+    tip.style.left = Math.min(param.point.x + 14, host - box.width - 8) + 'px';
+    tip.style.top = Math.max(6, param.point.y - box.height - 10) + 'px';
+  });
+}
+wireTooltip(imbChart, 'tip-imb', imbSeries, v => (v >= 0 ? '+' : '') + v.toFixed(1) + '%');
+wireTooltip(lrgChart, 'tip-lrg', lrgSeries, v => v.toFixed(0));
+
+let syncing = false;
+function sync(from, to) {
+  from.timeScale().subscribeVisibleLogicalRangeChange(r => {
+    if (syncing || !r) return;
+    syncing = true; to.timeScale().setVisibleLogicalRange(r); syncing = false;
+  });
+}
+sync(imbChart, lrgChart); sync(lrgChart, imbChart);
+
+// Each chart container is sized by flex, so observe both and push the computed
+// box into the chart — lightweight-charts needs explicit pixels.
+for (const [chart, id] of [[imbChart, 'chart-imb'], [lrgChart, 'chart-lrg']]) {
+  const el = document.getElementById(id);
+  new ResizeObserver(() => chart.applyOptions({ width: el.clientWidth, height: el.clientHeight }))
+    .observe(el);
+}
+
+for (const id of ['asset', 'hours', 'f-imb', 'f-lrg']) {
+  flowFilters.restoreSelect(document.getElementById(id));
+}
+document.getElementById('asset').onchange = event => {
+  flowFilters.set('asset', event.target.value);
+  load();
+};
+document.getElementById('hours').onchange = event => {
+  flowFilters.set('hours', event.target.value);
+  load();
+};
+document.getElementById('f-imb').onchange = event => {
+  flowFilters.set('f-imb', event.target.value);
+  renderTable(activeVenues());
+};
+document.getElementById('f-lrg').onchange = event => {
+  flowFilters.set('f-lrg', event.target.value);
+  renderTable(activeVenues());
+};
+document.getElementById('table-toggle').onclick = (e) => {
+  const wrap = document.getElementById('table-wrap');
+  wrap.classList.toggle('hidden');
+  e.currentTarget.classList.toggle('text-body', !wrap.classList.contains('hidden'));
+  e.currentTarget.setAttribute('aria-expanded', String(!wrap.classList.contains('hidden')));
+};
+Overseer.poll(load, 60);
+</script>
+{% endblock %}
