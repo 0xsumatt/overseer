@@ -5,13 +5,20 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from itertools import combinations
 
 from core.enums import MarketType, QuoteCurrency
-from core.models import TopOfBook
+from core.models import OrderBookSnapshot, TopOfBook
 from core.symbols import SymbolRegistry
 from data_collection.base import BaseExchangeScraper, Capability
 from scheduler.notify import DiscordNotifier, trade_link
-from scheduler.targets import FillsTarget, FundingTarget, LiquidityTarget, ScrapeTarget
+from scheduler.targets import (
+    FillsTarget,
+    FundingTarget,
+    LiquidityTarget,
+    OrderBookTarget,
+    ScrapeTarget,
+)
 from storage.writers import Storage
 
 log = logging.getLogger("scheduler")
@@ -45,6 +52,30 @@ async def scrape_ohlcv(
         log.exception("scrape failed: %s", target.job_id)
         return JobOutcome(target.job_id, "fail", 0, 0, repr(exc), ran_at)
     return JobOutcome(target.job_id, "ok", len(records), new_rows, None, ran_at)
+
+
+async def scrape_orderbook(
+    scraper: BaseExchangeScraper, storage: Storage, target: OrderBookTarget
+) -> JobOutcome:
+    ran_at = datetime.now(timezone.utc)
+    try:
+        book = await scraper.fetch_bbo(target.symbol)
+        snapshot = OrderBookSnapshot(
+            exchange=book.exchange,
+            market_type=scraper.market_type_for(target.symbol),
+            symbol=book.symbol,
+            quote_currency=book.quote_currency,
+            ts=book.ts,
+            bid_price=book.bid_price,
+            bid_size=book.bid_size,
+            ask_price=book.ask_price,
+            ask_size=book.ask_size,
+        )
+        new_rows = await storage.write_orderbook_snapshots([snapshot])
+    except Exception as exc:
+        log.exception("orderbook scrape failed: %s", target.job_id)
+        return JobOutcome(target.job_id, "fail", 0, 0, repr(exc), ran_at)
+    return JobOutcome(target.job_id, "ok", 1, new_rows, None, ran_at)
 
 
 async def scrape_fills(
@@ -94,6 +125,13 @@ async def _record_and_alert(
 
 async def run_ohlcv(scraper, storage, notifier, state, target: ScrapeTarget) -> None:
     outcome = await scrape_ohlcv(scraper, storage, target)
+    await _record_and_alert(outcome, storage, notifier, state)
+
+
+async def run_orderbook(
+    scraper, storage, notifier, state, target: OrderBookTarget
+) -> None:
+    outcome = await scrape_orderbook(scraper, storage, target)
     await _record_and_alert(outcome, storage, notifier, state)
 
 
@@ -243,6 +281,78 @@ class FundingLeg:
     venue: str | None
     symbol: str
     apr: float
+    ts: datetime
+    next_funding_at: datetime | None
+
+
+@dataclass(frozen=True)
+class _PendingDislocation:
+    pair: tuple[str, str, str, str, datetime | None, datetime | None]
+    first_seen: datetime
+    last_seen: datetime
+    observations: int
+
+
+class DislocationConfirmation:
+    """Require a spread to survive distinct fresh snapshots before alerting."""
+
+    def __init__(
+        self,
+        confirm_for: timedelta,
+        *,
+        min_observations: int = 3,
+    ) -> None:
+        if confirm_for <= timedelta(0):
+            raise ValueError("spread confirmation duration must be positive")
+        if min_observations < 2:
+            raise ValueError("spread confirmation needs at least two observations")
+        self.confirm_for = confirm_for
+        self.min_observations = min_observations
+        self._pending: dict[str, _PendingDislocation] = {}
+
+    @property
+    def minutes(self) -> float:
+        return self.confirm_for.total_seconds() / 60
+
+    def observe(self, asset: str, hi: FundingLeg, lo: FundingLeg) -> bool:
+        pair = (
+            hi.exchange,
+            hi.symbol,
+            lo.exchange,
+            lo.symbol,
+            hi.next_funding_at,
+            lo.next_funding_at,
+        )
+        observed_at = min(hi.ts, lo.ts)
+        pending = self._pending.get(asset)
+        if pending is None or pending.pair != pair:
+            self._pending[asset] = _PendingDislocation(
+                pair, observed_at, observed_at, 1
+            )
+            return False
+        if observed_at <= pending.last_seen:
+            return False
+        pending = _PendingDislocation(
+            pair,
+            pending.first_seen,
+            observed_at,
+            pending.observations + 1,
+        )
+        self._pending[asset] = pending
+        confirmed = (
+            pending.observations >= self.min_observations
+            and observed_at - pending.first_seen >= self.confirm_for
+        )
+        if confirmed:
+            self._pending.pop(asset, None)
+        return confirmed
+
+    def reset(self, asset: str) -> None:
+        self._pending.pop(asset, None)
+
+    def retain(self, assets: set[str]) -> None:
+        for asset in self._pending.keys() - assets:
+            self._pending.pop(asset, None)
 
 
 class UsdcUsdtQuoteCache:
@@ -416,6 +526,32 @@ async def _execution_details(
     return "\n\n" + "\n\n".join(lines)
 
 
+def _best_aligned_dislocation(
+    venues: list[FundingLeg],
+    now: datetime,
+    *,
+    tolerance: timedelta = timedelta(minutes=1),
+) -> tuple[FundingLeg, FundingLeg, float] | None:
+    """Highest funding spread whose two next payments occur together."""
+    candidates: list[tuple[FundingLeg, FundingLeg, float]] = []
+    for first, second in combinations(venues, 2):
+        first_settlement = first.next_funding_at
+        second_settlement = second.next_funding_at
+        if (
+            first_settlement is None
+            or second_settlement is None
+            or first_settlement <= now
+            or second_settlement <= now
+            or abs(first_settlement - second_settlement) > tolerance
+        ):
+            continue
+        hi, lo = (
+            (first, second) if first.apr >= second.apr else (second, first)
+        )
+        candidates.append((hi, lo, hi.apr - lo.apr))
+    return max(candidates, key=lambda candidate: candidate[2], default=None)
+
+
 async def check_dislocations(
     storage: Storage,
     notifier: DiscordNotifier,
@@ -424,15 +560,17 @@ async def check_dislocations(
     threshold_apr: float,
     scrapers: dict[str, BaseExchangeScraper],
     fx_cache: UsdcUsdtQuoteCache,
+    confirmation: DislocationConfirmation,
 ) -> None:
-    """Alert on fresh current funding, enriching new crossings with live BBOs."""
+    """Alert only after current funding stays wide across fresh snapshots."""
     try:
         rows = await storage.latest_current_funding_rows()
     except Exception:
         log.exception("current funding dislocation check failed")
         return
 
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=30)
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(minutes=30)
     legs: dict[str, list[FundingLeg]] = {}
     for row in rows:
         if row["ts"] < cutoff:
@@ -443,29 +581,55 @@ async def check_dislocations(
             registry, scrapers, asset, row["exchange"], row["symbol"]
         )
         legs.setdefault(asset, []).append(
-            FundingLeg(row["exchange"], venue, row["symbol"], apr)
+            FundingLeg(
+                row["exchange"],
+                venue,
+                row["symbol"],
+                apr,
+                row["ts"],
+                row["next_funding_at"],
+            )
         )
 
+    pending_assets: set[str] = set()
     for asset, venues in sorted(legs.items()):
-        if len(venues) < 2:
-            continue
-        hi = max(venues, key=lambda leg: leg.apr)
-        lo = min(venues, key=lambda leg: leg.apr)
-        spread = hi.apr - lo.apr
         key = f"dislocation:{asset}"
+        aligned = _best_aligned_dislocation(venues, now)
+        if aligned is None:
+            confirmation.reset(asset)
+            if state.get(key) == "wide":
+                state[key] = "ok"
+                await notifier.digest(
+                    f"↩️ **{asset}** funding opportunity ended: "
+                    "next settlements no longer align"
+                )
+            continue
+        hi, lo, spread = aligned
         prev = state.get(key, "ok")
         if spread >= threshold_apr and prev != "wide":
+            pending_assets.add(asset)
+            if not confirmation.observe(asset, hi, lo):
+                continue
             state[key] = "wide"
             execution = await _execution_details(hi, lo, scrapers, fx_cache)
+            assert hi.next_funding_at is not None
+            assert lo.next_funding_at is not None
+            settlement = max(hi.next_funding_at, lo.next_funding_at)
             await notifier.digest(
-                f"📈 **{asset}** current funding spread {spread:.1f}% APR"
+                f"📈 **{asset}** current funding spread {spread:.1f}% APR "
+                f"confirmed for {confirmation.minutes:g}m · "
+                f"settles {settlement:%d %b %H:%M UTC}"
                 + execution
             )
-        elif spread < threshold_apr * 0.8 and prev == "wide":
-            state[key] = "ok"
-            await notifier.digest(
-                f"↩️ **{asset}** current funding spread narrowed to {spread:.1f}% APR"
-            )
+        else:
+            confirmation.reset(asset)
+            if spread < threshold_apr * 0.8 and prev == "wide":
+                state[key] = "ok"
+                await notifier.digest(
+                    f"↩️ **{asset}** current funding spread narrowed to "
+                    f"{spread:.1f}% APR"
+                )
+    confirmation.retain(pending_assets)
 
 
 async def post_digest(storage: Storage, notifier: DiscordNotifier) -> None:

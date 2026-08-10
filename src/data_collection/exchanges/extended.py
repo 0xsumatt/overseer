@@ -18,7 +18,6 @@ _INTERVALS: dict[Timeframe, str] = {
 
 
 def _from_ts_flexible(ts: int | float) -> datetime:
-    """Docs declare ms but at least one example shows seconds — parse both."""
     if ts > 1e11:
         ts = ts / 1000
     return datetime.fromtimestamp(ts, tz=timezone.utc)
@@ -35,7 +34,7 @@ def _unwrap(payload: Any) -> Any:
 class ExtendedScraper(BaseExchangeScraper):
     exchange: ClassVar[Exchange] = Exchange.EXTENDED
     base_url: ClassVar[str] = "https://api.starknet.extended.exchange"
-    market_type: ClassVar[MarketType] = MarketType.PERP        # default/primary
+    market_type: ClassVar[MarketType] = MarketType.PERP 
     quote_currency: ClassVar[QuoteCurrency] = QuoteCurrency.USDC
     capabilities: ClassVar[frozenset[Capability]] = frozenset(
         {
@@ -49,11 +48,10 @@ class ExtendedScraper(BaseExchangeScraper):
 
     def _build_http(self) -> HttpClient:
         return HttpClient(
-            limiter=RateLimiter.per_minute(600, burst=60),     # docs: 1000/min default
+            limiter=RateLimiter.per_minute(600, burst=60),     
             default_headers={"User-Agent": "overseer/0.1"},
         )
 
-    # -- symbols: identity; type derivable from the naming convention ---------------
 
     def to_symbol(self, native: str) -> str:
         return native
@@ -63,7 +61,6 @@ class ExtendedScraper(BaseExchangeScraper):
 
     @classmethod
     def market_type_for(cls, symbol: str) -> MarketType:
-        # perps are "BTC-USD"; spot markets are "BTCSPOT"
         return MarketType.SPOT if symbol.upper().endswith("SPOT") else MarketType.PERP
 
     async def fetch_bbo(self, symbol: str) -> TopOfBook:
@@ -86,8 +83,6 @@ class ExtendedScraper(BaseExchangeScraper):
             ask_price=self._dec(ask["price"]),
             ask_size=self._dec(ask["qty"]),
         )
-
-    # -- OHLCV (no startTime param: filter client-side for resume) ------------------
 
     async def fetch_ohlcv(
         self, symbol: str, interval: Timeframe, since: datetime, *, limit: int = 1000
@@ -120,10 +115,9 @@ class ExtendedScraper(BaseExchangeScraper):
                     volume=self._dec(c.get("v", 0)),
                 )
             )
-        out.sort(key=lambda b: b.ts)          # API is newest-first
+        out.sort(key=lambda b: b.ts)         
         return out
 
-    # -- funding: applied hourly ------------------------------------------------------
 
     async def fetch_funding(
         self, symbol: str, since: datetime, *, limit: int = 1000
@@ -149,8 +143,6 @@ class ExtendedScraper(BaseExchangeScraper):
         ]
         out.sort(key=lambda r: r.ts)
         return out
-
-    # -- liquidity: the markets call carries everything --------------------------------
 
     async def fetch_liquidity(
         self, symbols: Sequence[str]
@@ -189,7 +181,6 @@ class ExtendedScraper(BaseExchangeScraper):
             )
         return out
 
-    # -- venue volume: same markets call, no market filter, ALL types summed -----
 
     async def fetch_venue_volume(self) -> dict:
         payload = await self.http.get_json(f"{self.base_url}/api/v1/info/markets")

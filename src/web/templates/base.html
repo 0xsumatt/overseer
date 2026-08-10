@@ -37,7 +37,6 @@
   </style>
 </head>
 <body class="flex min-h-full flex-col bg-ink text-body font-sans antialiased">
-  {% if current_user.is_authenticated %}
   {% set links = [('pages.dashboard','charts'), ('pages.basis','basis'),
                   ('pages.funding','funding'), ('pages.flow','flow'),
                   ('pages.wallets','wallets')] %}
@@ -67,7 +66,7 @@
                   {{ 'border-phosphor text-body' if request.endpoint == endpoint
                      else 'border-transparent text-dim hover:text-body' }}">{{ label }}</a>
         {% endfor %}
-        {% if current_user.can_view_internal %}
+        {% if current_user.is_authenticated and current_user.can_view_internal %}
         <a href="{{ url_for('pages.health') }}"
            {% if request.endpoint == 'pages.health' %}aria-current="page"{% endif %}
            class="flex h-12 items-center border-b-2 pt-px font-mono text-data tracking-label uppercase -mb-px
@@ -79,9 +78,11 @@
       <div class="ml-auto hidden shrink-0 items-center gap-5 xl:flex">
         {{ freshness_indicator() }}
         <span data-utc-clock class="shrink-0 whitespace-nowrap font-mono text-data text-faint tabular-nums"></span>
+        {% if current_user.is_authenticated %}
         <span class="max-w-48 truncate whitespace-nowrap font-mono text-data text-dim">{{ current_user.email }}</span>
         <a href="{{ url_for('pages.logout') }}"
            class="shrink-0 whitespace-nowrap font-mono text-data text-dim hover:text-loss">log out</a>
+        {% endif %}
       </div>
       <div class="ml-auto xl:hidden">{{ freshness_indicator() }}</div>
       <button id="mobile-menu-trigger" type="button" aria-expanded="false"
@@ -101,7 +102,7 @@
                   {{ 'bg-panel2 text-body' if request.endpoint == endpoint
                      else 'text-dim hover:bg-panel2 hover:text-body' }}">{{ label }}</a>
         {% endfor %}
-        {% if current_user.can_view_internal %}
+        {% if current_user.is_authenticated and current_user.can_view_internal %}
         <a href="{{ url_for('pages.health') }}"
            {% if request.endpoint == 'pages.health' %}aria-current="page"{% endif %}
            class="flex min-h-11 items-center rounded px-3 font-mono text-data tracking-label uppercase
@@ -111,16 +112,17 @@
       </div>
       <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-line/60 px-3 pt-3">
         <span data-utc-clock class="font-mono text-data text-faint tabular-nums"></span>
+        {% if current_user.is_authenticated %}
         <span class="min-w-0 flex-1 truncate font-mono text-data text-dim">{{ current_user.email }}</span>
         <a href="{{ url_for('pages.logout') }}"
            class="flex min-h-11 items-center font-mono text-data text-dim hover:text-loss">log out</a>
+        {% endif %}
       </div>
     </div>
   </nav>
   <div id="stale-banner" role="status" aria-live="polite" aria-atomic="true"
        class="hidden border-b border-phosphor/40 bg-phosphor/10 px-4 py-1.5
               text-center font-mono text-label text-phosphor sm:px-6"></div>
-  {% endif %}
   <main class="mx-auto w-full min-w-0 max-w-6xl flex-1 px-4 py-5 sm:px-6 sm:py-8">
     {% with messages = get_flashed_messages() %}
       {% for m in messages %}
@@ -181,9 +183,7 @@
       if (event.matches) setMobileMenu(false);
     });
   </script>
-  {% if current_user.is_authenticated %}
   <script>Overseer.startFreshness();</script>
-  {% endif %}
   {% block scripts %}{% endblock %}
 </body>
 </html>

@@ -1,45 +1,3 @@
-"""Supervised websocket transport for streaming venue feeds.
-
-The streaming counterpart to http.py, and the same bargain: this module is the
-single place that knows about picows, so swapping the websocket library changes
-this file and nothing else. Venue streams never touch a socket — they declare
-what to subscribe to and how to parse a payload (see streams.py).
-
-What it folds in, so no venue re-implements it:
-
-  * **reconnect supervision** — exponential backoff with full jitter, the same
-    posture HttpClient uses for retries, running until explicitly stopped;
-  * **subscription replay** — a reconnect is invisible to the venue adapter;
-    its subscribe frames are re-sent on every fresh connection;
-  * **liveness accounting** — separately tracking "the socket is alive" and
-    "the subscription is delivering", which are NOT the same thing (see below).
-
-Two liveness signals, deliberately distinct
--------------------------------------------
-`last_frame_at` advances on ANY frame including pongs; `last_payload_at` only
-on data frames. A feed that is connected, answering pings, and silently
-delivering nothing — a dropped subscription, a venue that quietly stopped
-publishing — looks perfectly healthy on the first signal and dead on the
-second. That combination is the whole reason a poll-shaped health model
-doesn't work for streams, so both are exposed and the supervisor alerts on the
-second (see scheduler/streams.py).
-
-picows specifics worth knowing before editing
----------------------------------------------
-* `WSListener` callbacks are **synchronous** — that is where picows' speed
-  comes from, and it is a hard constraint on everything downstream: no awaits,
-  no database writes, no slow parsing inside `on_ws_frame`. The callback
-  parses and drops records into an in-memory buffer; an async task drains it
-  (storage/buffer.py). Blocking here stalls the read loop and drops frames.
-* Ping/pong is the library's job, not ours: `enable_auto_ping` sends pings when
-  idle and drops the connection if a reply never arrives, which surfaces to us
-  as a normal disconnect and therefore a normal reconnect.
-* `frame.get_payload_as_bytes()` returns a copy, so it is safe to hand onward.
-  `get_payload_as_memoryview()` is the zero-copy variant and is NOT safe to
-  retain past the callback — do not "optimise" into it without also making the
-  parse fully eager.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -49,7 +7,6 @@ import random
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any
 
 from picows import WSFrame, WSListener, WSMsgType, WSTransport, ws_connect
 
@@ -61,10 +18,10 @@ class WsHealth:
     """Point-in-time view of a connection, for the heartbeat translator."""
 
     connected: bool
-    frames: int                     # data frames since the last read
+    frames: int                    
     reconnects: int
-    seconds_since_frame: float | None    # any frame — socket alive?
-    seconds_since_payload: float | None  # data frame — subscription alive?
+    seconds_since_frame: float | None    
+    seconds_since_payload: float | None  
     last_error: str | None
 
 
@@ -84,21 +41,19 @@ class _Listener(WSListener):
 
         msg_type = frame.msg_type
         if msg_type == WSMsgType.CLOSE:
-            # Answer the close handshake and let the supervisor reconnect.
             with contextlib.suppress(Exception):
                 transport.send_close(frame.get_close_code())
                 transport.disconnect()
             return
         if msg_type not in (WSMsgType.TEXT, WSMsgType.BINARY):
-            return                   # ping/pong/continuation: liveness only
+            return                   
 
         client._frames += 1
         client._last_payload_at = now
         try:
             client._on_payload(frame.get_payload_as_bytes())
         except Exception:
-            # One malformed message must never kill the read loop; the venue
-            # would otherwise reconnect in a hot loop on a single bad frame.
+           
             client._parse_errors += 1
             log.exception("%s: payload handler raised", client.name)
 
@@ -150,7 +105,7 @@ class WsClient:
         self._last_error: str | None = None
         self._transport: WSTransport | None = None
 
-    # -- counters ----------------------------------------------------------------
+   
 
     def _on_connected(self, transport: WSTransport) -> None:
         self._connected = True
@@ -187,7 +142,6 @@ class WsClient:
         ceiling = min(self._backoff_max, self._backoff_base * (2 ** attempt))
         return random.uniform(0.0, ceiling)
 
-    # -- the supervisor loop -------------------------------------------------------
 
     async def run(self, stop: asyncio.Event) -> None:
         """Connect, subscribe, pump until the socket drops, then reconnect.
@@ -223,8 +177,7 @@ class WsClient:
                 for payload in self._subscribe_frames():
                     transport.send(WSMsgType.TEXT, payload)
             except Exception as exc:
-                # A bad subscribe is a permanent, venue-side problem; record it
-                # and let the loop reconnect rather than spinning silently.
+               
                 self._last_error = f"subscribe failed: {exc!r}"
                 log.exception("%s: subscribe failed", self.name)
 
@@ -268,8 +221,7 @@ class WsClient:
                 for payload in self._keepalive_frames():
                     transport.send(WSMsgType.TEXT, payload)
             except Exception:
-                # A failed keepalive means the socket is going down anyway;
-                # let the disconnect path handle it rather than raising here.
+              
                 log.warning("%s: keepalive send failed", self.name, exc_info=True)
                 return
 

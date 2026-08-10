@@ -21,12 +21,12 @@ class RateLimiter:
         self._capacity = float(capacity) if capacity is not None else float(rate)
         if self._capacity <= 0:
             raise ValueError("capacity must be > 0")
-        self._tokens = self._capacity            # start full
+        self._tokens = self._capacity           
         self._updated = time.monotonic()
-        self._blocked_until = 0.0                # server-imposed backoff (monotonic)
+        self._blocked_until = 0.0                
         self._lock = asyncio.Lock()
 
-    # -- convenience constructors -------------------------------------------------
+ 
 
     @classmethod
     def per_second(cls, n: float, burst: float | None = None) -> "RateLimiter":

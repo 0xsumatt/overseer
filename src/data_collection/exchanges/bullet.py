@@ -18,10 +18,8 @@ class BulletScraper(BinanceFuturesScraper):
     market_type: ClassVar[MarketType] = MarketType.PERP
     quote_currency: ClassVar[QuoteCurrency] = QuoteCurrency.USDC
 
-    # verify on first live run — see module docstring
-    DEFAULT_FUNDING_HOURS: ClassVar[int] = 8
+    DEFAULT_FUNDING_HOURS: ClassVar[int] = 1
 
-    # that could never be admitted). Both reset to 1 token per call.
     _klines_weight: ClassVar[int] = 1
     _ticker24h_weight: ClassVar[int] = 1
 
@@ -51,8 +49,6 @@ class BulletScraper(BinanceFuturesScraper):
         }
     )
 
-    # -- OHLCV: no klines endpoint exists on Bullet — see module docstring ------
-
     async def fetch_ohlcv(
         self, symbol: str, interval: Timeframe, since: datetime, *, limit: int = 1000
     ) -> Sequence[OHLCV]:
@@ -60,13 +56,11 @@ class BulletScraper(BinanceFuturesScraper):
 
     def _build_http(self) -> HttpClient:
         return HttpClient(
-            limiter=RateLimiter.per_minute(300, burst=20),   # unpublished limits
+            limiter=RateLimiter.per_minute(300, burst=20),  
             default_headers={"User-Agent": "overseer/0.1"},
         )
 
     async def _funding_interval(self, native: str) -> int:
-        """Binance-compat clones often omit /fapi/v1/fundingInfo; degrade to
-        the venue default instead of failing every funding job."""
         if self._funding_intervals is None:
             try:
                 info = await self.http.get_json(f"{self.base_url}/fapi/v1/fundingInfo")
@@ -75,7 +69,7 @@ class BulletScraper(BinanceFuturesScraper):
                     for x in info
                 }
             except Exception:
-                self._funding_intervals = {}     # endpoint absent: defaults for all
+                self._funding_intervals = {}  
         return self._funding_intervals.get(native, self.DEFAULT_FUNDING_HOURS)
 
     async def fetch_bbo(self, symbol: str) -> TopOfBook:
@@ -98,10 +92,6 @@ class BulletScraper(BinanceFuturesScraper):
             ask_price=self._dec(ask[0]),
             ask_size=self._dec(ask[1]),
         )
-
-    # -- liquidity: openInterest/ticker ignore `symbol`, premiumIndex wraps a
-    #    single match in a list — see module docstring. Fetch each once,
-    #    index by symbol, instead of the inherited per-symbol Binance loop.
 
     async def fetch_liquidity(
         self, symbols: Sequence[str]

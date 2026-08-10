@@ -1,0 +1,26 @@
+[Unit]
+Description=Overseer Gunicorn web dashboard
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=overseer
+Group=overseer
+WorkingDirectory=/opt/overseer
+EnvironmentFile=/opt/overseer/.env
+Environment=PYTHONUNBUFFERED=1
+Environment=OVERSEER_PROXY_HOPS=1
+Environment=OVERSEER_SECURE_COOKIES=true
+ExecStart=/opt/overseer/.venv/bin/gunicorn --config /opt/overseer/deploy/gunicorn.conf.py "web:create_app()"
+ExecReload=/bin/kill -HUP $MAINPID
+KillSignal=SIGQUIT
+TimeoutStopSec=35
+Restart=on-failure
+RestartSec=5
+PrivateTmp=true
+NoNewPrivileges=true
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

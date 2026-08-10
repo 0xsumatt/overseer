@@ -20,16 +20,52 @@ import tomllib
 
 import click
 from flask import Flask
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from core.config import settings
 from core.symbols import SymbolRegistry
 from storage.queries import ReadStorage
 from web import auth as auth_module
+from web.cache import ResponseCache
 from web.views import api, pages
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean")
+
+
+def _proxy_hops() -> int:
+    try:
+        hops = int(os.getenv("OVERSEER_PROXY_HOPS", "0"))
+    except ValueError as exc:
+        raise ValueError("OVERSEER_PROXY_HOPS must be an integer") from exc
+    if hops < 0:
+        raise ValueError("OVERSEER_PROXY_HOPS must not be negative")
+    return hops
 
 
 def create_app(database_url: str | None = None) -> Flask:
     app = Flask(__name__, template_folder="templates")
+    proxy_hops = _proxy_hops()
+    if proxy_hops:
+        app.wsgi_app = ProxyFix(
+            app.wsgi_app,
+            x_for=proxy_hops,
+            x_proto=proxy_hops,
+        )
+    app.config.update(
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
+        SESSION_COOKIE_SECURE=_env_bool("OVERSEER_SECURE_COOKIES"),
+    )
 
     secret = getattr(settings, "flask_secret_key", "") or os.getenv("FLASK_SECRET_KEY", "")
     if not secret:
@@ -73,6 +109,7 @@ def create_app(database_url: str | None = None) -> Flask:
         w["address"]: w["label"] for w in app.extensions["tracked_wallets"]
     }
     app.extensions["read_storage"] = storage
+    app.extensions["response_cache"] = ResponseCache(ttl_seconds=30)
 
     auth_module.init_auth(app, storage)
     app.register_blueprint(pages.bp)

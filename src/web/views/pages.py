@@ -36,7 +36,6 @@ def logout():
 
 
 @bp.get("/")
-@login_required
 def dashboard():
     # annotate each series with its canonical asset so the chart's token
     # dropdown groups venue-native symbols ("BTC/USDT", "BTC", "BTC-USD")
@@ -48,20 +47,17 @@ def dashboard():
 
 
 @bp.get("/basis")
-@login_required
 def basis():
     return render_template("basis.html", series=_store().series_list())
 
 
 @bp.get("/funding")
-@login_required
 def funding():
     # data comes client-side from /api/funding; the page is just the shell
     return render_template("funding.html")
 
 
 @bp.get("/flow")
-@login_required
 def flow():
     # data comes client-side from /api/trade-flow; the page is just the shell
     registry = current_app.extensions["symbols"]
@@ -69,7 +65,6 @@ def flow():
 
 
 @bp.get("/wallets")
-@login_required
 def wallets():
     tracked = current_app.extensions.get("tracked_wallets", [])
     store = _store()

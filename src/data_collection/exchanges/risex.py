@@ -13,7 +13,6 @@ from data_collection.ratelimit import RateLimiter
 
 _NS = 1_000_000_000
 
-# Timeframe -> candle interval as a ns duration
 _INTERVALS_NS: dict[Timeframe, int] = {
     Timeframe.M1: 60 * _NS, Timeframe.M5: 300 * _NS, Timeframe.M15: 900 * _NS,
     Timeframe.M30: 1800 * _NS, Timeframe.H1: 3600 * _NS, Timeframe.H4: 4 * 3600 * _NS,
@@ -49,18 +48,16 @@ class RiseScraper(BaseExchangeScraper):
 
     def __init__(self, http: HttpClient | None = None) -> None:
         super().__init__(http)
-        self._markets: dict[str, dict] | None = None      # name -> market info
+        self._markets: dict[str, dict] | None = None      
         self._markets_at: float = 0.0
 
     def _build_http(self) -> HttpClient:
         return HttpClient(
-            limiter=RateLimiter.per_minute(300, burst=20),   # limits unpublished
+            limiter=RateLimiter.per_minute(300, burst=20),   
             default_headers={"User-Agent": "overseer/0.1"},
         )
 
-    # -- symbols: market names ("BTC/USDC"), identity mapping ----------------------
-    # API is under active development (endpoints deprecated/changed without
-    # notice) — re-verify this convention if fetches start failing.
+
 
     def to_symbol(self, native: str) -> str:
         return native
@@ -68,7 +65,7 @@ class RiseScraper(BaseExchangeScraper):
     def to_native(self, symbol: str) -> str:
         return symbol
 
-    # -- market map (also the liquidity + venue-volume source) ---------------------
+    
 
     async def _market_map(self, refresh: bool = False) -> dict[str, dict]:
         import time
@@ -119,7 +116,7 @@ class RiseScraper(BaseExchangeScraper):
             ask_size=self._dec(ask["quantity"]),
         )
 
-    # -- OHLCV: ns interval + ns window ---------------------------------------------
+    
 
     async def fetch_ohlcv(
         self, symbol: str, interval: Timeframe, since: datetime, *, limit: int = 1000
@@ -133,8 +130,7 @@ class RiseScraper(BaseExchangeScraper):
                 "to": str(_to_ns(datetime.now(timezone.utc))),
             },
         )
-        # trading-view-data nests candles under data.data (a second "data" key,
-        # not a duplicate line) — see module docstring.
+      
         candles = (payload.get("data") or {}).get("data", [])
         out = [
             OHLCV(
@@ -154,7 +150,7 @@ class RiseScraper(BaseExchangeScraper):
         out.sort(key=lambda b: b.ts)
         return out
 
-    # -- funding: settled events, interval derived PER RECORD -------------------------
+  
 
     async def fetch_funding(
         self, symbol: str, since: datetime, *, limit: int = 1000, max_pages: int = 10
@@ -180,7 +176,7 @@ class RiseScraper(BaseExchangeScraper):
                     FundingRate(
                         exchange=self.exchange,
                         symbol=symbol,
-                        ts=_from_ns(end_ns),           # settlement time keys the row
+                        ts=_from_ns(end_ns),           
                         rate=self._dec(r["funding_rate"]),
                         interval_hours=hours,
                     )
@@ -191,7 +187,7 @@ class RiseScraper(BaseExchangeScraper):
         out.sort(key=lambda x: x.ts)
         return out
 
-    # -- liquidity: the market map already carries it ---------------------------------
+   
 
     async def fetch_liquidity(
         self, symbols: Sequence[str]
@@ -230,7 +226,7 @@ class RiseScraper(BaseExchangeScraper):
             )
         return out
 
-    # -- discovery + venue volume ------------------------------------------------------
+  
 
     async def list_perp_symbols(self) -> list[str]:
         markets = await self._market_map(refresh=True)

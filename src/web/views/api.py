@@ -1,4 +1,4 @@
-"""JSON API — feeds the charts. All endpoints require login.
+"""Public JSON API feeding the analytics pages.
 
 Decimal -> float happens HERE (the serialization edge), never in the query
 layer. Candle payloads use lightweight-charts' native shape:
@@ -12,9 +12,24 @@ import io
 from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, Response, current_app, jsonify, request
-from flask_login import login_required
+from core.enums import Exchange, MarketType
 
 bp = Blueprint("api", __name__, url_prefix="/api")
+
+@bp.before_request
+def _serve_cached_response() -> Response | None:
+    if request.method != "GET":
+        return None
+    key = f"{request.endpoint}:{request.full_path}"
+    return current_app.extensions["response_cache"].get(key)
+
+
+@bp.after_request
+def _cache_successful_response(response: Response) -> Response:
+    if request.method != "GET" or response.headers.get("X-Overseer-Cache") == "HIT":
+        return response
+    key = f"{request.endpoint}:{request.full_path}"
+    return current_app.extensions["response_cache"].put(key, response)
 
 
 def _store():
@@ -43,7 +58,6 @@ def _maybe_csv(rows: list[dict], filename: str) -> Response | None:
 
 
 @bp.get("/series")
-@login_required
 def series():
     rows = _store().series_list()
     return jsonify([
@@ -58,7 +72,6 @@ def series():
 
 
 @bp.get("/candles")
-@login_required
 def candles():
     q = request.args
     try:
@@ -87,8 +100,62 @@ def candles():
         or jsonify(payload)
 
 
+@bp.get("/orderbook-spreads")
+def orderbook_spreads():
+    q = request.args
+    asset = q.get("asset", "").strip().upper()
+    market = q.get("market", "perp")
+    registry = current_app.extensions["symbols"]
+    if asset not in registry.assets():
+        return jsonify(error="unknown asset"), 400
+    if market not in {MarketType.SPOT.value, MarketType.PERP.value}:
+        return jsonify(error="market must be 'spot' or 'perp'"), 400
+    try:
+        hours = max(1.0, min(float(q.get("hours", 48)), 720.0))
+    except ValueError:
+        return jsonify(error="hours must be numeric"), 400
+
+    known_exchanges = {exchange.value for exchange in Exchange}
+    requested = {
+        value.strip()
+        for value in q.get("exchanges", "").split(",")
+        if value.strip()
+    }
+    invalid = requested - known_exchanges
+    if invalid:
+        return jsonify(error=f"unknown exchanges: {', '.join(sorted(invalid))}"), 400
+    exchanges = sorted(requested or known_exchanges)
+    symbols = sorted(set(registry.listings(asset).values()))
+    bucket_minutes = 1 if hours <= 48 else 5 if hours <= 168 else 15
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+    rows = _store().orderbook_spreads(
+        market, symbols, exchanges, since, bucket_minutes
+    )
+
+    grouped: dict[tuple[str, str], list[dict]] = {}
+    for row in rows:
+        key = (row["exchange"], row["symbol"])
+        grouped.setdefault(key, []).append({
+            "time": int(row["ts"].timestamp()),
+            "spread_bps": float(row["spread_bps"]),
+            "midpoint": float(row["midpoint"]),
+            "bid_price": float(row["bid_price"]),
+            "ask_price": float(row["ask_price"]),
+            "bid_size": float(row["bid_size"]),
+            "ask_size": float(row["ask_size"]),
+        })
+    return jsonify({
+        "asset": asset,
+        "market": market,
+        "bucket_seconds": bucket_minutes * 60,
+        "series": [
+            {"exchange": exchange, "symbol": symbol, "points": points}
+            for (exchange, symbol), points in grouped.items()
+        ],
+    })
+
+
 @bp.get("/basis")
-@login_required
 def basis():
     q = request.args
     try:
@@ -115,7 +182,6 @@ def basis():
     ])
 
 @bp.get("/funding")
-@login_required
 def funding():
     """Latest annualized funding + liquidity per (venue, perp), grouped by the
     canonical asset id from the symbols registry. Rows whose symbol isn't in
@@ -169,7 +235,6 @@ def funding():
     return jsonify(out)
 
 @bp.get("/venue-volume")
-@login_required
 def venue_volume():
     data = _store().venue_volume()
     f = _float_or_none
@@ -182,7 +247,6 @@ def venue_volume():
     })
 
 @bp.get("/fills-pulse")
-@login_required
 def fills_pulse():
     labels = current_app.extensions.get("fills_labels", {})
     rows = _store().fills_pulse()
@@ -194,7 +258,6 @@ def fills_pulse():
     ])
 
 @bp.get("/funding-history")
-@login_required
 def funding_history():
     exchange = request.args.get("exchange", "")
     symbol = request.args.get("symbol", "")
@@ -209,7 +272,6 @@ def funding_history():
 
 
 @bp.get("/funding-history-multi")
-@login_required
 def funding_history_multi():
     """Settled funding history for one canonical asset, across every venue
     that lists it — the multi-venue overlay chart on the funding page. Keyed
@@ -228,7 +290,6 @@ def funding_history_multi():
 
 
 @bp.get("/liquidity-history-multi")
-@login_required
 def liquidity_history_multi():
     """OI-notional history for one canonical asset, across every venue that
     lists it — the bar pane under the funding history chart's line series."""
@@ -248,7 +309,6 @@ def liquidity_history_multi():
 
 
 @bp.get("/trade-flow")
-@login_required
 def trade_flow():
     """Per-minute order flow for one canonical asset, per venue, plus the
     funding settlement times inside the window.
@@ -315,7 +375,6 @@ def trade_flow():
 
 
 @bp.get("/freshness")
-@login_required
 def freshness():
     """Pipeline liveness for the stale-data banner: age of the newest bar
     anywhere. null age = empty database (also worth a banner)."""
@@ -327,7 +386,6 @@ def freshness():
 
 
 @bp.get("/wallet-share")
-@login_required
 def wallet_share():
     """Each tracked wallet's 24h fill notional vs its venue's 24h volume
     (the venue_volume daily sweep — the WHOLE venue, not just tracked symbols)
@@ -357,7 +415,6 @@ def wallet_share():
 
 
 @bp.get("/wallet-flows")
-@login_required
 def wallet_flows():
     """Per-wallet 5m net flow for one symbol, keyed by wallet label — the
     wallets page cumulates into position-drift lines."""

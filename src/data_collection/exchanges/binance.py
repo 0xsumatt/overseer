@@ -10,23 +10,18 @@ from data_collection.base import BaseExchangeScraper, Capability
 from data_collection.http import HttpClient
 from data_collection.ratelimit import RateLimiter
 
-# Quote assets, longest first, so "BTCUSDT" splits on "USDT" not "USD".
+
 _QUOTES: tuple[str, ...] = (
     "USDT", "USDC", "FDUSD", "TUSD", "BUSD", "DAI", "USD",
     "BTC", "ETH", "BNB", "EUR", "TRY", "GBP",
 )
 
-
 def to_canonical(native: str) -> str:
-    """'BTCUSDT' -> 'BTC/USDT'. Module-level so the websocket adapter shares
-    exactly this rule — the canonical form has to agree across REST and WS or
-    a stream's rows won't join to the funding/liquidity rows for the same
-    market (and the settlement-capture gate looks symbols up by that name)."""
     native = native.upper()
     for quote in _QUOTES:
         if native.endswith(quote) and len(native) > len(quote):
             return f"{native[: -len(quote)]}/{quote}"
-    return native            # unknown quote — leave as-is rather than guess
+    return native            
 
 
 class BinanceSpotScraper(BaseExchangeScraper):
@@ -40,16 +35,15 @@ class BinanceSpotScraper(BaseExchangeScraper):
     _klines_path: ClassVar[str] = "/api/v3/klines"
     _klines_weight: ClassVar[int] = 2
     _ticker24h_path: ClassVar[str] = "/api/v3/ticker/24hr"
-    _ticker24h_weight: ClassVar[int] = 80         # full-list weight (no symbol)
+    _ticker24h_weight: ClassVar[int] = 80       
     _book_ticker_path: ClassVar[str] = "/api/v3/ticker/bookTicker"
 
     def _build_http(self) -> HttpClient:
         return HttpClient(
-            limiter=RateLimiter.per_minute(6000, burst=120),   # 6000 weight/min/IP
+            limiter=RateLimiter.per_minute(6000, burst=120),  
             default_headers={"User-Agent": "overseer/0.1"},
         )
 
-    # -- symbols ------------------------------------------------------------------
 
     def to_symbol(self, native: str) -> str:
         return to_canonical(native)
@@ -73,7 +67,6 @@ class BinanceSpotScraper(BaseExchangeScraper):
             ask_size=self._dec(row["askQty"]),
         )
 
-    # -- OHLCV: GET klines (same shape spot vs fapi; path/weight via classvars) ----
 
     async def fetch_ohlcv(
         self, symbol: str, interval: Timeframe, since: datetime, *, limit: int = 1000
@@ -91,7 +84,6 @@ class BinanceSpotScraper(BaseExchangeScraper):
         canonical = self.to_symbol(self.to_native(symbol))
         out: list[OHLCV] = []
         for r in rows:
-            # [openTime, open, high, low, close, volume, closeTime, ...]
             out.append(
                 OHLCV(
                     exchange=self.exchange,
@@ -108,13 +100,6 @@ class BinanceSpotScraper(BaseExchangeScraper):
             )
         return out
 
-    # Public trades are intentionally NOT scraped over REST (recent-only / gappy,
-    # not real-time). The trade tape lives on the websocket layer instead.
-
-    # -- venue volume: full ticker/24hr list (no symbol), summed quoteVolume -----
-    #    Spot and futures share this response shape; only the host/path/weight
-    #    differ (via the classvars above), so one implementation covers both.
-
     async def fetch_venue_volume(self) -> dict:
         rows = await self.http.get_json(
             f"{self.base_url}{self._ticker24h_path}", weight=self._ticker24h_weight
@@ -125,23 +110,21 @@ class BinanceSpotScraper(BaseExchangeScraper):
 
 
 class BinanceFuturesScraper(BinanceSpotScraper):
-    """USDT-M perpetual futures. Same shapes as spot; different host/path/limit."""
 
     base_url: ClassVar[str] = "https://fapi.binance.com"
     market_type: ClassVar[MarketType] = MarketType.PERP
     _klines_path: ClassVar[str] = "/fapi/v1/klines"
-    _klines_weight: ClassVar[int] = 5            # fapi klines weight at limit <= 1000
+    _klines_weight: ClassVar[int] = 5            
     _ticker24h_path: ClassVar[str] = "/fapi/v1/ticker/24hr"
-    _ticker24h_weight: ClassVar[int] = 40         # full-list weight (no symbol)
+    _ticker24h_weight: ClassVar[int] = 40         
     _book_ticker_path: ClassVar[str] = "/fapi/v1/ticker/bookTicker"
 
     def _build_http(self) -> HttpClient:
         return HttpClient(
-            limiter=RateLimiter.per_minute(2400, burst=60),    # 2400 weight/min/IP (fapi)
+            limiter=RateLimiter.per_minute(2400, burst=60),    
             default_headers={"User-Agent": "overseer/0.1"},
         )
 
-    # -- funding: GET /fapi/v1/fundingRate (+ /fundingInfo for per-symbol intervals)
 
     capabilities = frozenset(
         {
@@ -153,11 +136,9 @@ class BinanceFuturesScraper(BinanceSpotScraper):
         }
     )
 
-    _funding_intervals: dict[str, int] | None = None   # native symbol -> hours
+    _funding_intervals: dict[str, int] | None = None 
 
     async def _funding_interval(self, native: str) -> int:
-        """Binance funding is 8h by default, but some symbols are adjusted (4h).
-        /fapi/v1/fundingInfo lists ONLY the adjusted ones; cache it once."""
         if self._funding_intervals is None:
             info = await self.http.get_json(f"{self.base_url}/fapi/v1/fundingInfo")
             self._funding_intervals = {
@@ -190,7 +171,6 @@ class BinanceFuturesScraper(BinanceSpotScraper):
             for r in rows
         ]
 
-    # -- liquidity: per-symbol OI + 24h ticker ----------------------------------
 
     async def fetch_liquidity(
         self, symbols: Sequence[str]

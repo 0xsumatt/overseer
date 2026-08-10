@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
+from datetime import timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -14,6 +15,7 @@ from core.symbols import SymbolRegistry
 from data_collection.exchanges.registry import REGISTRY, STREAM_REGISTRY
 from scheduler.capture import SettlementCapture
 from scheduler.jobs import (
+    DislocationConfirmation,
     UsdcUsdtQuoteCache,
     check_dislocations,
     post_digest,
@@ -21,6 +23,7 @@ from scheduler.jobs import (
     run_funding,
     run_liquidity,
     run_ohlcv,
+    run_orderbook,
     run_venue_volume,
 )
 from scheduler.notify import DiscordNotifier
@@ -37,7 +40,7 @@ def _jitter(poll_seconds: int) -> int:
 def build_scheduler(
     scrapers, storage, notifier, state,
     ohlcv_targets, fills_targets, funding_targets, liquidity_targets,
-    registry: SymbolRegistry | None = None,
+    orderbook_targets, registry: SymbolRegistry | None = None,
 ) -> AsyncIOScheduler:
     sched = AsyncIOScheduler(
         job_defaults={
@@ -46,17 +49,20 @@ def build_scheduler(
             "max_instances": 1,        # never overlap a slow run with the next
         }
     )
-    # all four target kinds schedule identically: interval-poll, one job per target
+    # all polling target kinds schedule identically: one interval job per target
     for run, targets in (
         (run_ohlcv, ohlcv_targets),
         (run_fills, fills_targets),
         (run_funding, funding_targets),
         (run_liquidity, liquidity_targets),
+        (run_orderbook, orderbook_targets),
     ):
         for t in targets:
             sched.add_job(
                 run,
-                trigger=IntervalTrigger(seconds=t.poll_seconds),
+                trigger=IntervalTrigger(
+                    seconds=t.poll_seconds, jitter=_jitter(t.poll_seconds)
+                ),
                 args=[scrapers[t.venue], storage, notifier, state, t],
                 id=t.job_id, name=t.job_id, replace_existing=True,
             )
@@ -74,9 +80,12 @@ def build_scheduler(
         args=[scrapers, storage, notifier, state],
         id="venue_volume:daily", name="venue_volume:daily", replace_existing=True,
     )
-    # Current-funding dislocations are checked against the latest 5-minute
-    # liquidity snapshots. Only a new threshold crossing fetches live books.
+    # Current-funding dislocations must persist across fresh 5-minute snapshots
+    # before an alert fetches live books. This rejects one-tick funding spikes.
     if funding_targets and registry is not None:
+        confirmation = DislocationConfirmation(
+            timedelta(minutes=settings.spread_confirm_minutes)
+        )
         fx_cache = UsdcUsdtQuoteCache(scrapers.get("binance_spot"))
         sched.add_job(
             check_dislocations,
@@ -89,6 +98,7 @@ def build_scheduler(
                 settings.spread_alert_apr,
                 scrapers,
                 fx_cache,
+                confirmation,
             ],
             id="alert:dislocations", name="alert:dislocations",
             replace_existing=True,
@@ -110,26 +120,41 @@ async def main() -> None:
 
     # Load + validate the scrape config. Any error raises here and the process
     # exits loudly rather than starting up scraping nothing.
-    ohlcv_targets, fills_targets, funding_targets, liquidity_targets = load_targets(
-        settings.symbols_file
+    (
+        ohlcv_targets,
+        fills_targets,
+        funding_targets,
+        liquidity_targets,
+        orderbook_targets,
+    ) = load_targets(settings.symbols_file)
+    log.info(
+        "loaded %d ohlcv + %d fills + %d funding + %d liquidity + %d orderbook "
+        "targets from %s",
+        len(ohlcv_targets), len(fills_targets), len(funding_targets),
+        len(liquidity_targets), len(orderbook_targets), settings.symbols_file,
     )
-    log.info("loaded %d ohlcv + %d fills + %d funding + %d liquidity targets from %s",
-             len(ohlcv_targets), len(fills_targets), len(funding_targets),
-             len(liquidity_targets), settings.symbols_file)
 
     # one scraper instance per venue, shared across every target kind.
     venues = {
         t.venue
-        for targets in (ohlcv_targets, fills_targets, funding_targets, liquidity_targets)
+        for targets in (
+            ohlcv_targets,
+            fills_targets,
+            funding_targets,
+            liquidity_targets,
+            orderbook_targets,
+        )
         for t in targets
     }
     scrapers = {v: REGISTRY[v]() for v in venues}
 
     state: dict[str, str] = {}      # job_id -> last status, for edge-triggered alerts
     registry = SymbolRegistry.load(settings.symbols_file)
-    sched = build_scheduler(scrapers, storage, notifier, state,
-                            ohlcv_targets, fills_targets, funding_targets, liquidity_targets,
-                            registry=registry)
+    sched = build_scheduler(
+        scrapers, storage, notifier, state,
+        ohlcv_targets, fills_targets, funding_targets, liquidity_targets,
+        orderbook_targets, registry=registry,
+    )
     sched.start()
     log.info("scheduler started with %d job(s)", len(sched.get_jobs()))
 

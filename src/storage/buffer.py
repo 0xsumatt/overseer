@@ -1,21 +1,3 @@
-"""Buffered writes for streaming feeds.
-
-Bridges the synchronous world of a picows frame callback to the async world of
-asyncpg. `add()` is sync and must stay cheap — it is called from the read loop,
-where any blocking stalls frame delivery. `run()` drains on a timer from a
-normal async task.
-
-It also fixes an impedance mismatch: Storage._bulk_upsert is one database
-round-trip per call, which is right for a poll returning 500 bars and badly
-wrong for a per-message write. Batching by size OR age keeps a busy feed
-efficient without letting a quiet one sit unflushed indefinitely.
-
-Records are de-duplicated on their natural `key` before writing, because a
-resubscribe after a reconnect commonly replays recent messages. The database
-would reject the duplicates anyway (the trades primary key is idempotent by
-design) — deduping here just avoids paying for the round-trip.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -30,22 +12,12 @@ from typing import Any
 log = logging.getLogger("overseer.buffer")
 
 
-# A trade at or above this quote notional counts as "large". Quote-denominated
-# so it means the same thing across assets and venues (all of ours quote in a
-# USD stablecoin), unlike a base-size threshold which would be meaningless
-# across a $65k asset and a $0.40 one.
-#
-# This is applied AT INGEST and cannot be changed retroactively — the trades it
-# classifies are not kept. Changing it makes history incomparable, so treat it
-# as a schema decision, not a tunable. max_trade_notional is stored alongside
-# precisely to hedge that: it is threshold-free, so a badly chosen threshold
-# does not leave the data useless.
+
 LARGE_TRADE_NOTIONAL = Decimal(10_000)
 
 
 class _Bucket:
-    """Mutable accumulator for one market-minute. Plain class with slots
-    rather than a dataclass: one of these is touched on every single trade."""
+  
 
     __slots__ = ("trades", "volume", "buy", "sell", "notional",
                  "large", "large_buy", "large_sell", "max_notional",
@@ -80,8 +52,6 @@ class _Bucket:
             self.high = trade.price
         if trade.price < self.low:
             self.low = trade.price
-        # By trade time, not arrival: venues deliver slightly out of order and
-        # replay on reconnect, so ordering by arrival would corrupt open/close.
         if trade.ts <= self.first_ts:
             self.first_ts, self.open = trade.ts, trade.price
         if trade.ts >= self.last_ts:
@@ -89,20 +59,6 @@ class _Bucket:
 
 
 class FlowBuffer:
-    """Per-minute order flow, accumulated in memory from the live tape.
-
-    Fed EVERY parsed trade, including those the settlement gate discards —
-    that is the whole point. Storage then scales with how many markets we
-    follow (1440 rows per market per day, flat) instead of with how much the
-    market trades, which measurement showed is both far larger and wildly
-    unpredictable: on Bybit, going from 5 to 30 symbols multiplied the row
-    rate 5.6x, and a single high-churn listing outweighed ten majors.
-
-    Only COMPLETED minutes are written. The in-flight bucket stays in memory,
-    so a restart loses at most the current partial minute — writing it would
-    persist a wrong number that nothing would ever correct, since the memory
-    it would be completed from is gone.
-    """
 
     def __init__(
         self,
@@ -113,8 +69,6 @@ class FlowBuffer:
     ) -> None:
         self._storage = storage
         self._write_name = write
-        # A bucket is sealed once the minute has ended plus this much slack,
-        # covering venue clock skew and late-delivered trades.
         self._grace = grace_seconds
         self._buckets: dict[tuple, _Bucket] = {}
         self._lock = asyncio.Lock()
@@ -158,9 +112,6 @@ class FlowBuffer:
             try:
                 written = await getattr(self._storage, self._write_name)(records)
             except Exception:
-                # Put them back so a database blip costs latency, not a hole in
-                # the flow series — these are irreplaceable once the raw trades
-                # they came from are gone.
                 for record in records:
                     key = (record.exchange, record.market_type,
                            record.symbol, record.bucket)
@@ -203,15 +154,6 @@ def _replay(record) -> _Bucket:
 
 
 class WriteBuffer:
-    """Accumulate stream records, flush on size or age.
-
-    `hard_cap` is a survival limit for the case where the database is slow or
-    down while the feed keeps arriving. Past it, the OLDEST records are dropped
-    and counted: unbounded growth would take the process out entirely, and a
-    silent drop would be worse than a counted one — `dropped` rides along on
-    every heartbeat so a shedding buffer shows up in the health page and in
-    Discord rather than being discovered later as a hole in the data.
-    """
 
     def __init__(
         self,
@@ -234,7 +176,6 @@ class WriteBuffer:
         self.written = 0
         self.dropped = 0
 
-    # -- sync side: called from the frame callback -------------------------------
 
     def add(self, records: Sequence[Any]) -> None:
         if not records:
@@ -243,7 +184,7 @@ class WriteBuffer:
             self._pending[record.key] = record
         overflow = len(self._pending) - self._hard_cap
         if overflow > 0:
-            # dicts preserve insertion order, so the first keys are the oldest
+         
             for key in list(self._pending)[:overflow]:
                 del self._pending[key]
             self.dropped += overflow
@@ -259,15 +200,8 @@ class WriteBuffer:
             or (time.monotonic() - self._last_flush) >= self._max_seconds
         )
 
-    # -- async side --------------------------------------------------------------
 
     async def flush(self) -> int:
-        """Write everything pending. Returns rows newly inserted.
-
-        On failure the batch is put BACK, so a transient database blip costs
-        latency rather than data — bounded by hard_cap, which is what stops
-        that from becoming an unbounded leak if the outage persists.
-        """
         async with self._lock:
             if not self._pending:
                 self._last_flush = time.monotonic()

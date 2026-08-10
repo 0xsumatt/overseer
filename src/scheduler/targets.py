@@ -51,6 +51,19 @@ class LiquidityTarget:
 
 
 @dataclass(frozen=True)
+class OrderBookTarget:
+    """One scheduled best-bid/ask snapshot for a venue market."""
+
+    venue: str
+    symbol: str
+    poll_seconds: int = 60
+
+    @property
+    def job_id(self) -> str:
+        return f"orderbook:{self.venue}:{self.symbol}"
+
+
+@dataclass(frozen=True)
 class FillsTarget:
     """A specific address whose fills we log over time (e.g. the HLP vault).
 
@@ -87,17 +100,7 @@ class StreamTarget:
 
 
 def load_stream_targets(path: str | Path) -> list[StreamTarget]:
-    """Build stream targets from `stream = true` / `stream = "capture"` on a
-    [venues.*] section.
 
-    Kept separate from load_targets() rather than widening its return tuple:
-    the polling targets and the streams are consumed by different machinery,
-    and most venues will have polling long before they have a stream.
-
-    Perp-only, via the same adapter filter the funding and liquidity targets
-    use — settlement windows are a perp-domain concept, and a spot symbol has
-    no funding to anchor them to.
-    """
     p = Path(path)
     with p.open("rb") as f:
         data = tomllib.load(f)
@@ -123,8 +126,6 @@ def load_stream_targets(path: str | Path) -> list[StreamTarget]:
         if not perp_syms:
             errors.append(f"[venues.{venue}] has stream enabled but lists no perps")
             continue
-        # stream = "tape" opts into the continuous feed; anything else truthy
-        # is the (much cheaper) settlement-window capture.
         out.append(StreamTarget(venue, perp_syms, capture=(mode != "tape")))
 
     if errors:
@@ -133,17 +134,13 @@ def load_stream_targets(path: str | Path) -> list[StreamTarget]:
 
 
 def load_targets(path: str | Path) -> tuple[
-    list[ScrapeTarget], list[FillsTarget], list[FundingTarget], list[LiquidityTarget]
+    list[ScrapeTarget],
+    list[FillsTarget],
+    list[FundingTarget],
+    list[LiquidityTarget],
+    list[OrderBookTarget],
 ]:
-    """Parse + validate symbols.toml ([venues] + [assets] format) into target
-    lists. Raises with ALL problems collected, so the scheduler fails fast and
-    loud at startup rather than silently scraping nothing.
 
-    Targets are the cross product of [assets.*] listings and [venues.*]
-    settings: an asset listed on a venue gets an OHLCV target per interval;
-    venues flagged funding/liquidity get those jobs for their PERP listings
-    only (spot symbols are filtered via the adapter's market_type_for).
-    """
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(f"symbols config not found: {p}")
@@ -152,19 +149,17 @@ def load_targets(path: str | Path) -> tuple[
 
     errors: list[str] = []
 
-    # -- the asset map (cross-venue symbol registry) ---------------------------
+   
     try:
         registry = SymbolRegistry.from_config(data)
     except SymbolConfigError as exc:
         raise ValueError(str(exc)) from exc
 
-    # -- venue settings ---------------------------------------------------------
     venues_cfg = data.get("venues", {})
     known = set(REGISTRY)
     for venue in venues_cfg:
         if venue not in known:
             errors.append(f"unknown venue [venues.{venue}] (known: {sorted(known)})")
-    # assets may only reference declared venues
     for asset in registry.assets():
         for venue in registry.listings(asset):
             if venue not in venues_cfg:
@@ -176,6 +171,7 @@ def load_targets(path: str | Path) -> tuple[
     ohlcv: list[ScrapeTarget] = []
     funding: list[FundingTarget] = []
     liquidity: list[LiquidityTarget] = []
+    orderbooks: list[OrderBookTarget] = []
 
     for venue, section in venues_cfg.items():
         if venue not in known:
@@ -195,8 +191,6 @@ def load_targets(path: str | Path) -> tuple[
             for tf in tfs:
                 ohlcv.append(ScrapeTarget(venue, sym, tf, poll_seconds=poll))
 
-        # funding / OI are PERP-domain; filter via the adapter so a spot
-        # listing can never spawn a funding job.
         perp_syms = [
             sym for sym in symbols
             if REGISTRY[venue].market_type_for(sym) == MarketType.PERP
@@ -218,18 +212,33 @@ def load_targets(path: str | Path) -> tuple[
                 )
             else:
                 liquidity.append(LiquidityTarget(venue, tuple(perp_syms)))
+        if section.get("orderbook"):
+            if Capability.BBO not in REGISTRY[venue].capabilities:
+                errors.append(
+                    f"[venues.{venue}] has orderbook = true but its adapter does not "
+                    "implement fetch_bbo — sync gap? (check the adapter file)"
+                )
+            else:
+                orderbook_poll = int(section.get("orderbook_poll_seconds", 60))
+                for sym in symbols:
+                    orderbooks.append(OrderBookTarget(venue, sym, orderbook_poll))
 
-    # -- tracked addresses -------------------------------------------------------
+ 
     fills: list[FillsTarget] = []
     for i, entry in enumerate(data.get("fills", [])):
         venue, addr, label = entry.get("venue"), entry.get("address"), entry.get("label")
         ok = True
         if venue not in known:
-            errors.append(f"fills[{i}]: unknown venue {venue!r}"); ok = False
+            errors.append(f"fills[{i}]: unknown venue {venue!r}")
+            ok = False
         elif not REGISTRY[venue].is_fill_ref(addr):
-            errors.append(f"fills[{i}]: invalid account ref {addr!r} for venue {venue}"); ok = False
+            errors.append(
+                f"fills[{i}]: invalid account ref {addr!r} for venue {venue}"
+            )
+            ok = False
         if not (isinstance(label, str) and label):
-            errors.append(f"fills[{i}]: missing/invalid label"); ok = False
+            errors.append(f"fills[{i}]: missing/invalid label")
+            ok = False
         if ok:
             fills.append(FillsTarget(venue, addr, label,
                                      poll_seconds=int(entry.get("poll_seconds", 30))))
@@ -239,4 +248,4 @@ def load_targets(path: str | Path) -> tuple[
     if not ohlcv and not fills:
         raise ValueError(f"symbols config {p} produced no targets")
 
-    return ohlcv, fills, funding, liquidity
+    return ohlcv, fills, funding, liquidity, orderbooks

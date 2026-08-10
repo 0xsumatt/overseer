@@ -1,16 +1,3 @@
-"""Mock read-side storage — run the whole web app with NO database.
-
-    OVERSEER_MOCK=1 flask --app web:create_app run --debug
-    log in as  mock@overseer.local  /  mock
-
-Duck-types ReadStorage: every query the views use returns realistic, fully
-deterministic data (seeded from series name + bar index, so refreshes and
-pans are stable, prices are venue-consistent for sane-looking basis, and the
-funding grid gets a proper spread of green/red cells). Auth works through the
-real code path via one built-in account. Nothing here touches the network or
-disk; swap to live by unsetting OVERSEER_MOCK.
-"""
-
 from __future__ import annotations
 
 import hashlib
@@ -27,7 +14,6 @@ UTC = timezone.utc
 MOCK_EMAIL = "mock@overseer.local"
 MOCK_PASSWORD = "mock"
 
-# the live venue/asset matrix (binance_spot deliberately lacks HYPE, as in prod)
 _BASES = {"BTC": 102_500.0, "ETH": 3_260.0, "SOL": 219.0, "AAVE": 312.0, "HYPE": 44.0,
           "XRP": 3.1, "DOGE": 0.42, "LINK": 26.5, "AVAX": 55.0}
 
@@ -148,6 +134,50 @@ class MockStorage:
                 "volume": Decimal(f"{abs(vol):.4f}"),
             })
         return rows
+
+    def orderbook_spreads(
+        self, market_type, symbols, exchanges, since, bucket_minutes
+    ) -> list[Row]:
+        now = datetime.now(UTC).replace(second=0, microsecond=0)
+        step = bucket_minutes * 60
+        count = max(2, int((now - since).total_seconds() // step))
+        out: list[Row] = []
+        for _, exchange, mt, symbol, _asset, base, _funding in self._series():
+            if mt != market_type or symbol not in symbols or exchange not in exchanges:
+                continue
+            seed = f"book:{exchange}:{market_type}:{symbol}"
+            base_spread = 0.45 + 2.2 * abs(_u(seed, 2))
+            for k in range(count):
+                ts = datetime.fromtimestamp(
+                    (int(now.timestamp()) // step - (count - 1 - k)) * step,
+                    tz=UTC,
+                )
+                i = int(ts.timestamp() // 60)
+                midpoint = _px(seed, base, i)
+                spread_bps = max(
+                    0.05,
+                    base_spread * (
+                        1 + 0.22 * math.sin(i / 43 + _u(seed, 3) * math.pi)
+                    ) + 0.08 * _u(seed, i + 41),
+                )
+                half_spread = midpoint * spread_bps / 20_000
+                size = max(0.001, base * (0.02 + 0.03 * abs(_u(seed, i + 73))) / midpoint)
+                out.append({
+                    "exchange": exchange,
+                    "market_type": market_type,
+                    "symbol": symbol,
+                    "ts": ts,
+                    "spread_bps": Decimal(f"{spread_bps:.6f}"),
+                    "midpoint": Decimal(f"{midpoint:.8f}"),
+                    "bid_price": Decimal(f"{midpoint - half_spread:.8f}"),
+                    "ask_price": Decimal(f"{midpoint + half_spread:.8f}"),
+                    "bid_size": Decimal(f"{size:.8f}"),
+                    "ask_size": Decimal(
+                        f"{size * (0.8 + 0.4 * abs(_u(seed, i + 91))):.8f}"
+                    ),
+                })
+        out.sort(key=lambda row: (row["ts"], row["exchange"]))
+        return out
 
     def basis(self, spot_exchange, spot_symbol, perp_exchange, perp_symbol,
               interval, since=None, limit: int = 1000) -> list[Row]:

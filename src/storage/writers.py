@@ -8,7 +8,7 @@ import asyncpg
 
 from core.enums import Exchange, MarketType, Timeframe
 from core.models import (OHLCV, FundingRate, LeverageStats, LiquiditySnapshot,
-                         Trade, TradeFlow, VenueVolume)
+                         OrderBookSnapshot, Trade, TradeFlow, VenueVolume)
 
 # (db column, postgres array cast, value extractor)
 _Col = tuple[str, str, Callable[[Any], Any]]
@@ -67,6 +67,19 @@ _LIQ_COLS: tuple[_Col, ...] = (
     ("funding_premium",              "numeric",     lambda r: r.funding_premium),
 )
 _LIQ_CONFLICT = ("exchange", "symbol", "ts")
+
+_ORDERBOOK_COLS: tuple[_Col, ...] = (
+    ("exchange",       "text",        lambda r: r.exchange.value),
+    ("market_type",    "text",        lambda r: r.market_type.value),
+    ("symbol",         "text",        lambda r: r.symbol),
+    ("quote_currency", "text",        lambda r: r.quote_currency.value),
+    ("ts",             "timestamptz", lambda r: r.ts),
+    ("bid_price",      "numeric",     lambda r: r.bid_price),
+    ("bid_size",       "numeric",     lambda r: r.bid_size),
+    ("ask_price",      "numeric",     lambda r: r.ask_price),
+    ("ask_size",       "numeric",     lambda r: r.ask_size),
+)
+_ORDERBOOK_CONFLICT = ("exchange", "market_type", "symbol", "ts")
 
 _VENUE_VOL_COLS: tuple[_Col, ...] = (
     ("exchange",     "text",        lambda r: r.exchange.value),
@@ -223,6 +236,16 @@ class Storage:
     async def write_liquidity(self, records: Sequence[LiquiditySnapshot]) -> int:
         return await self._bulk_upsert("liquidity", _LIQ_COLS, _LIQ_CONFLICT, records)
 
+    async def write_orderbook_snapshots(
+        self, records: Sequence[OrderBookSnapshot]
+    ) -> int:
+        return await self._bulk_upsert(
+            "orderbook_snapshots",
+            _ORDERBOOK_COLS,
+            _ORDERBOOK_CONFLICT,
+            records,
+        )
+
     async def write_venue_volume(self, records: Sequence[VenueVolume]) -> int:
         return await self._bulk_upsert(
             "venue_volume", _VENUE_VOL_COLS, _VENUE_VOL_CONFLICT, records
@@ -269,7 +292,7 @@ class Storage:
         return await self.pool.fetch(
             "SELECT DISTINCT ON (exchange, symbol) "
             "exchange, symbol, ts, current_funding_rate AS rate, "
-            "funding_interval_hours AS interval_hours "
+            "funding_interval_hours AS interval_hours, next_funding_at "
             "FROM liquidity "
             "WHERE current_funding_rate IS NOT NULL "
             "AND funding_interval_hours IS NOT NULL "

@@ -29,5 +29,12 @@ class Settings:
         default_factory=lambda: float(os.getenv("OVERSEER_SPREAD_ALERT_APR", "25"))
     )
 
+    # A spread must persist across fresh snapshots for this long before alerting.
+    spread_confirm_minutes: float = field(
+        default_factory=lambda: float(
+            os.getenv("OVERSEER_SPREAD_CONFIRM_MINUTES", "10")
+        )
+    )
+
 
 settings = Settings()

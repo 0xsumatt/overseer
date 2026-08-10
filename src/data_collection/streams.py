@@ -1,34 +1,3 @@
-"""Venue stream adapters — the websocket sibling of BaseExchangeScraper.
-
-Deliberately a separate base class rather than more methods on the scraper.
-BaseExchangeScraper's entire contract is "call it, get a list back, it holds no
-state between calls"; a stream is a long-lived connection with a lifecycle, a
-subscription set and health of its own. Bolting one onto the other would make
-both harder to reason about, and the two are wired up by different machinery
-anyway (APScheduler polls scrapers; scheduler/streams.py supervises streams).
-
-A stream adapter is intentionally tiny — it owns exactly two decisions:
-
-    subscribe_frames()  what to say on connect (re-sent on every reconnect)
-    parse(payload)      bytes -> domain records
-
-Everything else — connecting, reconnecting with backoff, ping/pong, liveness
-accounting, buffering, database writes, health heartbeats — belongs to
-data_collection/ws.py and storage/buffer.py. If a venue adapter grows a
-connection concern, it is in the wrong file.
-
-`parse` is called from picows' SYNCHRONOUS frame callback, so implementations
-must be fast and must not await, block or touch the database. Use orjson
-(already a project dependency) on the raw bytes rather than decoding to str
-first — orjson.loads takes bytes directly.
-
-Scope note: `parse` returns Trades, which covers the tape and per-account fills
-— the two feeds that write to the existing `trades` table. Order-book depth is
-deliberately NOT modelled here. A book is materialised state maintained from a
-snapshot plus sequenced deltas, needing gap detection and resync, and it is not
-append-only, so it wants its own base class and its own sink rather than being
-forced through a records-to-rows path. See the note in scheduler/streams.py.
-"""
 
 from __future__ import annotations
 
@@ -42,22 +11,14 @@ from data_collection.base import Capability
 
 
 class BaseExchangeStream(ABC):
-    # -- venue identity (set by each adapter) -------------------------------------
     exchange: ClassVar[Exchange]
     ws_url: ClassVar[str]
-    # What this stream carries: Capability.TRADES (public tape) or
-    # Capability.FILLS (per-account). Both already exist on the REST side and
-    # are documented there as stream capabilities.
+   
     capabilities: ClassVar[frozenset[Capability]] = frozenset()
-    # Short tag distinguishing two streams on one venue, e.g. "trades", "fills".
     kind: ClassVar[str] = "stream"
 
     def __init__(self, symbols: Sequence[str] = (), venue: str | None = None) -> None:
         self.symbols = tuple(symbols)
-        # The VENUE id, not the exchange: one exchange can be several venues
-        # (binance_spot and binance_perp are both Exchange.BINANCE), and their
-        # heartbeats must not collide in job_runs. Defaults to the exchange
-        # name, which is correct for single-venue exchanges like Hyperliquid.
         self.venue = venue or str(self.exchange)
 
     @property
@@ -67,7 +28,6 @@ class BaseExchangeStream(ABC):
         treat a stream exactly like any other job."""
         return f"stream:{self.venue}:{self.kind}"
 
-    # -- the two decisions an adapter owns ------------------------------------------
 
     @abstractmethod
     def subscribe_frames(self) -> Sequence[bytes]:

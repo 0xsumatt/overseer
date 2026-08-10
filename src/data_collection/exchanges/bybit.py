@@ -15,7 +15,6 @@ _QUOTES: tuple[str, ...] = (
     "BTC", "ETH", "EUR", "TRY", "GBP", "BRL",
 )
 
-# Timeframe -> bybit interval string ("1","5","60","240","D"…)
 _INTERVALS: dict[Timeframe, str] = {
     Timeframe.M1: "1", Timeframe.M3: "3", Timeframe.M5: "5",
     Timeframe.M15: "15", Timeframe.M30: "30", Timeframe.H1: "60",
@@ -26,30 +25,25 @@ _INTERVALS: dict[Timeframe, str] = {
 
 
 def _window_ms(since: datetime, max_lookback_days: int = 60) -> tuple[int, int]:
-    """Bybit v5 is strict about time params: send BOTH start and end, with
-    start strictly before end, and don't ask for absurd lookbacks. Returns a
-    clamped (start_ms, end_ms) pair."""
+
     now = datetime.now(timezone.utc)
     end_ms = int(now.timestamp() * 1000)
     floor = end_ms - max_lookback_days * 86_400_000
     start_ms = int(since.timestamp() * 1000)
-    start_ms = max(start_ms, floor)          # cap the lookback
+    start_ms = max(start_ms, floor)         
     if start_ms >= end_ms:
-        start_ms = end_ms - 60_000           # clock skew / same-ms resume: back off 1min
+        start_ms = end_ms - 60_000           
     return start_ms, end_ms
 
 
-_RATE_LIMIT_CODES = {10006, 10018}     # too many visits / IP rate limit
-_RATE_LIMIT_BACKOFF = 30.0             # seconds to stall the bucket when bybit says stop
+_RATE_LIMIT_CODES = {10006, 10018}    
+_RATE_LIMIT_BACKOFF = 30.0             
 
 
 
 
 
 def to_canonical(native: str) -> str:
-    """'BTCUSDT' -> 'BTC/USDT'. Module-level so the websocket adapter shares
-    this rule exactly — stream rows must carry the same canonical symbol as the
-    REST rows or they won't join, and the capture gate looks symbols up by it."""
     native = native.upper()
     for quote in _QUOTES:
         if native.endswith(quote) and len(native) > len(quote):
@@ -73,13 +67,8 @@ class BybitSpotScraper(BaseExchangeScraper):
             default_headers={"User-Agent": "overseer/0.1"},
         )
 
-    # -- symbols (BTCUSDT concatenated, like Binance) ------------------------------
 
     def _unwrap(self, payload: Any) -> Any:
-        """v5 envelope: HTTP 200 with retCode != 0 is still an error — and
-        retCode 10006/10018 is bybit's rate limit arriving OUTSIDE HTTP 429,
-        so push the backoff into the limiter before raising (otherwise the
-        bucket keeps firing into the same limited window)."""
         code = payload.get("retCode")
         if code == 0:
             return payload["result"]
@@ -114,7 +103,6 @@ class BybitSpotScraper(BaseExchangeScraper):
             ask_size=self._dec(row["ask1Size"]),
         )
 
-    # -- OHLCV ----------------------------------------------------------------------
 
     async def fetch_ohlcv(
         self, symbol: str, interval: Timeframe, since: datetime, *, limit: int = 1000
@@ -142,14 +130,13 @@ class BybitSpotScraper(BaseExchangeScraper):
                 ts=self._from_ms(int(r[0])),
                 open=self._dec(r[1]), high=self._dec(r[2]),
                 low=self._dec(r[3]), close=self._dec(r[4]),
-                volume=self._dec(r[5]),                    # base volume
+                volume=self._dec(r[5]),                   
             )
             for r in rows
         ]
-        out.reverse()          # bybit returns newest-first
+        out.reverse()         
         return out
 
-    # -- venue volume: full tickers list for the category (no symbol) ------------
 
     async def fetch_venue_volume(self) -> dict:
         payload = await self.http.get_json(
@@ -162,8 +149,7 @@ class BybitSpotScraper(BaseExchangeScraper):
 
 
 class BybitPerpScraper(BybitSpotScraper):
-    """USDT linear perpetuals: same endpoints, category=linear, plus funding
-    and liquidity (perp-domain feeds)."""
+   
 
     market_type: ClassVar[MarketType] = MarketType.PERP
     category: ClassVar[str] = "linear"
@@ -177,7 +163,7 @@ class BybitPerpScraper(BybitSpotScraper):
         }
     )
 
-    _funding_intervals: dict[str, int] | None = None   # native -> hours
+    _funding_intervals: dict[str, int] | None = None   
 
     async def _funding_interval(self, native: str) -> int:
         if self._funding_intervals is None:
@@ -203,8 +189,8 @@ class BybitPerpScraper(BybitSpotScraper):
                 "category": "linear",
                 "symbol": native,
                 "startTime": str(start_ms),
-                "endTime": str(end_ms),            # bybit wants a bounded window
-                "limit": str(limit),               # bybit caps this at 200
+                "endTime": str(end_ms),            
+                "limit": str(limit),               
             },
         )
         rows = self._unwrap(payload)["list"]
@@ -220,7 +206,7 @@ class BybitPerpScraper(BybitSpotScraper):
             )
             for r in rows
         ]
-        out.reverse()          # newest-first from the API
+        out.reverse()         
         return out
 
     async def fetch_liquidity(

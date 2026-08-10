@@ -10,7 +10,6 @@ Row = dict[str, Any]
 
 
 class ReadStorage:
-    """Pooled, sync read access. Create one per web process; it's thread-safe."""
 
     def __init__(self, dsn: str, min_size: int = 1, max_size: int = 8) -> None:
         self._pool = ConnectionPool(
@@ -30,7 +29,6 @@ class ReadStorage:
                 cur.execute(sql, params)
                 return cur.fetchall()
 
-    # -- candles (feeds the charts) -------------------------------------------
 
     def candles(
         self,
@@ -42,11 +40,7 @@ class ReadStorage:
         until: datetime | None = None,
         limit: int = 1000,
     ) -> list[Row]:
-        """Bars for one series, ascending by time (what charting libs expect).
 
-        The LIMIT applies to the *most recent* bars (inner DESC), then reorders
-        ascending — so "last 500 bars" is the natural call shape.
-        """
         since = since or datetime(1970, 1, 1, tzinfo=timezone.utc)
         until = until or datetime.now(timezone.utc)
         return self._fetch(
@@ -76,6 +70,48 @@ class ReadStorage:
             """
         )
 
+    def orderbook_spreads(
+        self,
+        market_type: str,
+        symbols: list[str],
+        exchanges: list[str],
+        since: datetime,
+        bucket_minutes: int,
+    ) -> list[Row]:
+        """Bucketed executable bid/ask spread history for one canonical asset."""
+        if not symbols or not exchanges:
+            return []
+        return self._fetch(
+            """
+            SELECT exchange, market_type, symbol,
+                   date_bin(%s::interval, ts, TIMESTAMPTZ '1970-01-01') AS ts,
+                   avg((ask_price - bid_price)
+                       / NULLIF((ask_price + bid_price) / 2, 0) * 10000)
+                       AS spread_bps,
+                   avg((ask_price + bid_price) / 2) AS midpoint,
+                   avg(bid_price) AS bid_price,
+                   avg(ask_price) AS ask_price,
+                   avg(bid_size) AS bid_size,
+                   avg(ask_size) AS ask_size
+            FROM orderbook_snapshots
+            WHERE market_type=%s
+              AND symbol = ANY(%s)
+              AND exchange = ANY(%s)
+              AND ts >= %s
+            GROUP BY exchange, market_type, symbol,
+                     date_bin(%s::interval, ts, TIMESTAMPTZ '1970-01-01')
+            ORDER BY ts ASC, exchange ASC
+            """,
+            (
+                f"{bucket_minutes} minutes",
+                market_type,
+                symbols,
+                exchanges,
+                since,
+                f"{bucket_minutes} minutes",
+            ),
+        )
+
     # -- spot-perp basis (the analysis this project exists for) ----------------
 
     def basis(
@@ -88,14 +124,6 @@ class ReadStorage:
         since: datetime | None = None,
         limit: int = 1000,
     ) -> list[Row]:
-        """Join spot and perp closes on the bar timestamp.
-
-        basis = perp - spot; basis_pct = basis / spot * 100.
-        Parameterised by venue+symbol on each leg, so it covers same-venue
-        (binance spot vs binance perp, same symbol) AND cross-venue
-        (binance BTC/USDT spot vs hyperliquid BTC perp) with one query.
-        INNER JOIN: a bar missing on either leg is simply absent, not null.
-        """
         since = since or (datetime.now(timezone.utc) - timedelta(days=7))
         return self._fetch(
             """
@@ -119,7 +147,6 @@ class ReadStorage:
         )
 
 
-    # -- funding table (funding vs liquidity, per coin per venue) ---------------
 
     def funding_table(self) -> list[Row]:
         """Latest venue-published funding with settled funding as the fallback.

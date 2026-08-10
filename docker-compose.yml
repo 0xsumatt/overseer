@@ -30,6 +30,8 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@timescaledb:5432/overseer
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+      OVERSEER_SPREAD_ALERT_APR: ${OVERSEER_SPREAD_ALERT_APR:-25}
+      OVERSEER_SPREAD_CONFIRM_MINUTES: ${OVERSEER_SPREAD_CONFIRM_MINUTES:-10}
     restart: unless-stopped       # the supervision the scheduler needs for a multi-day soak
 
 volumes:

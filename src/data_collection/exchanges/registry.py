@@ -23,25 +23,14 @@ REGISTRY: dict[str, type[BaseExchangeScraper]] = {
     "hyperliquid": HyperliquidScraper,
     "lighter": LighterScraper,
     "extended": ExtendedScraper,
-    "bulk": BulkScraper,          # TESTNET adapter — enable config listings at mainnet
-    "rise": RiseScraper,          # TESTNET adapter — enable config listings at mainnet
-    "bullet": BulletScraper,      # mainnet LIVE — run the curl checklist in bullet.py, then enable
-    # Leveraged tokens, not an order-book venue. Registered but intentionally
-    # absent from symbols.toml: its API is behind an anti-bot challenge, so no
-    # targets are built and nothing polls. See the checklist in hylo.py.
+    "bulk": BulkScraper,          
+    "rise": RiseScraper,          
+    "bullet": BulletScraper,      
     "hylo": HyloScraper,
 }
 
-# Websocket adapters, keyed by the same venue ids. Separate from REGISTRY
-# because the two are wired up by different machinery — APScheduler polls
-# scrapers, scheduler/streams.py supervises streams — and most venues will
-# have one without the other for a while.
 STREAM_REGISTRY: dict[str, type[BaseExchangeStream]] = {
     "hyperliquid": HyperliquidTradesStream,
     "bybit_perp": BybitPerpTradesStream,
-    # Written and parse-verified, but fstream.binance.com delivered no market
-    # data from the dev machine on 2026-07-27 (spot streams worked, REST fapi
-    # worked) — looks like a jurisdiction restriction on the futures socket.
-    # Smoke-test it from the soak server before enabling in symbols.toml.
     "binance_perp": BinanceFuturesTradesStream,
 }

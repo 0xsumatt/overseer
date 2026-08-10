@@ -17,7 +17,11 @@ from data_collection.exchanges.extended import ExtendedScraper
 from data_collection.exchanges.hyperliquid import HyperliquidScraper
 from data_collection.exchanges.lighter import LighterScraper
 from data_collection.exchanges.risex import RiseScraper
-from scheduler.jobs import UsdcUsdtQuoteCache, check_dislocations
+from scheduler.jobs import (
+    DislocationConfirmation,
+    UsdcUsdtQuoteCache,
+    check_dislocations,
+)
 
 
 class RoutingHTTP:
@@ -169,12 +173,14 @@ class FakeBookScraper:
         self.exchange = exchange
         self.quote_currency = quote
         self.book = book
+        self.calls = 0
 
     @classmethod
     def market_type_for(cls, _: str) -> MarketType:
         return cls.market_type
 
     async def fetch_bbo(self, _: str) -> TopOfBook:
+        self.calls += 1
         return self.book
 
 
@@ -203,7 +209,7 @@ class FixedFxCache:
 
 
 @pytest.mark.asyncio
-async def test_dislocation_alert_uses_current_rates_bbo_and_side_aware_fx() -> None:
+async def test_dislocation_requires_sustained_rates_before_fetching_books() -> None:
     now = datetime.now(timezone.utc)
     binance_book = TopOfBook(
         Exchange.BINANCE,
@@ -235,6 +241,7 @@ async def test_dislocation_alert_uses_current_rates_bbo_and_side_aware_fx() -> N
         Decimal("1.002"),
         Decimal("1000000"),
     )
+    settlement = now + timedelta(hours=1)
     rows = [
         {
             "exchange": "binance",
@@ -242,6 +249,7 @@ async def test_dislocation_alert_uses_current_rates_bbo_and_side_aware_fx() -> N
             "ts": now,
             "rate": Decimal("0.0005"),
             "interval_hours": 8,
+            "next_funding_at": settlement,
         },
         {
             "exchange": "hyperliquid",
@@ -249,6 +257,7 @@ async def test_dislocation_alert_uses_current_rates_bbo_and_side_aware_fx() -> N
             "ts": now,
             "rate": Decimal("-0.0001"),
             "interval_hours": 1,
+            "next_funding_at": settlement,
         },
     ]
     storage = AlertStorage(rows)
@@ -264,37 +273,65 @@ async def test_dislocation_alert_uses_current_rates_bbo_and_side_aware_fx() -> N
             }
         }
     )
+    binance = FakeBookScraper(
+        Exchange.BINANCE, QuoteCurrency.USDT, binance_book
+    )
+    hyperliquid = FakeBookScraper(
+        Exchange.HYPERLIQUID, QuoteCurrency.USDC, hyperliquid_book
+    )
     scrapers = {
-        "binance_perp": FakeBookScraper(
-            Exchange.BINANCE, QuoteCurrency.USDT, binance_book
-        ),
-        "hyperliquid": FakeBookScraper(
-            Exchange.HYPERLIQUID, QuoteCurrency.USDC, hyperliquid_book
-        ),
+        "binance_perp": binance,
+        "hyperliquid": hyperliquid,
     }
+    confirmation = DislocationConfirmation(timedelta(minutes=10))
 
-    await check_dislocations(
-        storage,
-        notifier,
-        state,
-        registry,
-        25,
-        scrapers,  # type: ignore[arg-type]
-        FixedFxCache(fx_book),  # type: ignore[arg-type]
-    )
-    await check_dislocations(
-        storage,
-        notifier,
-        state,
-        registry,
-        25,
-        scrapers,  # type: ignore[arg-type]
-        FixedFxCache(fx_book),  # type: ignore[arg-type]
-    )
+    async def run_check() -> None:
+        await check_dislocations(
+            storage,
+            notifier,
+            state,
+            registry,
+            25,
+            scrapers,  # type: ignore[arg-type]
+            FixedFxCache(fx_book),  # type: ignore[arg-type]
+            confirmation,
+        )
 
+    # A one-snapshot spike does not alert or spend BBO requests.
+    await run_check()
+    await run_check()
+    assert notifier.messages == []
+    assert binance.calls == hyperliquid.calls == 0
+
+    # Dropping below the threshold resets the candidate.
+    for row in storage.rows:
+        row["ts"] = now + timedelta(minutes=5)
+    storage.rows[0]["rate"] = Decimal("0.00001")
+    storage.rows[1]["rate"] = Decimal("0.000001")
+    await run_check()
+
+    # A wide spread with different next settlements is not a candidate.
+    storage.rows[0]["rate"] = Decimal("0.0005")
+    storage.rows[1]["rate"] = Decimal("-0.0001")
+    storage.rows[1]["next_funding_at"] = settlement + timedelta(hours=1)
+    for row in storage.rows:
+        row["ts"] = now + timedelta(minutes=10)
+    await run_check()
+    assert notifier.messages == []
+    assert binance.calls == hyperliquid.calls == 0
+
+    # Three aligned fresh snapshots spanning ten minutes confirm the opportunity.
+    storage.rows[1]["next_funding_at"] = settlement
+    for minutes in (15, 20, 25):
+        for row in storage.rows:
+            row["ts"] = now + timedelta(minutes=minutes)
+        await run_check()
+
+    assert binance.calls == hyperliquid.calls == 1
     assert len(notifier.messages) == 1
     alert = notifier.messages[0]
-    assert "current funding spread 142.3% APR" in alert
+    assert "current funding spread 142.3% APR confirmed for 10m" in alert
+    assert f"settles {settlement:%d %b %H:%M UTC}" in alert
     assert "**SHORT**" in alert and "**LONG**" in alert
     assert "bid 100.000 × 2.000 | ask 101.000 × 3.000 USDT" in alert
     assert "bid 99.099 × 4.000 | ask 99.699 × 5.000 USDT" in alert
@@ -303,17 +340,11 @@ async def test_dislocation_alert_uses_current_rates_bbo_and_side_aware_fx() -> N
     assert "Fees and slippage beyond displayed size excluded" in alert
     assert state == {"dislocation:BTC": "wide"}
 
+    for row in storage.rows:
+        row["ts"] = now + timedelta(minutes=30)
     storage.rows[0]["rate"] = Decimal("0.00001")
     storage.rows[1]["rate"] = Decimal("0.000001")
-    await check_dislocations(
-        storage,
-        notifier,
-        state,
-        registry,
-        25,
-        scrapers,  # type: ignore[arg-type]
-        FixedFxCache(fx_book),  # type: ignore[arg-type]
-    )
+    await run_check()
     assert len(notifier.messages) == 2
     assert "current funding spread narrowed" in notifier.messages[1]
     assert state == {"dislocation:BTC": "ok"}

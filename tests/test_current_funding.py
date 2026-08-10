@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -164,7 +165,7 @@ async def test_dex_market_payloads_publish_current_funding() -> None:
                             "market_id": 1,
                             "exchange": "lighter",
                             "symbol": "BTC",
-                            "rate": "0.0002",
+                            "rate": "0.000096",
                         },
                         {
                             "market_id": 1,
@@ -178,7 +179,7 @@ async def test_dex_market_payloads_publish_current_funding() -> None:
         )
     )
     [row] = await lighter.fetch_liquidity(["BTC"])
-    assert_current(row, rate="0.0002", index="100.0", hours=1)
+    assert_current(row, rate="0.000012", index="100.0", hours=1)
 
     extended = ExtendedScraper(
         RoutingHTTP(
@@ -248,3 +249,68 @@ async def test_dex_market_payloads_publish_current_funding() -> None:
     )
     [row] = await bulk.fetch_liquidity(["BTC-USD"])
     assert_current(row, rate="0.0005", index="100.0", hours=8, has_next=False)
+
+
+@pytest.mark.asyncio
+async def test_lighter_settled_funding_converts_percent_to_fraction() -> None:
+    scraper = LighterScraper(
+        RoutingHTTP(
+            {
+                "/orderBookDetails": {
+                    "order_book_details": [
+                        {"symbol": "BTC", "market_id": 1}
+                    ],
+                    "spot_order_book_details": [],
+                },
+                "/fundings": {
+                    "fundings": [
+                        {
+                            "timestamp": 1_700_000_000,
+                            "rate": "0.0008",
+                            "direction": "long",
+                        },
+                        {
+                            "timestamp": 1_700_003_600,
+                            "rate": "0.0004",
+                            "direction": "short",
+                        },
+                    ]
+                },
+            }
+        )
+    )
+
+    rows = await scraper.fetch_funding(
+        "BTC", datetime(2023, 1, 1, tzinfo=timezone.utc)
+    )
+
+    assert [row.rate for row in rows] == [
+        Decimal("0.000008"),
+        Decimal("-0.000004"),
+    ]
+    assert [row.interval_hours for row in rows] == [1, 1]
+
+
+@pytest.mark.asyncio
+async def test_bullet_funding_defaults_to_hourly_when_info_is_empty() -> None:
+    scraper = BulletScraper(
+        RoutingHTTP(
+            {
+                "/fundingRate": [
+                    {
+                        "symbol": "BTC-USD",
+                        "fundingRate": "0.000048",
+                        "fundingTime": 1_700_000_000_000_000,
+                    }
+                ],
+                "/fundingInfo": [],
+            }
+        )
+    )
+
+    [row] = await scraper.fetch_funding(
+        "BTC-USD", datetime(2023, 1, 1, tzinfo=timezone.utc)
+    )
+
+    assert row.rate == Decimal("0.000048")
+    assert row.interval_hours == 1

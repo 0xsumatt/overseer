@@ -1,8 +1,10 @@
 [venues.binance_spot]
 intervals = ["1m"]
+orderbook = true
 
 [venues.binance_perp]
 intervals = ["1m"]
+orderbook = true
 funding = "all"
 liquidity = true
 # aggTrade tape, settlement-windowed. Adapter is written and parse-verified,
@@ -13,6 +15,7 @@ liquidity = true
 
 [venues.hyperliquid]
 intervals = ["1m"]
+orderbook = true
 funding = "all"
 liquidity = "all"
 # Public trade tape over websocket. true = raw trades kept only around funding
@@ -21,9 +24,11 @@ stream = true
 
 [venues.bybit_spot]
 intervals = ["1m"]
+orderbook = true
 
 [venues.bybit_perp]
 intervals = ["1m"]
+orderbook = true
 funding = "all"
 liquidity = "all"
 # publicTrade tape. true = raw trades kept only around funding settlements;
@@ -33,11 +38,13 @@ stream = true
 
 [venues.lighter]
 intervals = ["1m"]
+orderbook = true
 funding = "all"
 liquidity = "all"
 
 [venues.extended]
 intervals = ["1m"]
+orderbook = true
 funding = "all"
 liquidity = "all"
 
@@ -49,11 +56,13 @@ liquidity = "all"
 
 [venues.rise]
 intervals = ["1m"]
+orderbook = true
 funding = "all"
 liquidity = "all"
  
 [venues.bullet]
 intervals = []
+orderbook = true
 funding = "all"
 liquidity = "all"
 

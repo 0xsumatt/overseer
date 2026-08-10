@@ -14,10 +14,8 @@ from data_collection.ratelimit import RateLimiter
 class HyperliquidScraper(BaseExchangeScraper):
     exchange: ClassVar[Exchange] = Exchange.HYPERLIQUID
     base_url: ClassVar[str] = "https://api.hyperliquid.xyz"
-    market_type: ClassVar[MarketType] = MarketType.PERP        # default/primary
+    market_type: ClassVar[MarketType] = MarketType.PERP  
     quote_currency: ClassVar[QuoteCurrency] = QuoteCurrency.USDC
-    # FILLS is scheduled for specific known addresses (e.g. the HLP vault), not
-    # as a market-wide tape — that's still WS's job. See scheduler/targets.py.
     capabilities: ClassVar[frozenset[Capability]] = frozenset(
         {
             Capability.OHLCV,
@@ -31,25 +29,18 @@ class HyperliquidScraper(BaseExchangeScraper):
 
     def _build_http(self) -> HttpClient:
         return HttpClient(
-            limiter=RateLimiter.per_minute(1200, burst=60),    # conservative; tune
+            limiter=RateLimiter.per_minute(1200, burst=60), 
             default_headers={"User-Agent": "overseer/0.1"},
         )
 
-    # -- symbols ------------------------------------------------------------------
 
     @staticmethod
     def _market_for_coin(coin: str) -> MarketType:
-        # spot coins are "X/USDC" or "@{index}"; everything else is a perp
         if "/" in coin or coin.startswith("@"):
             return MarketType.SPOT
         return MarketType.PERP
 
-    # Hyperliquid's own coin format already works as an unambiguous canonical
-    # within the venue: "BTC" is a perp, "PURR/USDC" / "@1" are spot, "dex:NAME"
-    # is a HIP-3 perp. So translation is identity, and market_type derives
-    # straight from the symbol. (An earlier "BTC" -> "BTC/USDC" mapping collided
-    # with spot "PURR/USDC" and made the market undecidable from the string.)
-    # Reconciling HL "BTC" with Binance "BTC/USDT" is symbols.py's job, deferred.
+   
     def to_symbol(self, native: str) -> str:
         return native
 
@@ -80,7 +71,6 @@ class HyperliquidScraper(BaseExchangeScraper):
             ask_size=self._dec(ask["sz"]),
         )
 
-    # -- OHLCV: POST /info candleSnapshot -----------------------------------------
 
     async def fetch_ohlcv(
         self, symbol: str, interval: Timeframe, since: datetime, *, until: datetime | None = None
@@ -117,10 +107,6 @@ class HyperliquidScraper(BaseExchangeScraper):
             )
         return out
 
-    # -- fills: POST /info userFillsByTime — per-address utility, NOT scheduled ---
-    #    Account-scoped, so it can't be the market-wide tape (that's WS later).
-    #    Handy for "analyse this one wallet's fills/PnL" on demand.
-
     @classmethod
     def is_fill_ref(cls, ref: object) -> bool:
         return (
@@ -154,8 +140,6 @@ class HyperliquidScraper(BaseExchangeScraper):
             )
         return out
 
-    # -- funding: POST /info fundingHistory (hourly settlements) ------------------
-
     async def fetch_funding(self, symbol: str, since: datetime) -> Sequence[FundingRate]:
         rows = await self.http.post_json(
             f"{self.base_url}/info",
@@ -171,13 +155,11 @@ class HyperliquidScraper(BaseExchangeScraper):
                 symbol=self.to_symbol(r["coin"]),
                 ts=self._from_ms(r["time"]),
                 rate=self._dec(r["fundingRate"]),
-                interval_hours=1,          # HL settles hourly
+                interval_hours=1,         
             )
             for r in rows
         ]
 
-    # -- liquidity: POST /info metaAndAssetCtxs — ALL coins in one call -----------
-    #    universe[i] (names) aligns index-wise with ctxs[i] (market data).
 
     async def fetch_liquidity(
         self, symbols: Sequence[str]
@@ -217,9 +199,6 @@ class HyperliquidScraper(BaseExchangeScraper):
             )
         return out
 
-    # -- venue volume: sum dayNtlVlm across the WHOLE listed universe, perp +
-    #    spot separately (metaAndAssetCtxs / spotMetaAndAssetCtxs mirror each
-    #    other's [meta, ctxs] shape; dayNtlVlm is already quote-notional) -------
 
     async def fetch_venue_volume(self) -> dict:
         meta, ctxs = await self.http.post_json(

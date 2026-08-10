@@ -104,6 +104,25 @@ class TopOfBook:
 
 
 @dataclass(frozen=True, slots=True)
+class OrderBookSnapshot:
+    """Persisted executable top-of-book quote for spread history."""
+
+    exchange: Exchange
+    market_type: MarketType
+    symbol: str
+    quote_currency: QuoteCurrency
+    ts: datetime
+    bid_price: Decimal
+    bid_size: Decimal
+    ask_price: Decimal
+    ask_size: Decimal
+
+    @property
+    def key(self) -> tuple[str, str, str, datetime]:
+        return (self.exchange, self.market_type, self.symbol, self.ts)
+
+
+@dataclass(frozen=True, slots=True)
 class TradeFlow:
     """One minute of order flow for one market, aggregated in-process.
 

@@ -21,13 +21,13 @@ from data_collection.http import HttpClient
 
 class Capability(StrEnum):
     OHLCV = "ohlcv"
-    FUNDING = "funding"    # settled funding-rate history (perps)
-    LIQUIDITY = "liquidity"  # OI / 24h volume / mark snapshots (perps)
-    VENUE_VOLUME = "venue_volume"  # venue-wide 24h volume, all markets
-    LEVERAGE_STATS = "leverage_stats"  # pool TVL / effective leverage (leveraged tokens)
-    TRADES = "trades"      # public tape — a STREAM (websocket) capability, not REST
-    FILLS = "fills"        # per-address fills; on-demand utility, not scheduled
-    BBO = "bbo"            # on-demand best bid/ask snapshot
+    FUNDING = "funding"    
+    LIQUIDITY = "liquidity"  
+    VENUE_VOLUME = "venue_volume"  
+    LEVERAGE_STATS = "leverage_stats"  
+    TRADES = "trades"     
+    FILLS = "fills"       
+    BBO = "bbo"          
 
 
 class UnsupportedCapability(NotImplementedError):
@@ -38,23 +38,22 @@ class UnsupportedCapability(NotImplementedError):
 
 
 class BaseExchangeScraper(ABC):
-    # -- venue identity & config (set by each adapter) ----------------------------
     exchange: ClassVar[Exchange]
     base_url: ClassVar[str]
-    market_type: ClassVar[MarketType]          # the market this adapter covers
+    market_type: ClassVar[MarketType]         
     capabilities: ClassVar[frozenset[Capability]] = frozenset()
     quote_currency: ClassVar[QuoteCurrency]
 
     def __init__(self, http: HttpClient | None = None) -> None:
-        # injectable for tests; otherwise the venue builds its own client with
-        # the right limiter and headers.
+   
+
         self.http = http if http is not None else self._build_http()
 
     @abstractmethod
     def _build_http(self) -> HttpClient:
         """Construct the venue's rate-limited HttpClient."""
 
-    # -- symbol translation (each venue knows its own convention) -----------------
+
 
     @abstractmethod
     def to_symbol(self, native: str) -> str:
@@ -73,7 +72,7 @@ class BaseExchangeScraper(ABC):
         endpoint (Hyperliquid) override to derive it."""
         return cls.market_type
 
-    # -- data methods: default to "unsupported"; venues override what they serve --
+    
 
     async def fetch_ohlcv(
         self, symbol: str, interval: Timeframe, since: datetime
@@ -97,8 +96,7 @@ class BaseExchangeScraper(ABC):
         """Current best bid/ask. Called on demand for alerting, never polled."""
         raise UnsupportedCapability(self.exchange, "fetch_bbo")
 
-    # Venues whose liquidity endpoint returns ALL markets in one call can serve
-    # liquidity = "all" in config; per-symbol venues (binance OI) cannot.
+    
     supports_wide_liquidity: ClassVar[bool] = False
 
     async def fetch_leverage_stats(
@@ -130,7 +128,7 @@ class BaseExchangeScraper(ABC):
         """Per-address fills — the path that carries a wallet_address."""
         raise UnsupportedCapability(self.exchange, "fetch_fills")
 
-    # -- lifecycle ----------------------------------------------------------------
+   
 
     async def aclose(self) -> None:
         await self.http.aclose()
