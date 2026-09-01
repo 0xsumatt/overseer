@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+  set -Eeuo pipefail
+  umask 077
+
+   readonly APP_DIR=/opt/overseer
+   readonly DUMP_DIR=/var/backups/overseer
+   readonly DUMP_FILE="$DUMP_DIR/overseer.dump"
+   readonly META_FILE="$DUMP_DIR/versions.txt"
+
+   mkdir -p "$DUMP_DIR"
+
+   dump_tmp="$(mktemp "$DUMP_DIR/.overseer.dump.XXXXXX")"
+   meta_tmp="$(mktemp "$DUMP_DIR/.versions.txt.XXXXXX")"
+
+   cleanup() {
+    rm -f "$dump_tmp" "$meta_tmp"
+   }
+   trap cleanup EXIT
+
+   cd "$APP_DIR"
+
+   docker compose -p overseer exec -T timescaledb \
+       pg_dump -U postgres -d overseer -Fc > "$dump_tmp"
+
+   test -s "$dump_tmp"
+
+   docker compose -p overseer exec -T timescaledb \
+       psql -U postgres -d overseer -At -c \
+       "SELECT 'postgres=' || current_setting('server_version');
+        SELECT 'timescaledb=' || extversion
+        FROM pg_extension
+        WHERE extname = 'timescaledb';" > "$meta_tmp"
+
+   mv "$dump_tmp" "$DUMP_FILE"
+   mv "$meta_tmp" "$META_FILE"
+
+   restic backup \
+       "$DUMP_FILE" \
+       "$META_FILE" \
+       --tag overseer-postgres
+
+   restic forget \
+       --tag overseer-postgres \
+       --keep-daily 7 \
+       --keep-weekly 4 \
+       --keep-monthly 6 \
+       --prune

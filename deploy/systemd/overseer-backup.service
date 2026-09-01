@@ -1,0 +1,14 @@
+ [Unit]                                                                                                                  
+   Description=Overseer encrypted PostgreSQL backup                                                                        
+   After=network-online.target docker.service                                                                              
+   Wants=network-online.target                                                                                             
+   Requires=docker.service                                                                                                 
+                                                                                                                           
+   [Service]                                                                                                               
+   Type=oneshot                                                                                                            
+   EnvironmentFile=/etc/overseer-backup.env                                                                                
+   ExecStart=/usr/local/sbin/overseer-backup                                                                               
+   Nice=10                                                                                                                 
+   IOSchedulingClass=best-effort                                                                                           
+   IOSchedulingPriority=7                                                                                                  
+   UMask=0077    

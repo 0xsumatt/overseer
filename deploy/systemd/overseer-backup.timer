@@ -1,0 +1,10 @@
+[Unit]                                                                                                                  
+   Description=Daily Overseer database backup                                                                              
+                                                                                                                           
+   [Timer]                                                                                                                 
+   OnCalendar=*-*-* 03:17:00 UTC                                                                                           
+   RandomizedDelaySec=20m                                                                                                  
+   Persistent=true                                                                                                         
+                                                                                                                           
+   [Install]                                                                                                               
+   WantedBy=timers.target   
