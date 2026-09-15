@@ -298,6 +298,51 @@ class ReadStorage:
             (bucket, symbols, hours, limit),
         )
 
+    def volume_oi_ratio(
+        self, hours: int = 48, bucket_minutes: int | None = None,
+        limit: int = 20_000,
+    ) -> list[Row]:
+        """Reported 24h perp volume divided by OI notional, per exchange.
+
+        Each market contributes its latest snapshot inside the bucket. Venue
+        totals are calculated before division so small markets cannot carry
+        the same weight as large ones.
+        """
+        if bucket_minutes is None:
+            bucket_minutes = 15 if hours <= 48 else 60 if hours <= 168 else 240
+        bucket = f"{bucket_minutes} minutes"
+        return self._fetch(
+            """
+            WITH market_buckets AS (
+                SELECT exchange, symbol, time_bucket(%s::interval, ts) AS ts,
+                       last(volume_24h, ts) AS volume_24h,
+                       last(open_interest * mark_price, ts) AS oi_notional
+                FROM liquidity
+                WHERE ts >= now() - make_interval(hours => %s)
+                  AND volume_24h IS NOT NULL
+                  AND volume_24h >= 0
+                  AND open_interest > 0
+                  AND mark_price > 0
+                GROUP BY exchange, symbol, 3
+            ),
+            venue_buckets AS (
+                SELECT exchange, ts,
+                       sum(volume_24h) AS volume_24h,
+                       sum(oi_notional) AS oi_notional
+                FROM market_buckets
+                GROUP BY exchange, ts
+            )
+            SELECT exchange, ts, volume_24h, oi_notional,
+                   volume_24h / NULLIF(oi_notional, 0) AS ratio
+            FROM venue_buckets
+            WHERE oi_notional > 0
+            ORDER BY exchange, ts
+            LIMIT %s
+            """,
+            (bucket, hours, limit),
+        )
+
+
     def trade_flow_multi(
         self, symbols: list[str], hours: int = 48,
         bucket_minutes: int | None = None, limit: int = 20_000,

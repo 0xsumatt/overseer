@@ -7,9 +7,10 @@ TimescaleDB:
 * **scheduler** — async ingest: OHLCV bars, settled funding, OI/volume and
   top-of-book snapshots, plus tracked-address fills, per `symbols.toml`.
   Writes only.
-* **web** — Flask public analytics dashboard (price and bid–ask spread charts,
-  spot-perp basis, funding, flow, and wallets) plus an authenticated internal
-  health page. Reads only. Optional; ingest runs fine without it.
+* **web** — Flask public analytics dashboard (price, bid–ask spread, and
+  reported-volume/open-interest ratio charts; spot-perp basis; funding; flow;
+  wallets) plus an authenticated internal health page. Reads only. Optional;
+  ingest runs fine without it.
 
 ## Setup
 

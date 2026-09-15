@@ -62,6 +62,24 @@ def test_public_api_responses_are_cached_by_full_query(client) -> None:
     assert first.headers["Cache-Control"] == "public, max-age=30, stale-while-revalidate=30"
 
 
+def test_volume_oi_ratio_returns_weighted_exchange_series(client) -> None:
+    response = client.get("/api/volume-oi-ratio?hours=24")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["hours"] == 24
+    assert payload["bucket_minutes"] == 15
+    assert payload["series"]
+    assert len({item["exchange"] for item in payload["series"]}) == len(payload["series"])
+
+    point = payload["series"][0]["points"][0]
+    assert point["volume_24h"] >= 0
+    assert point["oi_notional"] > 0
+    assert point["ratio"] == pytest.approx(
+        point["volume_24h"] / point["oi_notional"]
+    )
+
+
 def test_orderbook_spread_api_returns_bucketed_executable_quotes(client) -> None:
     response = client.get("/api/orderbook-spreads?asset=BTC&market=perp&hours=24")
 

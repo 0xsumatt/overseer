@@ -48,10 +48,10 @@ orderbook = true
 funding = "all"
 liquidity = "all"
 
-# [venues.bulk]
-# intervals = ["1m"]
-# funding = true
-# liquidity = true
+[venues.bulk]
+intervals = ["1m"]
+funding = true
+liquidity = true
 
 
 [venues.rise]
@@ -78,7 +78,7 @@ lighter = "BTC"
 extended = "BTC-USD"
 bullet = "BTC-USD"
 rise ="BTC/USDC"
-# bulk         = "BTC-USD"
+bulk         = "BTC-USD"
 
 [assets.ETH]
 binance_spot = "ETH/USDT"
@@ -90,7 +90,7 @@ lighter = "ETH"
 extended = "ETH-USD"
 bullet = "ETH-USD"
 rise ="ETH/USDC"
-# bulk         = "ETH-USD"
+bulk         = "ETH-USD"
 
 [assets.SOL]
 binance_spot = "SOL/USDT"
@@ -102,7 +102,7 @@ lighter = "SOL"
 extended = "SOL-USD"
 bullet = "SOL-USD"
 rise ="SOL/USDC"
-# bulk         = "SOL-USD"
+bulk         = "SOL-USD"
 
 [assets.AAVE]
 binance_spot = "AAVE/USDT"
@@ -112,9 +112,8 @@ bybit_spot = "AAVE/USDT"
 bybit_perp = "AAVE/USDT"
 lighter = "AAVE"
 extended = "AAVE-USD"
-bullet = "AAVE-USD"
 rise ="AAVE/USDC"
-# bulk         = "AAVE-USD"
+bulk         = "AAVE-USD"
 
 [assets.HYPE]
 binance_perp = "HYPE/USDT"
@@ -125,7 +124,18 @@ lighter = "HYPE"
 extended = "HYPE-USD"
 bullet = "HYPE-USD"
 rise ="HYPE/USDC"
-# bulk         = "HYPE-USD"
+bulk         = "HYPE-USD"
+
+[assets.LIT]
+binance_perp = "LIT/USDT"
+hyperliquid = "LIT"
+bybit_spot = "LIT/USDT"
+bybit_perp = "LIT/USDT"
+lighter = "LIT"
+extended = "LIT-USD"
+bulk = "LIT-USD"
+rise = "LIT/USDC"
+bullet = "LIT-USD"
 
 
 

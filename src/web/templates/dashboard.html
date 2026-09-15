@@ -189,6 +189,36 @@
       </div>
     </section>
   </div>
+
+  <section data-panel="volume-oi" data-panel-label="volume to open interest chart"
+           class="mt-4 flex h-[24rem] flex-col overflow-hidden rounded-md border border-line bg-panel/50 sm:h-[27rem]">
+    <div class="flex min-h-11 flex-wrap items-center justify-between gap-x-3 border-b border-line/60 px-3 py-1.5">
+      <div>
+        <h2 class="font-mono text-label tracking-label uppercase text-dim">reported volume / open interest</h2>
+        <p class="font-mono text-label text-faint">tracked perpetual markets · 24h · × per day</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <span id="volume-oi-status" class="font-mono text-label text-faint" role="status"></span>
+        <div class="hidden items-center gap-1 sm:flex">
+          <button type="button" data-max class="min-h-11 rounded px-2 font-mono text-data text-dim hover:text-body"></button>
+          <button type="button" data-collapse class="min-h-11 rounded px-2 font-mono text-data text-dim hover:text-body"></button>
+        </div>
+      </div>
+    </div>
+    <div data-panel-body class="flex min-h-0 flex-1 flex-col">
+      <div id="volume-oi-legend"
+           class="scroll-thin flex flex-nowrap gap-2 overflow-x-auto border-b border-line/60 px-3 py-2 sm:flex-wrap sm:overflow-visible"></div>
+      <div class="relative min-h-0 flex-1">
+        <div id="volume-oi-chart" aria-hidden="true" class="h-full w-full"></div>
+        <div id="volume-oi-empty"
+             class="pointer-events-none absolute inset-0 hidden place-items-center px-5 text-center font-mono text-data text-dim">
+          No ratio history exists for this window.
+        </div>
+      </div>
+      <p id="volume-oi-summary" class="sr-only"></p>
+    </div>
+  </section>
+
 </div>
 
 <div id="charts-view" class="hidden">
@@ -249,6 +279,11 @@ let stagedAssets = new Set();
 let stagedExchanges = new Set();
 const multiCards = new Map();
 const discoveredExchanges = { spot: new Set(), perp: new Set() };
+let volumeOiChart = null;
+let volumeOiRequest = 0;
+const volumeOiSeries = new Map();
+
+
 
 const chartOptions = {
   layout: { background: { color: 'transparent' }, textColor: CHART_THEME.text,
@@ -881,6 +916,7 @@ document.getElementById('token').addEventListener('change', event => {
 document.getElementById('hours').addEventListener('change', event => {
   dashboardFilters.set('hours', event.target.value);
   loadActiveCharts();
+  if (dashboardView === 'overview') loadVolumeOiRatio();
 });
 document.getElementById('asset-picker-trigger').addEventListener('click', () => {
   const open = document.getElementById('asset-picker-trigger').getAttribute('aria-expanded') === 'true';
@@ -1033,6 +1069,101 @@ function bar(label, value, max, color, extra) {
   </div>`;
 }
 
+function ensureVolumeOiChart() {
+  if (volumeOiChart) return volumeOiChart;
+  volumeOiChart = LightweightCharts.createChart(
+    document.getElementById('volume-oi-chart'),
+    {
+      ...chartOptions,
+      rightPriceScale: { borderColor: CHART_THEME.border, minimumWidth: 68 },
+      localization: { priceFormatter: value => `${value.toFixed(2)}×` },
+    },
+  );
+  return volumeOiChart;
+}
+
+function orderedVolumeOiSeries(payload) {
+  const byVenue = new Map(payload.series.map(item => [item.exchange, item]));
+  return [...VENUE_ORDER, ...byVenue.keys()]
+    .filter((venue, index, all) => all.indexOf(venue) === index && byVenue.has(venue))
+    .map(venue => byVenue.get(venue));
+}
+
+function renderVolumeOiRatio(payload) {
+  const chart = ensureVolumeOiChart();
+  volumeOiSeries.forEach(series => chart.removeSeries(series));
+  volumeOiSeries.clear();
+
+  const ordered = orderedVolumeOiSeries(payload);
+  for (const item of ordered) {
+    const series = chart.addLineSeries({
+      color: colorFor(item.exchange),
+      lineWidth: 2,
+      title: item.exchange,
+      priceLineVisible: false,
+      lastValueVisible: true,
+      crosshairMarkerRadius: 4,
+      priceFormat: { type: 'custom', formatter: value => `${value.toFixed(2)}×` },
+    });
+    series.setData(item.points.map(point => ({ time: point.time, value: point.ratio })));
+    volumeOiSeries.set(item.exchange, series);
+  }
+  if (ordered.length) chart.timeScale().fitContent();
+
+  document.getElementById('volume-oi-legend').innerHTML = ordered.map(item => {
+    const latest = item.points[item.points.length - 1];
+    return `<span class="flex shrink-0 items-center gap-1.5 rounded border border-line bg-panel2 px-2 py-1 font-mono text-label text-body">
+      <span class="h-2 w-2 rounded-full" style="background:${colorFor(item.exchange)}"></span>
+      <span>${item.exchange}</span>
+      <span class="tabular-nums text-dim">${latest ? latest.ratio.toFixed(2) + '×' : '—'}</span>
+    </span>`;
+  }).join('') || '<span class="font-mono text-label text-faint">no exchanges reported</span>';
+
+  const empty = document.getElementById('volume-oi-empty');
+  empty.textContent = 'No ratio history exists for this window.';
+  empty.classList.toggle('hidden', ordered.length > 0);
+  empty.classList.toggle('grid', ordered.length === 0);
+
+  const latest = ordered
+    .map(item => [item.exchange, item.points[item.points.length - 1]?.ratio])
+    .filter(([, ratio]) => ratio != null)
+    .sort((a, b) => b[1] - a[1]);
+  document.getElementById('volume-oi-summary').textContent = latest.length
+    ? `Latest volume to open interest ratios. ${latest.map(
+        ([venue, ratio]) => `${venue} ${ratio.toFixed(2)} times`
+      ).join(', ')}.`
+    : 'No volume to open interest ratio history is available.';
+
+}
+
+async function loadVolumeOiRatio() {
+  if (dashboardView !== 'overview') return;
+  const requestId = ++volumeOiRequest;
+  const status = document.getElementById('volume-oi-status');
+  status.textContent = 'loading…';
+  const hours = document.getElementById('hours').value;
+  try {
+    const payload = await Overseer.requestJSON(
+      `/api/volume-oi-ratio?${new URLSearchParams({ hours })}`
+    );
+    if (requestId !== volumeOiRequest) return;
+    renderVolumeOiRatio(payload);
+    status.textContent = `${payload.bucket_minutes}m buckets`;
+    payload.series.length
+      ? dashboardState.ready('volume-oi')
+      : dashboardState.empty(
+          'No volume/OI ratio history exists for this window.',
+          loadVolumeOiRatio,
+          'volume-oi',
+        );
+  } catch (error) {
+    if (requestId !== volumeOiRequest) return;
+    status.textContent = 'unavailable';
+    dashboardState.error('Volume/OI ratio', loadVolumeOiRatio, 'volume-oi');
+  }
+}
+
+
 async function loadOverview() {
   if (dashboardView !== 'overview') return;
   try {
@@ -1067,6 +1198,8 @@ async function loadOverview() {
   } catch (error) {
     dashboardState.error('Open-interest summary', loadOverview, 'open-interest');
   }
+
+  await loadVolumeOiRatio();
 }
 
 Overseer.poll(loadOverview, 120);

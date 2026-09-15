@@ -307,6 +307,35 @@ def liquidity_history_multi():
         })
     return jsonify(out)
 
+@bp.get("/volume-oi-ratio")
+def volume_oi_ratio():
+    """Tracked perpetual-market turnover: reported 24h volume / OI notional."""
+    hours = min(max(int(request.args.get("hours", 48)), 1), 24 * 30)
+    bucket_arg = request.args.get("bucket")
+    bucket_minutes = (
+        min(max(int(bucket_arg), 1), 1440)
+        if bucket_arg
+        else (15 if hours <= 48 else 60 if hours <= 168 else 240)
+    )
+    rows = _store().volume_oi_ratio(hours=hours, bucket_minutes=bucket_minutes)
+    grouped: dict[str, list] = {}
+    for row in rows:
+        grouped.setdefault(row["exchange"], []).append({
+            "time": int(row["ts"].timestamp()),
+            "volume_24h": float(row["volume_24h"]),
+            "oi_notional": float(row["oi_notional"]),
+            "ratio": float(row["ratio"]),
+        })
+    return jsonify({
+        "hours": hours,
+        "bucket_minutes": bucket_minutes,
+        "series": [
+            {"exchange": exchange, "points": points}
+            for exchange, points in grouped.items()
+        ],
+    })
+
+
 
 @bp.get("/trade-flow")
 def trade_flow():

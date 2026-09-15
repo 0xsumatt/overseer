@@ -422,6 +422,41 @@ class MockStorage:
                                 "oi_notional": Decimal(f"{oi:.2f}") * mark})
         return out
 
+    def volume_oi_ratio(
+        self, hours: int = 48, bucket_minutes: int | None = None,
+        limit: int = 20_000,
+    ) -> list[Row]:
+        bucket_min = bucket_minutes or (15 if hours <= 48 else 60 if hours <= 168 else 240)
+        now = datetime.now(UTC).replace(second=0, microsecond=0)
+        baselines = {
+            "binance": (18.4e9, 2.7),
+            "bybit": (8.6e9, 2.1),
+            "hyperliquid": (5.1e9, 1.4),
+            "lighter": (1.8e9, 1.8),
+            "extended": (0.7e9, 1.2),
+            "rise": (0.35e9, 0.9),
+            "bullet": (0.18e9, 1.1),
+        }
+        points_per_venue = min(limit // len(baselines), (hours * 60) // bucket_min)
+        out: list[Row] = []
+        for exchange, (oi_base, ratio_base) in baselines.items():
+            for k in range(points_per_venue, 0, -1):
+                ts = now - timedelta(minutes=k * bucket_min)
+                i = int(ts.timestamp() // 60)
+                oi = oi_base * (1 + 0.08 * math.sin(i / 290) + 0.025 * _u(f"ratio-oi:{exchange}", i))
+                ratio = ratio_base * (1 + 0.18 * math.sin(i / 180) + 0.06 * _u(f"ratio:{exchange}", i))
+                oi_notional = Decimal(f"{oi:.2f}")
+                volume_24h = Decimal(f"{oi * ratio:.2f}")
+                out.append({
+                    "exchange": exchange,
+                    "ts": ts,
+                    "volume_24h": volume_24h,
+                    "oi_notional": oi_notional,
+                    "ratio": volume_24h / oi_notional,
+                })
+        return out
+
+
     # Only venues with a websocket adapter produce flow, so the mock mirrors
     # that rather than inventing it for all nine — and it keeps the page to the
     # three-colour venue palette that validates cleanly on the dark surface.
