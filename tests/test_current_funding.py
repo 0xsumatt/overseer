@@ -14,6 +14,7 @@ from data_collection.exchanges.extended import ExtendedScraper
 from data_collection.exchanges.hyperliquid import HyperliquidScraper
 from data_collection.exchanges.lighter import LighterScraper
 from data_collection.exchanges.risex import RiseScraper
+from core.enums import Timeframe
 
 
 class RoutingHTTP:
@@ -314,3 +315,43 @@ async def test_bullet_funding_defaults_to_hourly_when_info_is_empty() -> None:
 
     assert row.rate == Decimal("0.000048")
     assert row.interval_hours == 1
+
+
+@pytest.mark.asyncio
+async def test_bulk_ohlcv_keeps_one_candle_per_open_time() -> None:
+    scraper = BulkScraper(
+        RoutingHTTP(
+            {
+                "/klines": [
+                    {
+                        "t": 1_700_000_000_000,
+                        "T": 1_700_000_060_000,
+                        "o": "100",
+                        "h": "102",
+                        "l": "99",
+                        "c": "101",
+                        "v": "4",
+                        "n": 12,
+                    },
+                    {
+                        "t": 1_700_000_000_000,
+                        "T": 1_700_000_060_000,
+                        "o": "101",
+                        "h": "101",
+                        "l": "101",
+                        "c": "101",
+                        "v": "0",
+                        "n": 0,
+                    },
+                ]
+            }
+        )
+    )
+
+    rows = await scraper.fetch_ohlcv(
+        "BTC-USD", Timeframe.M1, datetime(2023, 1, 1, tzinfo=timezone.utc)
+    )
+
+    assert len(rows) == 1
+    assert rows[0].volume == Decimal("4")
+    assert rows[0].high == Decimal("102")

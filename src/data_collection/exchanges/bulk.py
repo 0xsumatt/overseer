@@ -55,20 +55,27 @@ class BulkScraper(BaseExchangeScraper):
                 "endTime": str(self._to_ms(datetime.now(timezone.utc))),
             },
         )
+        by_open_time: dict[int, dict] = {}
+        for candle in rows:
+            open_time = int(candle["t"])
+            current = by_open_time.get(open_time)
+            if current is None or int(candle["n"]) > int(current["n"]):
+                by_open_time[open_time] = candle
+
         out = [
             OHLCV(
                 exchange=self.exchange,
                 market_type=self.market_type,
                 symbol=symbol,
                 interval=interval,
-                ts=self._from_ms(int(c["t"])),        
+                ts=self._from_ms(open_time),
                 open=self._dec(c["o"]), high=self._dec(c["h"]),
                 low=self._dec(c["l"]), close=self._dec(c["c"]),
-                volume=self._dec(c.get("v", 0)),       
+                volume=self._dec(c.get("v", 0)),
             )
-            for c in rows
+            for open_time, c in by_open_time.items()
         ]
-        out.sort(key=lambda b: b.ts)                    
+        out.sort(key=lambda b: b.ts)
         return out
 
 
