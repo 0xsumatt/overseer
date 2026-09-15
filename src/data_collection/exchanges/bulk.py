@@ -17,12 +17,12 @@ _INTERVALS: dict[Timeframe, str] = {
     Timeframe.H12: "12h", Timeframe.D1: "1d",
 }
 
-_FUNDING_INTERVAL_HOURS = 8   
+_FUNDING_INTERVAL_HOURS = 1
 
 
 class BulkScraper(BaseExchangeScraper):
     exchange: ClassVar[Exchange] = Exchange.BULK
-    base_url: ClassVar[str] = "https://exchange-api.bulk.trade/api/v1"
+    base_url: ClassVar[str] = "https://mainnet-api1.bulk.trade/api/v1"
     market_type: ClassVar[MarketType] = MarketType.PERP    
     capabilities: ClassVar[frozenset[Capability]] = frozenset(
         {Capability.OHLCV, Capability.FUNDING, Capability.LIQUIDITY}

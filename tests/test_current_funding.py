@@ -248,7 +248,7 @@ async def test_dex_market_payloads_publish_current_funding() -> None:
         )
     )
     [row] = await bulk.fetch_liquidity(["BTC-USD"])
-    assert_current(row, rate="0.0005", index="100.0", hours=8, has_next=False)
+    assert_current(row, rate="0.0005", index="100.0", hours=1, has_next=False)
 
 
 @pytest.mark.asyncio
