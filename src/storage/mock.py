@@ -17,9 +17,8 @@ MOCK_PASSWORD = "mock"
 _BASES = {"BTC": 102_500.0, "ETH": 3_260.0, "SOL": 219.0, "AAVE": 312.0, "HYPE": 44.0,
           "XRP": 3.1, "DOGE": 0.42, "LINK": 26.5, "AVAX": 55.0}
 
-# wide-universe extras: NOT in the asset registry, so they render under their
-# raw venue symbols — exactly what funding = "all" produces for memecoins and
-# fresh listings, where the biggest dislocations live.
+# Wide-universe rows exercise raw unconfigured listings and the curated
+# traditional-asset taxonomy without requiring a database.
 _WIDE_FUNDING = [
     # (exchange, symbol, interval_h, apr_pct, oi_notional)
     ("hyperliquid", "FARTCOIN", 1,  212.4,  8_400_000),
@@ -30,6 +29,70 @@ _WIDE_FUNDING = [
     ("bybit",       "WIF/USDT", 8,   41.7, 12_800_000),
     ("hyperliquid", "NEWLISTING", 1, 305.8,   410_000),
 ]
+
+_WIDE_FUNDING.extend([
+    ("binance", "XAU/USDT", 4, 6.2, 82_000_000),
+    ("hyperliquid", "xyz:GOLD", 1, 5.7, 41_000_000),
+    ("bybit", "XAU/USDT", 4, 6.8, 38_000_000),
+    ("lighter", "XAU", 1, 5.4, 21_000_000),
+    ("extended", "XAU-USD", 1, 7.1, 11_000_000),
+    ("rise", "XAU/USDC", 1, 6.4, 8_000_000),
+    ("bullet", "GOLD-USD", 1, 5.9, 6_000_000),
+    ("binance", "XAG/USDT", 4, 8.3, 31_000_000),
+    ("hyperliquid", "xyz:SILVER", 1, 7.4, 13_000_000),
+    ("bybit", "XAG/USDT", 4, 9.1, 15_000_000),
+    ("lighter", "XAG", 1, 7.8, 9_000_000),
+    ("extended", "XAG-USD", 1, 8.7, 5_000_000),
+    ("rise", "XAG/USDC", 1, 8.0, 4_000_000),
+    ("bullet", "SILVER-USD", 1, 7.6, 3_000_000),
+    ("hyperliquid", "xyz:CL", 1, 11.8, 19_000_000),
+    ("bybit", "CL/USDT", 4, 10.2, 12_000_000),
+    ("lighter", "WTI", 1, 9.9, 8_000_000),
+    ("extended", "WTI-USD", 1, 12.4, 7_000_000),
+    ("rise", "CL/USDC", 1, 10.7, 5_000_000),
+    ("bullet", "WTIOIL-USD", 1, 11.1, 4_000_000),
+    ("hyperliquid", "xyz:BRENTOIL", 1, 9.8, 11_000_000),
+    ("bybit", "BZ/USDT", 4, 9.2, 7_000_000),
+    ("lighter", "BRENTOIL", 1, 8.9, 5_000_000),
+    ("extended", "XBR-USD", 1, 10.5, 6_000_000),
+    ("rise", "BZ/USDC", 1, 9.5, 3_000_000),
+    ("hyperliquid", "xyz:SP500", 1, 4.3, 27_000_000),
+    ("lighter", "US500", 1, 4.7, 18_000_000),
+    ("extended", "SPX500m-USD", 1, 5.1, 14_000_000),
+    ("bullet", "US500-USD", 1, 4.5, 9_000_000),
+    ("extended", "TECH100m-USD", 1, 6.4, 16_000_000),
+    ("binance", "NVDA/USDT", 4, 7.5, 25_000_000),
+    ("hyperliquid", "xyz:NVDA", 1, 6.9, 21_000_000),
+    ("bybit", "NVDA/USDT", 4, 8.1, 17_000_000),
+    ("lighter", "NVDA", 1, 7.2, 14_000_000),
+    ("extended", "NVDA_24_5-USD", 1, 7.8, 10_000_000),
+    ("rise", "NVDA/USDC", 1, 7.0, 5_000_000),
+    ("binance", "AMD/USDT", 4, 8.7, 16_000_000),
+    ("hyperliquid", "xyz:AMD", 1, 8.0, 13_000_000),
+    ("bybit", "AMDSTOCK/USDT", 4, 9.2, 9_000_000),
+    ("lighter", "AMD", 1, 8.4, 8_000_000),
+    ("extended", "AMD_24_5-USD", 1, 8.9, 6_000_000),
+    ("binance", "META/USDT", 4, 5.9, 18_000_000),
+    ("hyperliquid", "xyz:META", 1, 5.3, 15_000_000),
+    ("bybit", "META/USDT", 4, 6.5, 11_000_000),
+    ("lighter", "META", 1, 5.7, 9_000_000),
+    ("extended", "META_24_5-USD", 1, 6.1, 7_000_000),
+    ("binance", "GOOGL/USDT", 4, 4.8, 17_000_000),
+    ("hyperliquid", "xyz:GOOGL", 1, 4.2, 14_000_000),
+    ("bybit", "GOOGL/USDT", 4, 5.4, 10_000_000),
+    ("lighter", "GOOGL", 1, 4.6, 8_000_000),
+    ("extended", "GOOGL-USD", 1, 5.0, 7_000_000),
+    ("binance", "MSFT/USDT", 4, 4.1, 19_000_000),
+    ("hyperliquid", "xyz:MSFT", 1, 3.7, 16_000_000),
+    ("bybit", "MSFT/USDT", 4, 4.6, 12_000_000),
+    ("lighter", "MSFT", 1, 4.0, 9_000_000),
+    ("extended", "MSFT_24_5-USD", 1, 4.4, 8_000_000),
+    ("binance", "AAPL/USDT", 4, 3.6, 21_000_000),
+    ("hyperliquid", "xyz:AAPL", 1, 3.1, 18_000_000),
+    ("bybit", "AAPL/USDT", 4, 4.0, 13_000_000),
+    ("lighter", "AAPL", 1, 3.4, 10_000_000),
+    ("extended", "AAPL_24_5-USD", 1, 3.8, 8_000_000),
+])
 
 MOCK_FILLS = {
     "0x1b7e1a1e8f6a2c9d4e5f60718293a4b5c6d7e8f9": "hlp",
@@ -356,9 +419,11 @@ class MockStorage:
 
 
 
-    def funding_series(self, exchange: str, symbol: str,
-                       hours: int = 48, limit: int = 2000) -> list[Row]:
-        fh = 8 if exchange in ("binance", "bybit") else 1
+    def funding_series(
+        self, exchange: str, symbol: str, hours: int = 48, limit: int = 2000,
+        interval_hours: int | None = None,
+    ) -> list[Row]:
+        fh = interval_hours or (8 if exchange in ("binance", "bybit") else 1)
         now = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
         n = min(limit, hours // fh)
         seed = f"fund:{exchange}:{symbol}"
@@ -366,7 +431,6 @@ class MockStorage:
         for k in range(n, 0, -1):
             ts = now - timedelta(hours=k * fh)
             i = int(ts.timestamp() // 3600)
-            # mostly positive carry with occasional negative prints
             apr = 12.0 + 14.0 * math.sin(i / 40) + 9.0 * _u(seed, i)
             rate = Decimal(f"{apr / 100 / (8760 / fh):.10f}")
             out.append({"ts": ts, "rate": rate, "interval_hours": fh,
@@ -378,17 +442,21 @@ class MockStorage:
     ) -> list[Row]:
         wanted = set(symbols)
         out: list[Row] = []
-        for venue, exchange, mt, pat, fh in _VENUES:
-            if fh is None:
-                continue                          # spot venues never fund
-            for asset in _BASES:
-                if venue == "binance_spot" and asset == "HYPE":
-                    continue
-                sym = pat.format(a=asset)
-                if sym not in wanted:
-                    continue
-                for r in self.funding_series(exchange, sym, hours=hours, limit=limit):
-                    out.append({"exchange": exchange, "symbol": sym, **r})
+        seen: set[tuple[str, str]] = set()
+        for current in self.funding_table():
+            symbol = current["symbol"]
+            key = (current["exchange"], symbol)
+            if symbol not in wanted or key in seen:
+                continue
+            seen.add(key)
+            for row in self.funding_series(
+                current["exchange"],
+                symbol,
+                hours=hours,
+                limit=limit,
+                interval_hours=current["interval_hours"],
+            ):
+                out.append({"exchange": current["exchange"], "symbol": symbol, **row})
         return out
 
     def liquidity_series_multi(
@@ -399,27 +467,26 @@ class MockStorage:
         bucket_min = bucket_minutes or (5 if hours <= 48 else 30 if hours <= 168 else 120)
         now = datetime.now(UTC).replace(second=0, microsecond=0)
         out: list[Row] = []
-        oi_bases = {"BTC": 48_000, "ETH": 310_000, "SOL": 2_400_000,
-                    "AAVE": 260_000, "HYPE": 4_100_000}
-        for venue, exchange, mt, pat, fh in _VENUES:
-            if fh is None:
-                continue                          # spot venues carry no OI here
-            for asset, base in _BASES.items():
-                if venue == "binance_spot" and asset == "HYPE":
-                    continue
-                sym = pat.format(a=asset)
-                if sym not in wanted:
-                    continue
-                oi_base = oi_bases.get(asset, 900_000_000 / base)
-                seed = f"oi:{exchange}:{sym}"
-                n = min(limit, (hours * 60) // bucket_min)
-                for k in range(n, 0, -1):
-                    ts = now - timedelta(minutes=k * bucket_min)
-                    i = int(ts.timestamp() // 60)
-                    oi = oi_base * (1 + 0.35 * math.sin(i / 500) + 0.15 * _u(seed, i))
-                    mark = Decimal(f"{_px(f'{exchange}:perp:{sym}', base, i):.4f}")
-                    out.append({"exchange": exchange, "symbol": sym, "ts": ts,
-                                "oi_notional": Decimal(f"{oi:.2f}") * mark})
+        seen: set[tuple[str, str]] = set()
+        for current in self.funding_table():
+            symbol = current["symbol"]
+            key = (current["exchange"], symbol)
+            base_notional = current["oi_notional"]
+            if symbol not in wanted or key in seen or base_notional is None:
+                continue
+            seen.add(key)
+            seed = f"oi:{current['exchange']}:{symbol}"
+            n = min(limit, (hours * 60) // bucket_min)
+            for k in range(n, 0, -1):
+                ts = now - timedelta(minutes=k * bucket_min)
+                i = int(ts.timestamp() // 60)
+                factor = 1 + 0.08 * math.sin(i / 500) + 0.04 * _u(seed, i)
+                out.append({
+                    "exchange": current["exchange"],
+                    "symbol": symbol,
+                    "ts": ts,
+                    "oi_notional": base_notional * Decimal(f"{factor:.6f}"),
+                })
         return out
 
     def volume_oi_ratio(

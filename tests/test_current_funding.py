@@ -11,10 +11,14 @@ from data_collection.exchanges.bullet import BulletScraper
 from data_collection.exchanges.bulk import BulkScraper
 from data_collection.exchanges.bybit import BybitPerpScraper
 from data_collection.exchanges.extended import ExtendedScraper
-from data_collection.exchanges.hyperliquid import HyperliquidScraper
+from data_collection.exchanges.hyperliquid import (
+    HyperliquidDeployerScraper,
+    HyperliquidScraper,
+)
 from data_collection.exchanges.lighter import LighterScraper
 from data_collection.exchanges.risex import RiseScraper
 from core.enums import Timeframe
+from data_collection.base import Capability
 
 
 class RoutingHTTP:
@@ -140,6 +144,51 @@ async def test_hyperliquid_context_preserves_funding_inputs() -> None:
     [row] = await scraper.fetch_liquidity(["BTC"])
     assert_current(row, rate="0.0002", index="100.0", hours=1)
     assert row.funding_premium == Decimal("0.00015")
+
+
+@pytest.mark.asyncio
+async def test_hyperliquid_hip3_uses_deployer_context_and_parent_aggregates_volume() -> None:
+    class HIP3HTTP:
+        def __init__(self) -> None:
+            self.requests: list[dict] = []
+
+        async def post_json(self, _url: str, *, json: dict, **_: Any) -> Any:
+            self.requests.append(json)
+            if json["type"] == "perpDexs":
+                return [None, {"name": "xyz"}, {"name": "io"}]
+            if json["type"] == "spotMetaAndAssetCtxs":
+                return [{}, [{"dayNtlVlm": "40"}]]
+            if json["type"] == "metaAndAssetCtxs":
+                dex = json.get("dex")
+                name, volume = {
+                    None: ("BTC", "100"),
+                    "xyz": ("xyz:GOLD", "20"),
+                    "io": ("io:OAI", "30"),
+                }[dex]
+                return [
+                    {"universe": [{"name": name}]},
+                    [{
+                        "openInterest": "10",
+                        "dayNtlVlm": volume,
+                        "markPx": "100.5",
+                        "oraclePx": "100.0",
+                        "funding": "0.0002",
+                        "premium": "0.00015",
+                    }],
+                ]
+            raise AssertionError(f"unexpected request: {json}")
+
+    http = HIP3HTTP()
+    deployer = HyperliquidDeployerScraper(http)
+    [row] = await deployer.fetch_liquidity(["xyz:GOLD"])
+
+    assert row.symbol == "xyz:GOLD"
+    assert {"type": "metaAndAssetCtxs", "dex": "xyz"} in http.requests
+    assert Capability.VENUE_VOLUME not in deployer.capabilities
+
+    parent = HyperliquidScraper(http)
+    volume = await parent.fetch_venue_volume()
+    assert volume == {"spot": Decimal("40"), "perp": Decimal("150")}
 
 
 @pytest.mark.asyncio

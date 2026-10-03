@@ -18,25 +18,31 @@
     <h1 class="text-title font-semibold text-body">Spot–perpetual basis</h1>
     <p class="mt-1 text-data text-dim">Track price spread and funding carry for a selected pair.</p>
   </div>
-  <div class="grid w-full grid-cols-[auto_minmax(0,1fr)] items-center gap-2 font-mono text-data sm:flex sm:w-auto">
-    <label for="spot" class="text-dim">Spot</label>
-    <select id="spot" class="select min-w-0 w-full sm:w-auto">
-      {% for s in series if s.market_type == 'spot' %}
-      <option value="{{ s.exchange }}|{{ s.symbol }}">{{ s.exchange }} · {{ s.symbol }}</option>
-      {% endfor %}
-    </select>
-    <label for="perp" class="text-dim">Perp</label>
-    <select id="perp" class="select min-w-0 w-full sm:w-auto">
-      {% for s in series if s.market_type == 'perp' %}
-      <option value="{{ s.exchange }}|{{ s.symbol }}">{{ s.exchange }} · {{ s.symbol }}</option>
-      {% endfor %}
-    </select>
-    <label for="hours" class="text-dim">Window</label>
-    <select id="hours" class="select min-w-0 w-full sm:w-auto">
-      <option value="24">24h</option>
-      <option value="48" selected>48h</option>
-      <option value="168">7d</option>
-    </select>
+  <div class="grid w-full gap-2 font-mono text-data sm:ml-auto sm:flex sm:w-auto sm:items-end">
+    <label for="spot" class="flex min-w-0 flex-col gap-1">
+      <span class="text-label tracking-label uppercase text-faint">Spot</span>
+      <select id="spot" class="select min-w-0 w-full sm:w-auto">
+        {% for s in series if s.market_type == 'spot' %}
+        <option value="{{ s.exchange }}|{{ s.symbol }}">{{ s.exchange }} · {{ s.symbol }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label for="perp" class="flex min-w-0 flex-col gap-1">
+      <span class="text-label tracking-label uppercase text-faint">Perp</span>
+      <select id="perp" class="select min-w-0 w-full sm:w-auto">
+        {% for s in series if s.market_type == 'perp' %}
+        <option value="{{ s.exchange }}|{{ s.symbol }}">{{ s.exchange }} · {{ s.symbol }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label for="hours" class="flex min-w-0 flex-col gap-1">
+      <span class="text-label tracking-label uppercase text-faint">Window</span>
+      <select id="hours" class="select min-w-0 w-full sm:w-auto">
+        <option value="24">24h</option>
+        <option value="48" selected>48h</option>
+        <option value="168">7d</option>
+      </select>
+    </label>
   </div>
 </div>
 
@@ -83,7 +89,7 @@ const basisFilters = Overseer.filterState('basis');
 const basisState = Overseer.pageState();
 let basisRequest = 0;
 
-async function load() {
+async function load({ forceRefresh = false } = {}) {
   const request = ++basisRequest;
   const [se, ss] = document.getElementById('spot').value.split('|');
   const [pe, ps] = document.getElementById('perp').value.split('|');
@@ -96,8 +102,8 @@ async function load() {
   basisState.loading('Loading basis and funding history…');
   try {
     const [data, fdata] = await Promise.all([
-      Overseer.requestJSON(`/api/basis?${qs}`),
-      Overseer.requestJSON(`/api/funding-history?${fqs}`),
+      Overseer.requestJSON(`/api/basis?${qs}`, { forceRefresh }),
+      Overseer.requestJSON(`/api/funding-history?${fqs}`, { forceRefresh }),
     ]);
     if (request !== basisRequest) return;
     line.setData(data.map(d => ({ time: d.time, value: d.basis_pct })));
@@ -136,6 +142,6 @@ for (const id of ['spot', 'perp', 'hours']) {
     load();
   });
 }
-load();
+Overseer.poll(load, 60);
 </script>
 {% endblock %}

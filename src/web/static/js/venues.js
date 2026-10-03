@@ -11,13 +11,9 @@
  * keep neighbouring lines distinct instead of producing a same-brightness
  * rainbow. Binance is the one controlled warm identity.
  *
- * Validated across all 21 pairs:
- *
- *   contrast vs surface     >= 3.8:1
- *   normal-vision distance  >= 19.0 OKLab ΔE
- *   deutan distance         >= 10.1 OKLab ΔE
- *   protan distance         >= 10.3 OKLab ΔE
- *   tritan distance         >= 10.0 OKLab ΔE
+ * Core venue colors were checked for contrast and color-vision separation.
+ * HIP-3 deployers use stable display identities of their own rather than
+ * inheriting Hyperliquid's cyan, so overlapping markets remain distinguishable.
  *
  * Venue colors deliberately avoid the application's exact gain/loss tokens:
  * entity identity and market direction must not look like the same signal.
@@ -26,6 +22,8 @@
  */
 const VENUE_COLORS = {
   hyperliquid: '#2CECF5',   // branded ice cyan
+  'hyperliquid:xyz': '#FF8A3D', // TradeXYZ warm orange
+  'hyperliquid:io':  '#C084FC', // Entropy violet
   bybit:       '#00A0FF',   // terminal blue
   binance:     '#F8B600',   // controlled gold
   bullet:      '#7A53DB',   // violet

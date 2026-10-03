@@ -33,7 +33,7 @@
   {# Filters in one row above the charts. Venue toggles affect everything;
      the numeric ones narrow the detail table, because dropping buckets out of
      a time series would read as "nothing traded" rather than "filtered". #}
-  <div class="flex shrink-0 flex-wrap items-center gap-2 rounded border border-line
+  <div class="flex shrink-0 flex-wrap items-center gap-2 rounded-md border border-line
               bg-panel/40 px-3 py-2 sm:gap-x-4">
     <span id="venue-filter-label" class="font-mono text-label tracking-label uppercase text-faint">venues</span>
     <div id="venue-filters" class="scroll-thin flex w-full flex-nowrap items-center gap-1.5 overflow-x-auto pb-1 sm:w-auto sm:flex-wrap sm:overflow-visible sm:pb-0"
@@ -54,7 +54,7 @@
     </button>
   </div>
 
-  <div class="relative h-[22rem] shrink-0 rounded border border-line bg-panel/40 md:h-auto md:min-h-[140px] md:flex-1">
+  <div class="relative h-[22rem] shrink-0 rounded-md border border-line bg-panel/40 md:h-auto md:min-h-[140px] md:flex-1">
     <div class="absolute left-3 top-2 z-10 font-mono text-label tracking-label uppercase text-dim">
       taker imbalance <span class="text-faint normal-case tracking-normal">(buys−sells)÷volume</span>
     </div>
@@ -63,7 +63,7 @@
                              bg-ink/95 px-2.5 py-1.5 font-mono text-label shadow-lg"></div>
   </div>
 
-  <div class="relative h-[13rem] shrink-0 rounded border border-line bg-panel/40 md:h-[130px]">
+  <div class="relative h-[13rem] shrink-0 rounded-md border border-line bg-panel/40 md:h-[130px]">
     <div class="absolute left-3 top-2 z-10 font-mono text-label tracking-label uppercase text-dim">
       large trades <span class="text-faint normal-case tracking-normal">≥$10k notional</span>
     </div>
@@ -77,7 +77,7 @@
   {# Mobile gets a bounded two-axis table scroller; desktop keeps the pane
      inside the fixed-height workspace. #}
   <div id="table-wrap" class="scroll-thin hidden max-h-[28rem] shrink-0 overflow-auto
-                              rounded border border-line md:min-h-0 md:max-h-none md:basis-[36%]">
+                              rounded-md border border-line md:min-h-0 md:max-h-none md:basis-[36%]">
     <table class="w-full min-w-[46rem] border-collapse font-mono text-data">
       <caption class="sr-only">Order flow per venue per minute, filtered</caption>
       <thead class="sticky top-0 z-10 bg-panel">
@@ -96,7 +96,7 @@
     </table>
   </div>
 
-  <p id="empty" class="hidden shrink-0 rounded border border-line bg-panel/40 px-4 py-4 text-center text-data text-dim">
+  <p id="empty" class="hidden shrink-0 rounded-md border border-line bg-panel/40 px-4 py-4 text-center text-data text-dim">
     No flow recorded for this asset yet — the websocket streams write
     <code class="text-faint">trades_1m</code> once the scheduler is running.
   </p>
@@ -146,14 +146,16 @@ const hhmm = (t) => new Date(t * 1000).toISOString().slice(11, 16);
 const activeVenues = () =>
   VENUE_ORDER.filter(v => data.series[v] && data.series[v].length && !hidden.has(v));
 
-async function load() {
+async function load({ forceRefresh = false } = {}) {
   const request = ++flowRequest;
   const asset = document.getElementById('asset').value;
   const hours = document.getElementById('hours').value;
   flowState.loading('Loading streamed trade flow…');
   try {
     const next = await Overseer.requestJSON(
-      `/api/trade-flow?asset=${encodeURIComponent(asset)}&hours=${hours}`);
+      `/api/trade-flow?asset=${encodeURIComponent(asset)}&hours=${hours}`,
+      { forceRefresh },
+    );
     if (request !== flowRequest) return;
     data = next;
     data.series = data.series || {};
@@ -174,7 +176,7 @@ function renderFilters() {
   document.getElementById('venue-filters').innerHTML = present.map(v => {
     const off = hidden.has(v);
     return `<button data-venue="${v}" aria-pressed="${!off}"
-      class="venue-chip flex items-center gap-1.5 rounded border px-1.5 py-0.5 font-mono text-label
+      class="venue-chip flex min-h-11 items-center gap-1.5 rounded-md border px-1.5 py-0.5 font-mono text-label
              ${off ? 'border-line text-faint' : 'border-line bg-panel2 text-body'}">
       <span class="inline-block h-2 w-2 rounded-full ${off ? 'opacity-30' : ''}"
             style="background:${colorFor(v)}"></span>${v}</button>`;
@@ -244,7 +246,7 @@ function renderTiles(venues) {
                  ['large trades', large.toLocaleString(), 'text-body'],
                  ['largest trade', fmtUsd(maxTrade), 'text-phosphor']];
   document.getElementById('tiles').innerHTML = tiles.map(([l, v, c]) => `
-    <div class="rounded border border-line bg-panel/40 px-3 py-1.5">
+    <div class="rounded-md border border-line bg-panel/40 px-3 py-1.5">
       <div class="font-mono text-label tracking-label uppercase text-faint">${l}</div>
       <div class="font-mono text-hero tabular-nums ${c}">${v}</div>
     </div>`).join('');

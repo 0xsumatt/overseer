@@ -14,107 +14,127 @@
   }
 </style>
 <div class="mb-5 flex flex-col gap-4">
-  <div class="flex flex-wrap items-end justify-between gap-3">
+  <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
     <div>
       <h1 id="dashboard-title" class="text-title font-semibold text-body">Cross-venue prices</h1>
       <p class="mt-1 text-data text-dim">Compare one market or view up to four charts.</p>
     </div>
-    <div class="flex flex-wrap items-center gap-2">
-      <div class="flex shrink-0 rounded-full border border-line bg-panel p-1 font-mono text-data"
-           role="group" aria-label="Dashboard view">
-        <button id="view-overview" type="button" aria-pressed="true"
-                class="rounded-full px-3.5 py-1 tracking-label uppercase transition-colors">overview</button>
-        <button id="view-charts" type="button" aria-pressed="false"
-                class="rounded-full px-3.5 py-1 tracking-label uppercase transition-colors">charts</button>
-      </div>
-      <div class="flex shrink-0 rounded-full border border-line bg-panel p-1 font-mono text-data"
-           role="group" aria-label="Market type">
-        <button id="mkt-perp" type="button" data-market="perp" aria-pressed="true"
-                class="rounded-full px-3.5 py-1 tracking-label uppercase transition-colors">perp</button>
-        <button id="mkt-spot" type="button" data-market="spot" aria-pressed="false"
-                class="rounded-full px-3.5 py-1 tracking-label uppercase transition-colors">spot</button>
-      </div>
-      <div class="flex shrink-0 rounded-full border border-line bg-panel p-1 font-mono text-data"
-           role="group" aria-label="Chart metric">
-        <button id="metric-price" type="button" aria-pressed="true"
-                class="rounded-full px-3.5 py-1 tracking-label uppercase transition-colors">price</button>
-        <button id="metric-spread" type="button" aria-pressed="false"
-                class="rounded-full px-3.5 py-1 tracking-label uppercase transition-colors">spread</button>
-      </div>
+    <div class="flex w-fit shrink-0 rounded-md border border-line bg-panel p-1 font-mono text-data"
+         role="group" aria-label="Dashboard view">
+      <button id="view-overview" type="button" aria-pressed="true"
+              class="rounded px-3.5 py-1 tracking-label uppercase transition-colors">overview</button>
+      <button id="view-charts" type="button" aria-pressed="false"
+              class="rounded px-3.5 py-1 tracking-label uppercase transition-colors">charts</button>
     </div>
   </div>
 
-  <div class="flex w-full flex-wrap items-center gap-2 sm:justify-end">
-    <div id="exchange-picker-wrap" class="relative w-full sm:w-auto">
-      <button id="exchange-picker-trigger" type="button" aria-expanded="false"
-              aria-controls="exchange-picker"
-              class="select flex min-h-11 w-full min-w-44 items-center justify-between gap-3 text-left sm:w-56">
-        <span class="font-mono text-label tracking-label uppercase text-faint">exchanges</span>
-        <span id="exchange-picker-label" class="min-w-0 truncate">all</span>
-      </button>
-      <div id="exchange-picker" role="dialog" aria-label="Choose global exchanges"
-           class="absolute left-0 z-30 mt-2 hidden w-[min(20rem,calc(100vw-2rem))]
-                  rounded-md border border-line-strong bg-panel p-3 shadow-2xl shadow-black/60">
-        <div class="flex items-baseline justify-between gap-3">
-          <span class="font-mono text-label tracking-label uppercase text-dim">global exchanges</span>
-          <span class="font-mono text-label text-faint">charts inherit this</span>
-        </div>
-        <div id="exchange-options" class="mt-2 max-h-64 space-y-1 overflow-y-auto"
-             role="group" aria-label="Available exchanges"></div>
-        <div class="mt-3 flex items-center justify-between gap-3 border-t border-line/60 pt-3">
-          <button id="exchange-all" type="button"
-                  class="min-h-11 px-2 font-mono text-label tracking-label uppercase text-dim hover:text-body">
-            select all
-          </button>
-          <button id="exchange-apply" type="button"
-                  class="min-h-11 rounded bg-phosphor/85 px-4 font-mono text-label
-                         tracking-label uppercase text-ink hover:brightness-110">
-            apply
-          </button>
-        </div>
+  <div class="grid grid-cols-2 items-end gap-3 rounded-md border border-line bg-panel/50 p-3
+              xl:grid-cols-[auto_auto_minmax(12rem,1fr)_minmax(12rem,1fr)_auto]"
+       role="group" aria-label="Chart filters">
+    <div class="min-w-0">
+      <span class="mb-1 block font-mono text-label tracking-label uppercase text-faint">market</span>
+      <div class="flex w-fit shrink-0 rounded-md border border-line bg-panel p-1 font-mono text-data"
+           role="group" aria-label="Market type">
+        <button id="mkt-perp" type="button" data-market="perp" aria-pressed="true"
+                class="rounded px-3.5 py-1 tracking-label uppercase transition-colors">perp</button>
+        <button id="mkt-spot" type="button" data-market="spot" aria-pressed="false"
+                class="rounded px-3.5 py-1 tracking-label uppercase transition-colors">spot</button>
       </div>
     </div>
 
-    <select id="token" class="select min-w-0 flex-1 sm:flex-none" aria-label="Asset"></select>
+    <div class="min-w-0">
+      <span class="mb-1 block font-mono text-label tracking-label uppercase text-faint">metric</span>
+      <div class="flex w-fit shrink-0 rounded-md border border-line bg-panel p-1 font-mono text-data"
+           role="group" aria-label="Chart metric">
+        <button id="metric-price" type="button" aria-pressed="true"
+                class="rounded px-3.5 py-1 tracking-label uppercase transition-colors">price</button>
+        <button id="metric-spread" type="button" aria-pressed="false"
+                class="rounded px-3.5 py-1 tracking-label uppercase transition-colors">spread</button>
+      </div>
+    </div>
 
-    <div id="asset-picker-wrap" class="relative hidden min-w-0 flex-1 sm:flex-none">
-      <button id="asset-picker-trigger" type="button" aria-expanded="false"
-              aria-controls="asset-picker"
-              class="select flex min-h-11 w-full items-center justify-between gap-3 text-left
-                     sm:w-auto sm:min-w-32 sm:max-w-96">
-        <span id="asset-picker-label" class="min-w-0 truncate">Choose assets</span>
-        <span id="asset-picker-count" class="shrink-0 font-mono text-label text-faint">0 / 4</span>
-      </button>
-      <div id="asset-picker" role="dialog" aria-label="Choose charts"
-           class="absolute left-0 z-30 mt-2 hidden w-[min(22rem,calc(100vw-2rem))]
-                  rounded-md border border-line-strong bg-panel p-3 shadow-2xl shadow-black/60 sm:left-auto sm:right-0">
-        <label for="asset-search" class="font-mono text-label tracking-label uppercase text-dim">assets</label>
-        <input id="asset-search" type="search" autocomplete="off" placeholder="Search assets"
-               class="input mt-2 w-full" />
-        <div id="asset-options" class="scroll-thin mt-2 max-h-64 space-y-1 overflow-y-auto"
-             role="group" aria-label="Available assets"></div>
-        <div class="mt-3 flex items-center justify-between gap-3 border-t border-line/60 pt-3">
-          <span class="font-mono text-label text-faint">Choose up to four</span>
-          <div class="flex items-center gap-2">
-            <button id="asset-clear" type="button"
+    <div class="col-span-2 min-w-0 xl:col-span-1">
+      <span id="exchange-filter-label"
+            class="mb-1 block font-mono text-label tracking-label uppercase text-faint">exchanges</span>
+      <div id="exchange-picker-wrap" class="relative">
+        <button id="exchange-picker-trigger" type="button" aria-expanded="false"
+                aria-controls="exchange-picker"
+                aria-labelledby="exchange-filter-label exchange-picker-label"
+                class="select select-summary flex w-full cursor-pointer items-center px-8 py-2">
+          <span id="exchange-picker-label" class="w-full min-w-0 truncate text-center">all</span>
+        </button>
+        <div id="exchange-picker" role="dialog" aria-label="Choose global exchanges"
+             class="absolute left-0 z-30 mt-2 hidden w-[min(20rem,calc(100vw-2rem))]
+                    rounded-md border border-line-strong bg-panel p-3 shadow-2xl shadow-black/60">
+          <div class="flex items-baseline justify-between gap-3">
+            <span class="font-mono text-label tracking-label uppercase text-dim">global exchanges</span>
+            <span class="font-mono text-label text-faint">charts inherit this</span>
+          </div>
+          <div id="exchange-options" class="mt-2 max-h-64 space-y-1 overflow-y-auto"
+               role="group" aria-label="Available exchanges"></div>
+          <div class="mt-3 flex items-center justify-between gap-3 border-t border-line/60 pt-3">
+            <button id="exchange-all" type="button"
                     class="min-h-11 px-2 font-mono text-label tracking-label uppercase text-dim hover:text-body">
-              clear
+              select all
             </button>
-            <button id="asset-apply" type="button"
+            <button id="exchange-apply" type="button"
                     class="min-h-11 rounded bg-phosphor/85 px-4 font-mono text-label
                            tracking-label uppercase text-ink hover:brightness-110">
-              show charts
+              apply
             </button>
           </div>
         </div>
       </div>
     </div>
 
-    <select id="hours" class="select shrink-0" aria-label="Time window">
-      <option value="24">24h</option>
-      <option value="48" selected>48h</option>
-      <option value="168">7d</option>
-    </select>
+    <div class="min-w-0">
+      <label id="asset-filter-label" for="token"
+             class="mb-1 block font-mono text-label tracking-label uppercase text-faint">asset</label>
+      <select id="token" class="select w-full min-w-0" aria-label="Asset"></select>
+
+      <div id="asset-picker-wrap" class="relative hidden min-w-0">
+        <button id="asset-picker-trigger" type="button" aria-expanded="false"
+                aria-controls="asset-picker"
+                aria-labelledby="asset-filter-label asset-picker-label"
+                class="select flex w-full items-center justify-between gap-3 text-left">
+          <span id="asset-picker-label" class="min-w-0 truncate">Choose assets</span>
+          <span id="asset-picker-count" class="shrink-0 font-mono text-label text-faint">0 / 4</span>
+        </button>
+        <div id="asset-picker" role="dialog" aria-label="Choose charts"
+             class="absolute left-0 z-30 mt-2 hidden w-[min(22rem,calc(100vw-2rem))] sm:left-auto sm:right-0
+                    rounded-md border border-line-strong bg-panel p-3 shadow-2xl shadow-black/60">
+          <label for="asset-search" class="font-mono text-label tracking-label uppercase text-dim">assets</label>
+          <input id="asset-search" type="search" autocomplete="off" placeholder="Search assets"
+                 class="input mt-2 w-full" />
+          <div id="asset-options" class="scroll-thin mt-2 max-h-64 space-y-1 overflow-y-auto"
+               role="group" aria-label="Available assets"></div>
+          <div class="mt-3 flex items-center justify-between gap-3 border-t border-line/60 pt-3">
+            <span class="font-mono text-label text-faint">Choose up to four</span>
+            <div class="flex items-center gap-2">
+              <button id="asset-clear" type="button"
+                      class="min-h-11 px-2 font-mono text-label tracking-label uppercase text-dim hover:text-body">
+                clear
+              </button>
+              <button id="asset-apply" type="button"
+                      class="min-h-11 rounded bg-phosphor/85 px-4 font-mono text-label
+                             tracking-label uppercase text-ink hover:brightness-110">
+                show charts
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="min-w-0">
+      <label for="hours"
+             class="mb-1 block font-mono text-label tracking-label uppercase text-faint">window</label>
+      <select id="hours" class="select w-full" aria-label="Time window">
+        <option value="24">24h</option>
+        <option value="48" selected>48h</option>
+        <option value="168">7d</option>
+      </select>
+    </div>
   </div>
 </div>
 
@@ -354,7 +374,7 @@ function saveSelectedExchanges(exchanges) {
   dashboardFilters.setList(SHARED_EXCHANGES_KEY, exchanges);
 }
 
-async function fetchCandles(series, hours) {
+async function fetchCandles(series, hours, { forceRefresh = false } = {}) {
   const qs = new URLSearchParams({
     exchange: series.exchange,
     market_type: series.market_type,
@@ -363,12 +383,12 @@ async function fetchCandles(series, hours) {
     hours,
     limit: 5000,
   });
-  return Overseer.requestJSON(`/api/candles?${qs}`);
+  return Overseer.requestJSON(`/api/candles?${qs}`, { forceRefresh });
 }
 
-async function fetchSpreads(asset, hours) {
+async function fetchSpreads(asset, hours, { forceRefresh = false } = {}) {
   const qs = new URLSearchParams({ asset, market, hours });
-  return Overseer.requestJSON(`/api/orderbook-spreads?${qs}`);
+  return Overseer.requestJSON(`/api/orderbook-spreads?${qs}`, { forceRefresh });
 }
 
 class MarketChartCard {
@@ -430,7 +450,7 @@ class MarketChartCard {
     this.handles = [];
   }
 
-  async load() {
+  async load({ forceRefresh = false } = {}) {
     const version = ++this.loadVersion;
     const requestedMetric = chartMetric;
     const hours = document.getElementById('hours').value;
@@ -438,7 +458,7 @@ class MarketChartCard {
 
     if (requestedMetric === 'spread') {
       try {
-        const payload = await fetchSpreads(this.asset, hours);
+        const payload = await fetchSpreads(this.asset, hours, { forceRefresh });
         if (version !== this.loadVersion) return;
         payload.series.forEach(series => {
           discoveredExchanges[payload.market].add(series.exchange);
@@ -491,7 +511,7 @@ class MarketChartCard {
       return;
     }
     const results = await Promise.allSettled(
-      venues.map(venue => fetchCandles(byVenue[venue], hours))
+      venues.map(venue => fetchCandles(byVenue[venue], hours, { forceRefresh }))
     );
     if (version !== this.loadVersion) return;
     this.metric = requestedMetric;
@@ -584,7 +604,7 @@ class MarketChartCard {
       return `
         <button type="button" data-venue="${venue}" aria-pressed="${active}"
           aria-label="${venue}: ${value}; ${active ? 'shown' : 'hidden'} on ${this.asset}. Toggle chart override."
-          class="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-full border px-3 py-1
+          class="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-md border px-3 py-1
                  font-mono text-data transition
                  ${active ? 'border-line bg-panel hover:border-phosphor/50'
                           : 'border-line/50 bg-panel/30 opacity-40 hover:opacity-70'}">
@@ -826,19 +846,21 @@ function syncMultiCards() {
   refreshPanels();
 }
 
-async function loadActiveCharts() {
+async function loadActiveCharts({ forceRefresh = false } = {}) {
   if (dashboardView === 'overview') {
     overviewCard.asset = document.getElementById('token').value;
-    await overviewCard.load();
+    await overviewCard.load({ forceRefresh });
     return;
   }
   syncMultiCards();
-  await Promise.all([...multiCards.values()].map(card => card.load()));
+  await Promise.all(
+    [...multiCards.values()].map(card => card.load({ forceRefresh })),
+  );
 }
 
 function setSegmentState(button, active) {
   button.className =
-    `min-h-11 rounded-full px-3.5 py-1 tracking-label uppercase transition-colors ${
+    `rounded px-3.5 py-1 tracking-label uppercase transition-colors ${
       active ? 'bg-phosphor/85 text-ink' : 'text-dim hover:text-body'
     }`;
   button.setAttribute('aria-pressed', String(active));
@@ -1136,7 +1158,7 @@ function renderVolumeOiRatio(payload) {
 
 }
 
-async function loadVolumeOiRatio() {
+async function loadVolumeOiRatio({ forceRefresh = false } = {}) {
   if (dashboardView !== 'overview') return;
   const requestId = ++volumeOiRequest;
   const status = document.getElementById('volume-oi-status');
@@ -1144,7 +1166,8 @@ async function loadVolumeOiRatio() {
   const hours = document.getElementById('hours').value;
   try {
     const payload = await Overseer.requestJSON(
-      `/api/volume-oi-ratio?${new URLSearchParams({ hours })}`
+      `/api/volume-oi-ratio?${new URLSearchParams({ hours })}`,
+      { forceRefresh },
     );
     if (requestId !== volumeOiRequest) return;
     renderVolumeOiRatio(payload);
@@ -1164,10 +1187,10 @@ async function loadVolumeOiRatio() {
 }
 
 
-async function loadOverview() {
+async function loadOverview({ forceRefresh = false } = {}) {
   if (dashboardView !== 'overview') return;
   try {
-    const vv = await Overseer.requestJSON('/api/venue-volume');
+    const vv = await Overseer.requestJSON('/api/venue-volume', { forceRefresh });
     const latest = vv.latest.sort((a, b) => b.total - a.total);
     const max = latest[0]?.total || 0;
     const cexTotal = latest.filter(v => ['binance','bybit'].includes(v.exchange))
@@ -1185,7 +1208,7 @@ async function loadOverview() {
   }
 
   try {
-    const fu = await Overseer.requestJSON('/api/funding');
+    const fu = await Overseer.requestJSON('/api/funding', { forceRefresh });
     const oi = Object.entries(fu).map(([coin, rows]) => [coin,
         rows.reduce((s, r) => s + (r.oi_notional || 0), 0)])
       .filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
@@ -1199,13 +1222,13 @@ async function loadOverview() {
     dashboardState.error('Open-interest summary', loadOverview, 'open-interest');
   }
 
-  await loadVolumeOiRatio();
+  await loadVolumeOiRatio({ forceRefresh });
 }
 
-Overseer.poll(loadOverview, 120);
+Overseer.poll(loadOverview, 300);
 
 // ---- basis snapshot: same-venue spot/perp pairs, latest bar -----------------
-async function loadBasis() {
+async function loadBasis({ forceRefresh = false } = {}) {
   if (dashboardView !== 'overview') return;
   const series = JSON.parse(document.getElementById('series-data').textContent);
   const pairs = [];
@@ -1218,7 +1241,7 @@ async function loadBasis() {
     const results = await Promise.all(shown.map(async p => {
       const qs = new URLSearchParams({ spot_exchange: p.exchange, spot_symbol: p.symbol,
         perp_exchange: p.exchange, perp_symbol: p.symbol, interval: '1m', limit: 1 });
-      const d = await Overseer.requestJSON(`/api/basis?${qs}`);
+      const d = await Overseer.requestJSON(`/api/basis?${qs}`, { forceRefresh });
       return d.length ? { symbol: p.symbol, bps: d[d.length-1].basis_pct * 100 } : null;
     }));
     const rows = results.filter(Boolean).sort((a, b) => Math.abs(b.bps) - Math.abs(a.bps));
@@ -1236,7 +1259,7 @@ async function loadBasis() {
 }
 
 
-Overseer.poll(loadBasis, 120);
+Overseer.poll(loadBasis, 60);
 
 </script>
 {% endblock %}

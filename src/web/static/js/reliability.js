@@ -10,12 +10,15 @@
     }
   }
 
-  async function requestJSON(url, { timeoutMs = 12_000 } = {}) {
+  async function requestJSON(url, { timeoutMs = 12_000, forceRefresh = false } = {}) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const headers = { Accept: 'application/json' };
+    if (forceRefresh) headers['Cache-Control'] = 'no-cache';
     try {
       const response = await fetch(url, {
-        headers: { Accept: 'application/json' },
+        cache: forceRefresh ? 'reload' : 'default',
+        headers,
         signal: controller.signal,
       });
       if (!response.ok) {
@@ -121,6 +124,15 @@
     if (seconds < 86_400) return `${Math.floor(seconds / 3600)}h`;
     return `${Math.floor(seconds / 86_400)}d`;
   }
+
+  function formatUtcTimestamp(value, includeDate = false) {
+    const date = value instanceof Date ? value : new Date(value);
+    if (!Number.isFinite(date.getTime())) return null;
+    const iso = date.toISOString();
+    return includeDate
+      ? `${iso.slice(0, 10)} ${iso.slice(11, 19)} UTC`
+      : `${iso.slice(11, 19)} UTC`;
+  }
   const screenPollers = new Set();
 
   function formatCheckDelay(milliseconds) {
@@ -142,20 +154,24 @@
     let label;
     let checkTitle;
     if (checking) {
-      label = 'refreshing now';
-      checkTitle = 'Screen refresh in progress';
+      label = 'refreshing data';
+      checkTitle = 'Forced data refresh in progress';
     } else if (Number.isFinite(nextAt)) {
       const delay = formatCheckDelay(nextAt - Date.now());
-      label = `refreshing in ${delay}`;
-      checkTitle = `Next screen refresh in ${delay}`;
+      label = null;
+      checkTitle = `Next forced data refresh in ${delay}`;
     } else {
-      label = 'refresh on change';
+      label = null;
       checkTitle = 'This screen refreshes on load or when its controls change';
     }
 
     for (const indicator of indicators) {
       const healthTitle = indicator.dataset.healthTitle || 'Data freshness is being checked';
-      indicator.querySelector('[data-freshness-label]').textContent = label;
+      const visibleLabel = label
+        || (indicator.dataset.dataTimestamp
+          ? `data · ${indicator.dataset.dataTimestamp}`
+          : 'data timestamp —');
+      indicator.querySelector('[data-freshness-label]').textContent = visibleLabel;
       indicator.title = `${checkTitle}. ${healthTitle}.`;
       indicator.setAttribute('aria-label', `${checkTitle}. ${healthTitle}.`);
     }
@@ -192,7 +208,7 @@
       poller.due = false;
       renderScreenCheck();
       try {
-        await callback();
+        await callback({ forceRefresh: true });
       } catch (error) {
         console.error('Scheduled screen check failed', error);
       } finally {
@@ -336,15 +352,16 @@
         setBanner('error', 'Freshness unavailable — this device is offline.');
       } else if (sample) {
         state = checkFailed ? 'error' : age <= 120 ? 'fresh' : age <= 300 ? 'delayed' : 'stale';
+        const timestamp = formatUtcTimestamp(sample.lastTs, true) || 'timestamp unavailable';
         const description = checkFailed ? 'Freshness check failed; last confirmed'
           : state === 'fresh' ? 'Fresh data; newest'
           : state === 'delayed' ? 'Data delayed; newest'
           : 'Stale data; newest';
-        title = `${description} bar: ${sample.lastTs || 'timestamp unavailable'}`;
+        title = `${description} bar: ${timestamp}`;
         if (checkFailed) {
-          setBanner('error', `Freshness check failed — showing the last confirmed bar age (${formatAge(age)}).`);
+          setBanner('error', `Freshness check failed — newest confirmed bar: ${timestamp}.`);
         } else if (age > 300) {
-          setBanner('stale', `Data stale — newest bar is ${formatAge(age)} old.`);
+          setBanner('stale', `Data stale — newest bar: ${timestamp} (${formatAge(age)} old).`);
         } else {
           setBanner(null, null);
         }
@@ -365,6 +382,9 @@
         indicator.classList.add(tone[2]);
         indicator.dataset.state = state;
         indicator.dataset.healthTitle = title;
+        const dataTimestamp = sample && formatUtcTimestamp(sample.lastTs);
+        if (dataTimestamp) indicator.dataset.dataTimestamp = dataTimestamp;
+        else delete indicator.dataset.dataTimestamp;
         dot.classList.remove(...ALL_DOT_TONES);
         dot.classList.add(tone[0]);
         text.classList.remove(...ALL_TEXT_TONES);
@@ -380,7 +400,10 @@
         return;
       }
       try {
-        const result = await requestJSON('/api/freshness', { timeoutMs: 8_000 });
+        const result = await requestJSON(
+          '/api/freshness',
+          { timeoutMs: 8_000, forceRefresh: true },
+        );
         checkFailed = false;
         if (result.age_seconds == null) {
           sample = null;
@@ -416,8 +439,8 @@
         await refresh();
       } finally {
         refreshing = false;
-        nextFreshnessAt = Date.now() + 30_000;
-        freshnessTimer = setTimeout(() => void runRefresh(), 30_000);
+        nextFreshnessAt = Date.now() + 60_000;
+        freshnessTimer = setTimeout(() => void runRefresh(), 60_000);
       }
     }
 
@@ -442,6 +465,7 @@
     requestJSON,
     pageState,
     formatAge,
+    formatUtcTimestamp,
     poll,
     filterState,
     startFreshness,

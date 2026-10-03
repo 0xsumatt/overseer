@@ -42,13 +42,13 @@
                   ('pages.wallets','wallets')] %}
   {% macro freshness_indicator() -%}
   <span data-freshness data-state="checking" role="timer" aria-live="off"
-        aria-label="Preparing the next screen refresh"
-        title="Preparing the next screen refresh"
+        aria-label="Checking the latest data timestamp"
+        title="Checking the latest data timestamp"
         class="inline-flex h-7 w-44 shrink-0 items-center justify-center gap-2 rounded-full border
                border-line bg-ink px-2 font-mono text-label tracking-label tabular-nums
                whitespace-nowrap text-dim">
     <span data-freshness-dot class="h-1.5 w-1.5 rounded-full bg-faint"></span>
-    <span data-freshness-label>refreshing —</span>
+    <span data-freshness-label>checking data</span>
   </span>
   {%- endmacro %}
   <nav class="border-b border-line bg-panel px-4 sm:px-6">

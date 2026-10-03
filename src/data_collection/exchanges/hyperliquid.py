@@ -33,6 +33,18 @@ class HyperliquidScraper(BaseExchangeScraper):
             default_headers={"User-Agent": "overseer/0.1"},
         )
 
+    @staticmethod
+    def _dex_for_symbol(symbol: str) -> str:
+        return symbol.split(":", 1)[0] if ":" in symbol else ""
+
+    async def _asset_contexts(self, dex: str = "") -> tuple[dict, list[dict]]:
+        request = {"type": "metaAndAssetCtxs"}
+        if dex:
+            request["dex"] = dex
+        meta, contexts = await self.http.post_json(
+            f"{self.base_url}/info", json=request
+        )
+        return meta, contexts
 
     @staticmethod
     def _market_for_coin(coin: str) -> MarketType:
@@ -165,48 +177,78 @@ class HyperliquidScraper(BaseExchangeScraper):
         self, symbols: Sequence[str]
     ) -> Sequence[LiquiditySnapshot]:
         from datetime import datetime as _dt, timedelta as _td, timezone as _tz
-        meta, ctxs = await self.http.post_json(
-            f"{self.base_url}/info", json={"type": "metaAndAssetCtxs"}
-        )
-        wanted = {self.to_native(s) for s in symbols}
+
+        symbols_by_dex: dict[str, set[str]] = {}
+        for symbol in symbols:
+            native = self.to_native(symbol)
+            symbols_by_dex.setdefault(self._dex_for_symbol(native), set()).add(native)
+
         now = _dt.now(_tz.utc)
         next_funding = now.replace(minute=0, second=0, microsecond=0) + _td(hours=1)
         out: list[LiquiditySnapshot] = []
-        for asset, ctx in zip(meta["universe"], ctxs):
-            if asset["name"] not in wanted:
-                continue
-            mark = ctx.get("markPx") or ctx.get("oraclePx")
-            current_rate = ctx.get("funding")
-            premium = ctx.get("premium")
-            out.append(
-                LiquiditySnapshot(
-                    exchange=self.exchange,
-                    symbol=self.to_symbol(asset["name"]),
-                    ts=now,
-                    open_interest=self._dec(ctx["openInterest"]),
-                    volume_24h=self._dec(ctx["dayNtlVlm"]),
-                    mark_price=self._dec(mark),
-                    index_price=self._dec(ctx["oraclePx"]),
-                    current_funding_rate=(
-                        self._dec(current_rate) if current_rate not in (None, "") else None
-                    ),
-                    funding_interval_hours=1,
-                    next_funding_at=next_funding,
-                    funding_premium=(
-                        self._dec(premium) if premium not in (None, "") else None
-                    ),
+        for dex, wanted in symbols_by_dex.items():
+            meta, contexts = await self._asset_contexts(dex)
+            for asset, ctx in zip(meta["universe"], contexts):
+                if asset["name"] not in wanted:
+                    continue
+                mark = ctx.get("markPx") or ctx.get("oraclePx")
+                current_rate = ctx.get("funding")
+                premium = ctx.get("premium")
+                out.append(
+                    LiquiditySnapshot(
+                        exchange=self.exchange,
+                        symbol=self.to_symbol(asset["name"]),
+                        ts=now,
+                        open_interest=self._dec(ctx["openInterest"]),
+                        volume_24h=self._dec(ctx["dayNtlVlm"]),
+                        mark_price=self._dec(mark),
+                        index_price=self._dec(ctx["oraclePx"]),
+                        current_funding_rate=(
+                            self._dec(current_rate)
+                            if current_rate not in (None, "")
+                            else None
+                        ),
+                        funding_interval_hours=1,
+                        next_funding_at=next_funding,
+                        funding_premium=(
+                            self._dec(premium)
+                            if premium not in (None, "")
+                            else None
+                        ),
+                    )
                 )
-            )
         return out
 
 
     async def fetch_venue_volume(self) -> dict:
-        meta, ctxs = await self.http.post_json(
-            f"{self.base_url}/info", json={"type": "metaAndAssetCtxs"}
+        _, contexts = await self._asset_contexts()
+        perp = sum((self._dec(c["dayNtlVlm"]) for c in contexts), self._dec(0))
+
+        dexes = await self.http.post_json(
+            f"{self.base_url}/info", json={"type": "perpDexs"}
         )
-        perp = sum(self._dec(c["dayNtlVlm"]) for c in ctxs) if ctxs else None
-        spot_meta, spot_ctxs = await self.http.post_json(
+        for dex in dexes:
+            if not isinstance(dex, dict) or not dex.get("name"):
+                continue
+            _, dex_contexts = await self._asset_contexts(dex["name"])
+            perp += sum(
+                (self._dec(c["dayNtlVlm"]) for c in dex_contexts),
+                self._dec(0),
+            )
+
+        _, spot_contexts = await self.http.post_json(
             f"{self.base_url}/info", json={"type": "spotMetaAndAssetCtxs"}
         )
-        spot = sum(self._dec(c["dayNtlVlm"]) for c in spot_ctxs) if spot_ctxs else None
-        return {"spot": spot, "perp": perp}
+        spot = sum(
+            (self._dec(c["dayNtlVlm"]) for c in spot_contexts),
+            self._dec(0),
+        )
+        return {"spot": spot or None, "perp": perp or None}
+
+class HyperliquidDeployerScraper(HyperliquidScraper):
+    """HIP-3 market adapter; deployer volume is included by the parent venue."""
+
+    capabilities: ClassVar[frozenset[Capability]] = (
+        HyperliquidScraper.capabilities
+        - frozenset({Capability.FILLS, Capability.VENUE_VOLUME})
+    )

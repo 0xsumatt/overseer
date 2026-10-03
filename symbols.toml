@@ -1,3 +1,9 @@
+[hyperliquid_deployers.xyz]
+label = "TradeXYZ"
+
+[hyperliquid_deployers.io]
+label = "Entropy"
+
 [venues.binance_spot]
 intervals = ["1m"]
 orderbook = true
@@ -21,6 +27,12 @@ liquidity = "all"
 # Public trade tape over websocket. true = raw trades kept only around funding
 # settlements; the per-minute flow aggregate is continuous regardless.
 stream = true
+
+[venues.hyperliquid_xyz]
+intervals = ["1m"]
+orderbook = true
+funding = "all"
+liquidity = "all"
 
 [venues.bybit_spot]
 intervals = ["1m"]
@@ -136,6 +148,163 @@ extended = "LIT-USD"
 bulk = "LIT-USD"
 rise = "LIT/USDC"
 bullet = "LIT-USD"
+
+[assets.XAU]
+binance_perp = "XAU/USDT"
+hyperliquid_xyz = "xyz:GOLD"
+bybit_perp = "XAU/USDT"
+lighter = "XAU"
+extended = "XAU-USD"
+rise = "XAU/USDC"
+bullet = "GOLD-USD"
+
+[asset_metadata.XAU]
+family = "traditional"
+asset_class = "commodity"
+group = "metals"
+label = "Gold"
+
+[assets.XAG]
+binance_perp = "XAG/USDT"
+hyperliquid_xyz = "xyz:SILVER"
+bybit_perp = "XAG/USDT"
+lighter = "XAG"
+extended = "XAG-USD"
+rise = "XAG/USDC"
+bullet = "SILVER-USD"
+
+[asset_metadata.XAG]
+family = "traditional"
+asset_class = "commodity"
+group = "metals"
+label = "Silver"
+
+[assets.WTI]
+hyperliquid_xyz = "xyz:CL"
+bybit_perp = "CL/USDT"
+lighter = "WTI"
+extended = "WTI-USD"
+rise = "CL/USDC"
+bullet = "WTIOIL-USD"
+
+[asset_metadata.WTI]
+family = "traditional"
+asset_class = "commodity"
+group = "energy"
+label = "WTI Crude Oil"
+
+[assets.BRENT]
+hyperliquid_xyz = "xyz:BRENTOIL"
+bybit_perp = "BZ/USDT"
+lighter = "BRENTOIL"
+extended = "XBR-USD"
+rise = "BZ/USDC"
+
+[asset_metadata.BRENT]
+family = "traditional"
+asset_class = "commodity"
+group = "energy"
+label = "Brent Crude Oil"
+
+[assets.SP500]
+hyperliquid_xyz = "xyz:SP500"
+lighter = "US500"
+extended = "SPX500m-USD"
+bullet = "US500-USD"
+
+[asset_metadata.SP500]
+family = "traditional"
+asset_class = "index"
+group = "equity_indices"
+label = "S&P 500"
+
+[assets.NDX]
+extended = "TECH100m-USD"
+
+[asset_metadata.NDX]
+family = "traditional"
+asset_class = "index"
+group = "equity_indices"
+label = "Nasdaq 100"
+
+[assets.NVDA]
+binance_perp = "NVDA/USDT"
+hyperliquid_xyz = "xyz:NVDA"
+bybit_perp = "NVDA/USDT"
+lighter = "NVDA"
+extended = "NVDA_24_5-USD"
+rise = "NVDA/USDC"
+
+[asset_metadata.NVDA]
+family = "traditional"
+asset_class = "equity"
+group = "mega_cap_technology"
+label = "NVIDIA"
+
+[assets.AMD]
+binance_perp = "AMD/USDT"
+hyperliquid_xyz = "xyz:AMD"
+bybit_perp = "AMDSTOCK/USDT"
+lighter = "AMD"
+extended = "AMD_24_5-USD"
+
+[asset_metadata.AMD]
+family = "traditional"
+asset_class = "equity"
+group = "mega_cap_technology"
+label = "AMD"
+
+[assets.META]
+binance_perp = "META/USDT"
+hyperliquid_xyz = "xyz:META"
+bybit_perp = "META/USDT"
+lighter = "META"
+extended = "META_24_5-USD"
+
+[asset_metadata.META]
+family = "traditional"
+asset_class = "equity"
+group = "mega_cap_technology"
+label = "Meta"
+
+[assets.GOOGL]
+binance_perp = "GOOGL/USDT"
+hyperliquid_xyz = "xyz:GOOGL"
+bybit_perp = "GOOGL/USDT"
+lighter = "GOOGL"
+extended = "GOOGL-USD"
+
+[asset_metadata.GOOGL]
+family = "traditional"
+asset_class = "equity"
+group = "mega_cap_technology"
+label = "Alphabet Class A"
+
+[assets.MSFT]
+binance_perp = "MSFT/USDT"
+hyperliquid_xyz = "xyz:MSFT"
+bybit_perp = "MSFT/USDT"
+lighter = "MSFT"
+extended = "MSFT_24_5-USD"
+
+[asset_metadata.MSFT]
+family = "traditional"
+asset_class = "equity"
+group = "mega_cap_technology"
+label = "Microsoft"
+
+[assets.AAPL]
+binance_perp = "AAPL/USDT"
+hyperliquid_xyz = "xyz:AAPL"
+bybit_perp = "AAPL/USDT"
+lighter = "AAPL"
+extended = "AAPL_24_5-USD"
+
+[asset_metadata.AAPL]
+family = "traditional"
+asset_class = "equity"
+group = "mega_cap_technology"
+label = "Apple"
 
 
 

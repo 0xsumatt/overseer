@@ -6,19 +6,23 @@
     <h1 class="text-title font-semibold text-body">Tracked wallets</h1>
     <p class="mt-1 text-data text-dim">Follow cumulative wallet flow against market price.</p>
   </div>
-  <div class="grid w-full grid-cols-[auto_minmax(0,1fr)] items-center gap-2 font-mono text-data sm:flex sm:w-auto">
-    <label for="wsym" class="text-dim">Asset</label>
-    <select id="wsym" class="select min-w-0 w-full sm:w-auto">
-      {% for s in symbols %}
-      <option value="{{ s.symbol }}">{{ s.symbol }} · {{ s.fills }} fills</option>
-      {% endfor %}
-    </select>
-    <label for="whours" class="text-dim">Window</label>
-    <select id="whours" class="select min-w-0 w-full sm:w-auto">
-      <option value="24">24h</option>
-      <option value="48" selected>48h</option>
-      <option value="168">7d</option>
-    </select>
+  <div class="grid w-full gap-2 font-mono text-data sm:ml-auto sm:flex sm:w-auto sm:items-end">
+    <label for="wsym" class="flex min-w-0 flex-col gap-1">
+      <span class="text-label tracking-label uppercase text-faint">Asset</span>
+      <select id="wsym" class="select min-w-0 w-full sm:w-auto">
+        {% for s in symbols %}
+        <option value="{{ s.symbol }}">{{ s.symbol }} · {{ s.fills }} fills</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label for="whours" class="flex min-w-0 flex-col gap-1">
+      <span class="text-label tracking-label uppercase text-faint">Window</span>
+      <select id="whours" class="select min-w-0 w-full sm:w-auto">
+        <option value="24">24h</option>
+        <option value="48" selected>48h</option>
+        <option value="168">7d</option>
+      </select>
+    </label>
   </div>
 </div>
 
@@ -120,7 +124,7 @@ const walletFilters = Overseer.filterState('wallets');
 const walletState = Overseer.pageState();
 let walletRequest = 0;
 
-async function loadWallets() {
+async function loadWallets({ forceRefresh = false } = {}) {
   const request = ++walletRequest;
   const symbol = document.getElementById('wsym').value;
   const hours = document.getElementById('whours').value;
@@ -131,8 +135,11 @@ async function loadWallets() {
   walletState.loading('Loading tracked-wallet flows…');
   try {
     const [flows, candles] = await Promise.all([
-      Overseer.requestJSON(`/api/wallet-flows?${new URLSearchParams({ symbol, hours })}`),
-      Overseer.requestJSON(`/api/candles?${pxQs}`),
+      Overseer.requestJSON(
+        `/api/wallet-flows?${new URLSearchParams({ symbol, hours })}`,
+        { forceRefresh },
+      ),
+      Overseer.requestJSON(`/api/candles?${pxQs}`, { forceRefresh }),
     ]);
     if (request !== walletRequest) return;
     handles.forEach(h => chart.removeSeries(h));
@@ -220,9 +227,9 @@ function meter(w, color) {
   </section>`;
 }
 
-async function loadShare() {
+async function loadShare({ forceRefresh = false } = {}) {
   try {
-    const rows = await Overseer.requestJSON('/api/wallet-share');
+    const rows = await Overseer.requestJSON('/api/wallet-share', { forceRefresh });
     // colorFor(w.venue), not the row index — same source as the chart lines,
     // so a wallet is one colour everywhere on this page.
     document.getElementById('wshare').innerHTML = rows.length

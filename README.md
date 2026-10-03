@@ -35,6 +35,9 @@ file; export the vars or use `uv run --env-file .env`):
 
 What gets scraped lives in `symbols.toml` (venues × assets); it is validated
 at startup and the scheduler refuses to launch on a bad config.
+`[asset_metadata.*]` supplies funding-dashboard family, class, group, and display
+labels. `[hyperliquid_deployers.*]` labels HIP-3 namespaces such as TradeXYZ
+without treating them as separate physical exchanges.
 Set `orderbook = true` on a venue to retain one best-bid/ask snapshot per
 configured market every 60 seconds. Override that cadence with
 `orderbook_poll_seconds`.

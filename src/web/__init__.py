@@ -80,13 +80,9 @@ def create_app(database_url: str | None = None) -> Flask:
     if mock:
         # UI testing with no database: storage.mock serves every read query with
         # deterministic realistic data; log in as mock@overseer.local / mock.
-        from storage.mock import MockStorage, _BASES, _VENUES
+        from storage.mock import MockStorage
         storage = MockStorage()
-        app.extensions["symbols"] = SymbolRegistry.from_config({"assets": {
-            asset: {v: pat.format(a=asset) for v, _e, mt, pat, _f in _VENUES
-                    if not (v == "binance_spot" and asset == "HYPE")}
-            for asset in _BASES
-        }})
+        app.extensions["symbols"] = SymbolRegistry.load(settings.symbols_file)
         app.logger.warning("MOCK MODE — serving generated data, no database")
         from storage.mock import MOCK_FILLS
         app.extensions["tracked_wallets"] = [

@@ -16,9 +16,15 @@ from core.enums import Exchange, MarketType
 
 bp = Blueprint("api", __name__, url_prefix="/api")
 
+
+def _force_refresh() -> bool:
+    """A no-cache request must reach storage, then replace the cached response."""
+    return request.cache_control.no_cache
+
+
 @bp.before_request
 def _serve_cached_response() -> Response | None:
-    if request.method != "GET":
+    if request.method != "GET" or _force_refresh():
         return None
     key = f"{request.endpoint}:{request.full_path}"
     return current_app.extensions["response_cache"].get(key)
@@ -38,6 +44,45 @@ def _store():
 
 def _float_or_none(value):
     return float(value) if value is not None else None
+
+
+_FUNDING_QUOTE_SUFFIXES = (
+    "FDUSD", "USDT", "USDC", "TUSD", "BUSD", "DAI", "USD",
+    "BTC", "ETH", "BNB", "EUR", "TRY", "GBP", "BRL",
+)
+
+
+def _funding_asset_id(registry, symbol: str) -> str:
+    """Group equivalent perp markets while retaining configured aliases."""
+    configured = registry.asset_for(symbol)
+    if configured is not None:
+        return configured
+
+    market = symbol.split(":", 1)[-1]
+    if "/" in market:
+        base, quote = market.rsplit("/", 1)
+        if base and quote:
+            return base
+    for quote in _FUNDING_QUOTE_SUFFIXES:
+        suffix = f"-{quote}"
+        if market.endswith(suffix) and len(market) > len(suffix):
+            return market[:-len(suffix)]
+    return market
+
+
+def _funding_symbols_for_asset(store, registry, requested_asset: str) -> list[str]:
+    """Resolve every current venue symbol represented by one funding asset."""
+    if not requested_asset:
+        return []
+    asset = _funding_asset_id(registry, requested_asset)
+    symbols = {requested_asset, asset, *registry.listings(asset).values()}
+    symbols.update(
+        row["symbol"]
+        for row in store.funding_table()
+        if _funding_asset_id(registry, row["symbol"]) == asset
+    )
+    symbols.discard("")
+    return sorted(symbols)
 
 
 def _maybe_csv(rows: list[dict], filename: str) -> Response | None:
@@ -183,17 +228,25 @@ def basis():
 
 @bp.get("/funding")
 def funding():
-    """Latest annualized funding + liquidity per (venue, perp), grouped by the
-    canonical asset id from the symbols registry. Rows whose symbol isn't in
-    the registry (e.g. a coin removed from config but still in the DB) group
-    under their raw symbol rather than being dropped."""
+    """Latest annualized funding + liquidity per (venue, perp), grouped by
+    configured asset id and then by unquoted base asset. This keeps equivalent
+    venue symbols such as DOGE, DOGE/USDT, and DOGE-USD on one funding row."""
     registry = current_app.extensions["symbols"]
     rows = _store().funding_table()
     out: dict[str, list] = {}
     for r in rows:
-        asset = registry.asset_for(r["symbol"]) or r["symbol"]
+        asset = _funding_asset_id(registry, r["symbol"])
+        metadata = registry.metadata(asset)
+        venue = registry.venue_identity(r["exchange"], r["symbol"])
         out.setdefault(asset, []).append({
             "exchange": r["exchange"], "symbol": r["symbol"],
+            "venue_key": venue.key,
+            "venue_label": venue.label,
+            "deployer": venue.deployer,
+            "asset_family": metadata.family,
+            "asset_class": metadata.asset_class,
+            "asset_group": metadata.group,
+            "asset_label": metadata.label,
             "rate": float(r["rate"]),
             "interval_hours": r["interval_hours"],
             "apr_pct": float(r["apr_pct"]),
@@ -273,37 +326,54 @@ def funding_history():
 
 @bp.get("/funding-history-multi")
 def funding_history_multi():
-    """Settled funding history for one canonical asset, across every venue
-    that lists it — the multi-venue overlay chart on the funding page. Keyed
-    by exchange so the frontend can assign one line + color per venue."""
-    asset = request.args.get("asset", "")
+    """Settled funding history for one aggregated base asset, grouped by its
+    display venue. HIP-3 deployers stay distinct from native Hyperliquid."""
+    requested_asset = request.args.get("asset", "")
     hours = min(int(request.args.get("hours", 48)), 24 * 30)
     registry = current_app.extensions["symbols"]
-    native_symbols = list(set(registry.listings(asset).values()))
-    rows = _store().funding_series_multi(native_symbols, hours=hours)
+    store = _store()
+    native_symbols = _funding_symbols_for_asset(store, registry, requested_asset)
+    rows = store.funding_series_multi(native_symbols, hours=hours)
     out: dict[str, list] = {}
     for r in rows:
-        out.setdefault(r["exchange"], []).append({
-            "time": int(r["ts"].timestamp()), "apr_pct": float(r["apr_pct"]),
+        venue = registry.venue_identity(r["exchange"], r["symbol"])
+        out.setdefault(venue.key, []).append({
+            "time": int(r["ts"].timestamp()),
+            "rate_pct": float(r["rate"]) * 100,
+            "interval_hours": r["interval_hours"],
+            "apr_pct": float(r["apr_pct"]),
+            "exchange": r["exchange"],
+            "symbol": r["symbol"],
+            "venue_label": venue.label,
+            "deployer": venue.deployer,
         })
     return jsonify(out)
 
 
 @bp.get("/liquidity-history-multi")
 def liquidity_history_multi():
-    """OI-notional history for one canonical asset, across every venue that
-    lists it — the bar pane under the funding history chart's line series."""
-    asset = request.args.get("asset", "")
+    """OI-notional history for one aggregated base asset, grouped by its
+    display venue. HIP-3 deployers stay distinct from native Hyperliquid."""
+    requested_asset = request.args.get("asset", "")
     hours = min(int(request.args.get("hours", 48)), 24 * 30)
     bucket_arg = request.args.get("bucket")
     bucket_minutes = min(max(int(bucket_arg), 1), 1440) if bucket_arg else None
     registry = current_app.extensions["symbols"]
-    native_symbols = list(set(registry.listings(asset).values()))
-    rows = _store().liquidity_series_multi(native_symbols, hours=hours, bucket_minutes=bucket_minutes)
+    store = _store()
+    native_symbols = _funding_symbols_for_asset(store, registry, requested_asset)
+    rows = store.liquidity_series_multi(
+        native_symbols, hours=hours, bucket_minutes=bucket_minutes
+    )
     out: dict[str, list] = {}
     for r in rows:
-        out.setdefault(r["exchange"], []).append({
-            "time": int(r["ts"].timestamp()), "oi_notional": float(r["oi_notional"]),
+        venue = registry.venue_identity(r["exchange"], r["symbol"])
+        out.setdefault(venue.key, []).append({
+            "time": int(r["ts"].timestamp()),
+            "oi_notional": float(r["oi_notional"]),
+            "exchange": r["exchange"],
+            "symbol": r["symbol"],
+            "venue_label": venue.label,
+            "deployer": venue.deployer,
         })
     return jsonify(out)
 
