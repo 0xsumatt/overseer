@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, Response, current_app, jsonify, request
 from core.enums import Exchange, MarketType
+from web.volatility import rolling_volatility
 
 bp = Blueprint("api", __name__, url_prefix="/api")
 
@@ -143,6 +144,31 @@ def candles():
     ]
     return _maybe_csv(payload, f"candles_{exchange}_{symbol}_{interval}") \
         or jsonify(payload)
+
+
+@bp.get("/realised-volatility")
+def realised_volatility():
+    q = request.args
+    try:
+        exchange, market_type, symbol = q["exchange"], q["market_type"], q["symbol"]
+        hours = int(q.get("hours", 48))
+        window_hours = int(q.get("window_hours", 24))
+    except KeyError as missing:
+        return jsonify(error=f"missing query param: {missing}"), 400
+    except ValueError:
+        return jsonify(error="hours and window_hours must be integers"), 400
+    if not 1 <= hours <= 168 or window_hours not in (1, 6, 24):
+        return jsonify(error="hours must be 1–168; window_hours must be 1, 6, or 24"), 400
+    end = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    # Include both closes at the beginning of the first rolling window.
+    since = end - timedelta(hours=hours + window_hours, minutes=2)
+    rows = _store().candles(
+        exchange, market_type, symbol, "1m", since=since,
+        until=end - timedelta(minutes=1), limit=(hours + window_hours) * 60 + 2,
+    )
+    return jsonify(rolling_volatility(
+        rows, end=int(end.timestamp()), hours=hours, window_hours=window_hours,
+    ))
 
 
 @bp.get("/orderbook-spreads")

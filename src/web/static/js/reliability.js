@@ -151,29 +151,29 @@
       Infinity,
     );
 
-    let label;
+    let checkLabel;
     let checkTitle;
     if (checking) {
-      label = 'refreshing data';
-      checkTitle = 'Forced data refresh in progress';
+      checkLabel = 'Screen refreshing';
+      checkTitle = 'Forced screen refresh in progress';
     } else if (Number.isFinite(nextAt)) {
       const delay = formatCheckDelay(nextAt - Date.now());
-      label = null;
-      checkTitle = `Next forced data refresh in ${delay}`;
+      checkLabel = `Screen refresh in ${delay}`;
+      checkTitle = `Next forced screen refresh in ${delay}`;
     } else {
-      label = null;
+      checkLabel = 'Screen refresh on demand';
       checkTitle = 'This screen refreshes on load or when its controls change';
     }
 
     for (const indicator of indicators) {
       const healthTitle = indicator.dataset.healthTitle || 'Data freshness is being checked';
-      const visibleLabel = label
-        || (indicator.dataset.dataTimestamp
-          ? `data · ${indicator.dataset.dataTimestamp}`
-          : 'data timestamp —');
-      indicator.querySelector('[data-freshness-label]').textContent = visibleLabel;
-      indicator.title = `${checkTitle}. ${healthTitle}.`;
-      indicator.setAttribute('aria-label', `${checkTitle}. ${healthTitle}.`);
+      indicator.querySelector('[data-freshness-check]').textContent = checkLabel;
+      const ageLabel = indicator.querySelector('[data-freshness-label]').textContent;
+      const stateLabel = indicator.querySelector('[data-freshness-state]').textContent;
+      const description = `Market feed: ${ageLabel}. ${stateLabel}. ${healthTitle}. ${checkTitle}. `
+        + 'This measures the newest bar across all markets, not every displayed series.';
+      indicator.title = description;
+      indicator.setAttribute('aria-label', description);
     }
   }
 
@@ -338,7 +338,7 @@
           : 'border-phosphor/40 bg-phosphor/10 text-phosphor'
       }`;
       banner.setAttribute('role', loss ? 'alert' : 'status');
-      banner.textContent = text;
+      if (banner.textContent !== text) banner.textContent = text;
     }
 
     function render() {
@@ -374,21 +374,35 @@
         title = 'No market-data bars have been ingested';
         setBanner('delayed', 'No data yet — ingest has not written a bar.');
       }
+      const ageLabel = age === null
+        ? emptyData && state !== 'error' ? 'No data yet' : 'Age unknown'
+        : `${formatAge(age)} old`;
+      const stateLabel = state === 'error'
+        ? navigator.onLine ? 'Check failed' : 'Offline'
+        : emptyData ? 'No bars'
+        : { checking: 'Checking', fresh: 'Fresh', delayed: 'Delayed', stale: 'Stale' }[state];
+      const timestamp = sample && formatUtcTimestamp(sample.lastTs, age >= 86_400);
+      const lastConfirmed = checkFailed || !navigator.onLine;
       for (const indicator of indicators) {
         const dot = indicator.querySelector('[data-freshness-dot]');
-        const text = indicator.querySelector('[data-freshness-label]');
+        const status = indicator.querySelector('[data-freshness-status]');
+        const time = indicator.querySelector('[data-freshness-timestamp]');
         const tone = FRESHNESS_TONE[state];
         indicator.classList.remove(...ALL_BORDER_TONES);
         indicator.classList.add(tone[2]);
         indicator.dataset.state = state;
         indicator.dataset.healthTitle = title;
-        const dataTimestamp = sample && formatUtcTimestamp(sample.lastTs);
-        if (dataTimestamp) indicator.dataset.dataTimestamp = dataTimestamp;
-        else delete indicator.dataset.dataTimestamp;
+        indicator.querySelector('[data-freshness-label]').textContent = ageLabel;
+        indicator.querySelector('[data-freshness-state]').textContent = stateLabel;
+        time.textContent = timestamp
+          ? `${lastConfirmed ? 'Last confirmed bar' : 'Latest bar'} · ${timestamp}`
+          : 'Latest bar · timestamp unavailable';
+        if (timestamp) time.dateTime = sample.lastTs;
+        else time.removeAttribute('datetime');
         dot.classList.remove(...ALL_DOT_TONES);
         dot.classList.add(tone[0]);
-        text.classList.remove(...ALL_TEXT_TONES);
-        text.classList.add(tone[1]);
+        status.classList.remove(...ALL_TEXT_TONES);
+        status.classList.add(tone[1]);
       }
       renderScreenCheck();
     }

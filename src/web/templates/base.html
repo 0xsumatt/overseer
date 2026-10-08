@@ -38,18 +38,22 @@
 </head>
 <body class="flex min-h-full flex-col bg-ink text-body font-sans antialiased">
   {% set links = [('pages.dashboard','charts'), ('pages.basis','basis'),
-                  ('pages.funding','funding'), ('pages.flow','flow'),
-                  ('pages.wallets','wallets')] %}
-  {% macro freshness_indicator() -%}
-  <span data-freshness data-state="checking" role="timer" aria-live="off"
-        aria-label="Checking the latest data timestamp"
-        title="Checking the latest data timestamp"
-        class="inline-flex h-7 w-44 shrink-0 items-center justify-center gap-2 rounded-full border
-               border-line bg-ink px-2 font-mono text-label tracking-label tabular-nums
-               whitespace-nowrap text-dim">
-    <span data-freshness-dot class="h-1.5 w-1.5 rounded-full bg-faint"></span>
-    <span data-freshness-label>checking data</span>
-  </span>
+                  ('pages.funding','funding')] %}
+  {% set tools = [('pages.flow','Trade flow'), ('pages.wallets','Tracked wallets')] %}
+  {% set tools_active = request.endpoint in ['pages.flow', 'pages.wallets'] %}
+  {% macro tools_links(id, floating=false) -%}
+  <div id="{{ id }}" data-tools-links
+       class="hidden rounded-md border border-line-strong bg-panel p-1
+              {{ 'absolute left-0 top-full z-50 mt-2 w-56 shadow-2xl shadow-black/50' if floating
+                 else 'col-span-2 mt-1' }}">
+    {% for endpoint, label in tools %}
+    <a href="{{ url_for(endpoint) }}"
+       {% if request.endpoint == endpoint %}aria-current="page"{% endif %}
+       class="flex min-h-11 items-center rounded px-3 font-mono text-data
+              {{ 'bg-panel2 text-body' if request.endpoint == endpoint
+                 else 'text-dim hover:bg-panel2 hover:text-body' }}">{{ label }}</a>
+    {% endfor %}
+  </div>
   {%- endmacro %}
   <nav class="border-b border-line bg-panel px-4 sm:px-6">
     <div class="flex h-12 w-full items-center gap-2 sm:gap-4">
@@ -66,6 +70,18 @@
                   {{ 'border-phosphor text-body' if request.endpoint == endpoint
                      else 'border-transparent text-dim hover:text-body' }}">{{ label }}</a>
         {% endfor %}
+        <div data-tools-nav class="relative">
+          <button type="button" data-tools-trigger aria-expanded="false"
+                  aria-controls="desktop-tools-links"
+                  aria-label="{{ 'Tools, current section' if tools_active else 'Tools' }}"
+                  class="flex h-12 items-center gap-2 border-b-2 pt-px font-mono text-data tracking-label uppercase -mb-px
+                         {{ 'border-phosphor text-body' if tools_active
+                            else 'border-transparent text-dim hover:text-body' }}">
+            tools
+            <span aria-hidden="true" class="h-1.5 w-1.5 -translate-y-px rotate-45 border-b border-r border-current"></span>
+          </button>
+          {{ tools_links('desktop-tools-links', true) }}
+        </div>
         {% if current_user.is_authenticated and current_user.can_view_internal %}
         <a href="{{ url_for('pages.health') }}"
            {% if request.endpoint == 'pages.health' %}aria-current="page"{% endif %}
@@ -76,7 +92,6 @@
       </div>
 
       <div class="ml-auto hidden shrink-0 items-center gap-5 xl:flex">
-        {{ freshness_indicator() }}
         <span data-utc-clock class="shrink-0 whitespace-nowrap font-mono text-data text-faint tabular-nums"></span>
         {% if current_user.is_authenticated %}
         <span class="max-w-48 truncate whitespace-nowrap font-mono text-data text-dim">{{ current_user.email }}</span>
@@ -84,11 +99,10 @@
            class="shrink-0 whitespace-nowrap font-mono text-data text-dim hover:text-loss">log out</a>
         {% endif %}
       </div>
-      <div class="ml-auto xl:hidden">{{ freshness_indicator() }}</div>
       <button id="mobile-menu-trigger" type="button" aria-expanded="false"
               aria-controls="mobile-primary-nav"
-              class="inline-flex min-h-11 items-center rounded border border-line-strong
-                     bg-ink px-3 font-mono text-data tracking-label uppercase text-body xl:hidden">
+              class="toolbar-button ml-auto inline-flex shrink-0 items-center border border-line-strong
+                     bg-ink tracking-label uppercase text-body xl:hidden">
         menu
       </button>
     </div>
@@ -102,6 +116,18 @@
                   {{ 'bg-panel2 text-body' if request.endpoint == endpoint
                      else 'text-dim hover:bg-panel2 hover:text-body' }}">{{ label }}</a>
         {% endfor %}
+        <div data-tools-nav class="contents">
+          <button type="button" data-tools-trigger aria-expanded="false"
+                  aria-controls="mobile-tools-links"
+                  aria-label="{{ 'Tools, current section' if tools_active else 'Tools' }}"
+                  class="flex min-h-11 items-center justify-between gap-2 rounded px-3 font-mono text-data tracking-label uppercase
+                         {{ 'bg-panel2 text-body' if tools_active
+                            else 'text-dim hover:bg-panel2 hover:text-body' }}">
+            tools
+            <span aria-hidden="true" class="h-1.5 w-1.5 -translate-y-px rotate-45 border-b border-r border-current"></span>
+          </button>
+          {{ tools_links('mobile-tools-links') }}
+        </div>
         {% if current_user.is_authenticated and current_user.can_view_internal %}
         <a href="{{ url_for('pages.health') }}"
            {% if request.endpoint == 'pages.health' %}aria-current="page"{% endif %}
@@ -120,6 +146,25 @@
       </div>
     </div>
   </nav>
+  <div data-freshness data-state="checking" role="timer" aria-live="off"
+       aria-label="Checking the age of the newest market-data bar"
+       title="Age of the newest bar across all markets; individual charts may contain older data."
+       class="border-b border-line bg-panel/50 px-4 py-2 sm:px-6">
+    <div class="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-6 gap-y-1">
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono">
+        <span class="text-label tracking-label uppercase text-faint">market feed</span>
+        <span data-freshness-label class="text-data font-semibold tabular-nums text-body">Age unknown</span>
+        <span data-freshness-status class="inline-flex items-center gap-1.5 text-label text-dim">
+          <span data-freshness-dot aria-hidden="true" class="h-1.5 w-1.5 rounded-full bg-faint"></span>
+          <span data-freshness-state>Checking</span>
+        </span>
+      </div>
+      <div class="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 font-mono text-label text-dim">
+        <time data-freshness-timestamp>Latest bar —</time>
+        <span data-freshness-check class="tabular-nums">Checking screen refresh</span>
+      </div>
+    </div>
+  </div>
   <div id="stale-banner" role="status" aria-live="polite" aria-atomic="true"
        class="hidden border-b border-phosphor/40 bg-phosphor/10 px-4 py-1.5
               text-center font-mono text-label text-phosphor sm:px-6"></div>
@@ -133,8 +178,8 @@
     <div id="page-status" class="hidden" role="status" aria-live="polite" aria-atomic="true">
       <span data-status-message class="min-w-0 flex-1"></span>
       <button data-status-retry type="button"
-              class="hidden min-h-11 shrink-0 rounded border border-current/40 px-3
-                     font-mono text-label tracking-label uppercase hover:bg-loss/10">
+              class="toolbar-button hidden shrink-0 border border-current/40
+                     tracking-label uppercase hover:bg-loss/10 disabled:hover:bg-transparent">
         try again
       </button>
     </div>
@@ -144,10 +189,9 @@
     <div class="mx-auto flex max-w-6xl flex-col items-start gap-2 font-mono text-label text-faint sm:flex-row sm:items-center sm:justify-between">
       <span>overseer · market operations console</span>
       <div class="flex items-center gap-4">
-        {# edit these to your real handles #}
-        <a href="https://x.com/yourhandle" target="_blank" rel="noopener"
+        <a href="https://x.com/sumatt" target="_blank" rel="noopener"
            class="hover:text-body">x / twitter</a>
-        <a href="https://github.com/yourhandle" target="_blank" rel="noopener"
+        <a href="https://github.com/0xsumatt" target="_blank" rel="noopener"
            class="hover:text-body">github</a>
       </div>
     </div>
@@ -162,6 +206,43 @@
       setTimeout(tick, 1000);
     })();
 
+    const toolsNavControls = [...document.querySelectorAll('[data-tools-nav]')];
+    function setToolsMenu(control, open, restoreFocus = false) {
+      const trigger = control.querySelector('[data-tools-trigger]');
+      control.querySelector('[data-tools-links]').classList.toggle('hidden', !open);
+      trigger.setAttribute('aria-expanded', String(open));
+      if (restoreFocus) trigger.focus();
+    }
+    toolsNavControls.forEach(control => {
+      const trigger = control.querySelector('[data-tools-trigger]');
+      trigger.addEventListener('click', () => {
+        const open = trigger.getAttribute('aria-expanded') !== 'true';
+        toolsNavControls.forEach(other => setToolsMenu(other, other === control && open));
+      });
+      control.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && trigger.getAttribute('aria-expanded') === 'true') {
+          event.preventDefault();
+          event.stopPropagation();
+          setToolsMenu(control, false, true);
+        } else if (event.target === trigger && ['ArrowDown', 'ArrowUp'].includes(event.key)) {
+          event.preventDefault();
+          toolsNavControls.forEach(other => setToolsMenu(other, other === control));
+          const links = control.querySelectorAll('[data-tools-links] a');
+          links[event.key === 'ArrowDown' ? 0 : links.length - 1].focus();
+        }
+      });
+    });
+    document.addEventListener('pointerdown', event => {
+      toolsNavControls.forEach(control => {
+        if (!control.contains(event.target)) setToolsMenu(control, false);
+      });
+    });
+    document.addEventListener('focusin', event => {
+      toolsNavControls.forEach(control => {
+        if (!control.contains(event.target)) setToolsMenu(control, false);
+      });
+    });
+
     const mobileMenuTrigger = document.getElementById('mobile-menu-trigger');
     const mobilePrimaryNav = document.getElementById('mobile-primary-nav');
     function setMobileMenu(open) {
@@ -169,6 +250,7 @@
       mobilePrimaryNav.classList.toggle('hidden', !open);
       mobileMenuTrigger.setAttribute('aria-expanded', String(open));
       mobileMenuTrigger.textContent = open ? 'close' : 'menu';
+      if (!open) toolsNavControls.forEach(control => setToolsMenu(control, false));
     }
     mobileMenuTrigger?.addEventListener('click', () => {
       setMobileMenu(mobileMenuTrigger.getAttribute('aria-expanded') !== 'true');
@@ -180,10 +262,11 @@
       }
     });
     window.matchMedia('(min-width: 1280px)').addEventListener('change', event => {
-      if (event.matches) setMobileMenu(false);
+      setMobileMenu(false);
     });
   </script>
   <script>Overseer.startFreshness();</script>
+  <script>const VENUE_LABELS = {{ venue_labels | tojson }};</script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

@@ -161,12 +161,22 @@ class SymbolRegistry:
             ),
         )
 
+    def _hip3_label(self, deployer: str) -> str:
+        return f"hip3:{self._hyperliquid_deployers.get(deployer, deployer).lower()}"
+
+    def hip3_venue_labels(self) -> dict[str, str]:
+        """Configured HIP-3 display names, keyed by stable venue identity."""
+        return {
+            f"hyperliquid:{deployer}": self._hip3_label(deployer)
+            for deployer in self._hyperliquid_deployers
+        }
+
     def venue_identity(self, exchange: str, symbol: str) -> VenueIdentity:
         if exchange == "hyperliquid" and ":" in symbol:
             deployer = symbol.split(":", 1)[0]
             return VenueIdentity(
                 key=f"hyperliquid:{deployer}",
-                label=self._hyperliquid_deployers.get(deployer, deployer),
+                label=self._hip3_label(deployer),
                 deployer=deployer,
             )
         return VenueIdentity(key=exchange, label=exchange)

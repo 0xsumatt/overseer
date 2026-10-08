@@ -9,44 +9,51 @@
   <div class="grid w-full gap-2 font-mono text-data sm:ml-auto sm:flex sm:w-auto sm:items-end">
     <label for="wsym" class="flex min-w-0 flex-col gap-1">
       <span class="text-label tracking-label uppercase text-faint">Asset</span>
-      <select id="wsym" class="select min-w-0 w-full sm:w-auto">
-        {% for s in symbols %}
-        <option value="{{ s.symbol }}">{{ s.symbol }} · {{ s.fills }} fills</option>
-        {% endfor %}
-      </select>
+      <span class="select-shell min-w-0 w-full sm:w-auto">
+        <select id="wsym" class="select select-polished w-full">
+          {% for s in symbols %}
+          <option value="{{ s.symbol }}">{{ s.symbol }} · {{ s.fills }} fills</option>
+          {% endfor %}
+        </select>
+      </span>
     </label>
     <label for="whours" class="flex min-w-0 flex-col gap-1">
       <span class="text-label tracking-label uppercase text-faint">Window</span>
-      <select id="whours" class="select min-w-0 w-full sm:w-auto">
-        <option value="24">24h</option>
-        <option value="48" selected>48h</option>
-        <option value="168">7d</option>
-      </select>
+      <span class="select-shell min-w-0 w-full sm:w-auto">
+        <select id="whours" class="select select-polished w-full">
+          <option value="24">24h</option>
+          <option value="48" selected>48h</option>
+          <option value="168">7d</option>
+        </select>
+      </span>
     </label>
   </div>
 </div>
 
 {% if not symbols %}
-<div class="rounded-md border border-line bg-panel/50 p-6 font-mono text-data text-dim">
+<div class="summary-card font-mono text-data text-dim">
   No fills recorded yet — tracked wallets are polled every 30s; first rows land shortly after the scheduler starts.
 </div>
 {% else %}
 <div id="wlegend" class="scroll-thin mb-3 flex flex-nowrap gap-2 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible sm:pb-0"></div>
-<div id="wchart" class="h-[22rem] w-full rounded-md border border-line bg-panel/50 sm:h-[27.5rem]"></div>
-<p class="mt-2 font-mono text-label text-faint">
-  cumulative net flow (buys − sells, base units, left axis) within the window vs price (right axis) ·
-  flow measures drift from the window-start position, not absolute inventory</p>
+<div id="wchart" class="chart-card h-[22rem] w-full sm:h-[27.5rem]"></div>
+<p class="chart-caption">
+  <span id="wchart-scope">Chart: selected asset and window.</span>
+  Cumulative net flow (buys − sells, base units, left axis) vs price (right axis);
+  flow measures drift from the window-start position, not absolute inventory.</p>
 
-<div id="wshare" class="mt-4 grid gap-4 sm:grid-cols-2"></div>
+<p class="chart-caption mt-4">Wallet share · Last 24h, all assets.</p>
+<div id="wshare" class="mt-2 grid gap-4 sm:grid-cols-2"></div>
 {% endif %}
 
 <div class="mt-8 grid gap-4 lg:grid-cols-2">
   {% for label, venue, rows in summaries %}
-  <section class="flex h-[18rem] flex-col rounded-md border border-line bg-panel/50 p-4 sm:h-[21rem]">
-    <div class="mb-3 flex items-baseline justify-between">
+  <section class="summary-card flex h-[18rem] flex-col sm:h-[21rem]">
+    <div class="flex items-baseline justify-between gap-2">
       <h2 class="font-mono text-label tracking-label uppercase text-dim">{{ label }}</h2>
       <span class="font-mono text-label text-faint">{{ venue }}</span>
     </div>
+    <p class="chart-caption mb-3">All recorded fills, all assets; size in base units.</p>
     <div class="scroll-thin min-h-0 flex-1 overflow-y-auto pr-3">
       {% if rows %}
       <table class="w-full font-mono text-data">
@@ -142,6 +149,8 @@ async function loadWallets({ forceRefresh = false } = {}) {
       Overseer.requestJSON(`/api/candles?${pxQs}`, { forceRefresh }),
     ]);
     if (request !== walletRequest) return;
+    document.getElementById('wchart-scope').textContent =
+      `Chart: ${symbol} · selected ${hours === '168' ? '7d' : hours + 'h'} window.`;
     handles.forEach(h => chart.removeSeries(h));
     handles = [];
 
@@ -202,7 +211,7 @@ function meter(w, color) {
   const pct = w.share_pct;
   const dash = pct == null ? 0 : Math.min(pct, 100) / 100 * c;
   return `
-  <section class="flex items-center gap-5 rounded-md border border-line bg-panel/50 p-4">
+  <section class="summary-card flex flex-col items-start gap-3 md:flex-row md:items-center">
     <svg viewBox="0 0 84 84" class="h-24 w-24 shrink-0" role="img"
          aria-label="${w.label} is ${pct == null ? 'unknown' : pct.toFixed(2) + '%'} of ${w.venue} 24h volume">
       <circle cx="42" cy="42" r="${r}" fill="none" stroke="${color}22" stroke-width="8"/>
@@ -214,15 +223,15 @@ function meter(w, color) {
         ${pct == null ? '—' : pct.toFixed(1) + '%'}</text>
     </svg>
     <div class="min-w-0">
-      <div class="flex items-center gap-2">
-        <span class="h-2 w-2 rounded-full" style="background:${color}"></span>
-        <span class="font-mono text-data tracking-label uppercase text-body">${w.label}</span>
-        <span class="font-mono text-label text-faint">${w.venue}</span>
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="h-2 w-2 shrink-0 rounded-full" style="background:${color}"></span>
+        <span class="min-w-0 break-words font-mono text-data tracking-label uppercase text-body">${w.label}</span>
+        <span class="font-mono text-label text-dim">${w.venue}</span>
       </div>
-      <div class="mt-1 font-mono text-label text-dim">
+      <div class="mt-1 text-data text-dim">
         ${fmtUsd(w.wallet_notional_24h)} filled of ${fmtUsd(w.venue_notional_24h)} venue-wide 24h volume</div>
-      <div class="font-mono text-label text-faint">${w.fills_24h.toLocaleString()} fills ·
-        venue total from the daily sweep · fills feed is best-effort (see caption above)</div>
+      <p class="chart-caption">${w.fills_24h.toLocaleString()} fills ·
+        venue total from the daily sweep. The best-effort fills feed may miss fills, so wallet share may be understated.</p>
     </div>
   </section>`;
 }
@@ -234,7 +243,7 @@ async function loadShare({ forceRefresh = false } = {}) {
     // so a wallet is one colour everywhere on this page.
     document.getElementById('wshare').innerHTML = rows.length
       ? rows.map(w => meter(w, colorFor(w.venue))).join('')
-      : '<div class="rounded border border-line bg-panel/50 p-4 font-mono text-data text-dim">No 24h wallet fills have been recorded yet.</div>';
+      : '<div class="summary-card text-data text-dim">No 24h wallet fills have been recorded yet.</div>';
     walletState.ready('share');
   } catch (error) {
     walletState.error('Wallet share', loadShare, 'share');

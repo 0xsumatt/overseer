@@ -1,18 +1,6 @@
 {% extends "base.html" %}
 {% block title %}funding · overseer{% endblock %}
 {% block content %}
-<style>
-  #highlights > :first-child { border-top-left-radius: .4375rem; }
-  #highlights > :nth-child(2) { border-top-right-radius: .4375rem; }
-  #highlights > :nth-last-child(2) { border-bottom-left-radius: .4375rem; }
-  #highlights > :last-child { border-bottom-right-radius: .4375rem; }
-  @media (min-width: 640px) {
-    #highlights > :first-child { border-bottom-left-radius: .4375rem; }
-    #highlights > :nth-child(2) { border-top-right-radius: 0; }
-    #highlights > :nth-last-child(2) { border-bottom-left-radius: 0; }
-    #highlights > :last-child { border-top-right-radius: .4375rem; }
-  }
-</style>
 <div class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
   <div>
     <h1 class="text-title font-semibold text-body">Funding rates</h1>
@@ -23,10 +11,10 @@
          role="tablist" aria-label="Funding view" aria-orientation="horizontal">
       <button id="tab-table" data-view="table" role="tab" aria-selected="true"
               aria-controls="view-table"
-              class="rounded px-3.5 py-1 tracking-label uppercase transition-colors text-ink bg-phosphor/85">table</button>
+              class="compact-button px-3 text-data tracking-label uppercase text-ink bg-phosphor/85">table</button>
       <button id="tab-history" data-view="history" role="tab" aria-selected="false"
               aria-controls="view-history" tabindex="-1"
-              class="rounded px-3.5 py-1 tracking-label uppercase transition-colors text-dim hover:text-body">history</button>
+              class="compact-button px-3 text-data tracking-label uppercase text-dim hover:text-body">history</button>
     </div>
     <div class="flex items-center gap-2 font-mono text-label text-dim">
       <span id="refresh-dot" class="inline-block h-1.5 w-1.5 rounded-full bg-faint"></span>
@@ -34,51 +22,53 @@
     </div>
   </div>
 </div>
+<p class="mb-4 text-data text-dim">Positive funding: longs pay shorts. Negative funding: shorts pay longs.
+  Annualized rates are not a promised return.</p>
 
-<div class="mb-4 grid grid-cols-[minmax(0,1fr)_auto] gap-2 sm:flex sm:items-center">
+<div class="mb-4 grid grid-cols-[minmax(0,1fr)_auto] gap-2 lg:flex lg:items-center">
   <input id="ffilter" type="search" placeholder="Search assets…" aria-label="Search assets"
-         class="funding-field input col-start-1 row-start-1 w-full min-w-0 rounded-full px-4 sm:max-w-sm">
+         class="input col-start-1 row-start-1 w-full min-w-0 rounded-full px-4 sm:max-w-sm">
   <div class="col-span-2 row-start-2 grid grid-cols-2 gap-2 font-mono text-data sm:ml-auto sm:flex">
-    <div id="asset-scope-control" class="relative min-w-0 sm:w-44">
+    <div id="asset-scope-control" class="relative min-w-0 sm:w-52">
       <span id="asset-scope-label" class="sr-only">Asset scope</span>
       <button id="asset-scope-trigger" type="button"
-              class="select select-summary flex min-h-11 w-full cursor-pointer items-center px-4 py-2"
+              class="select select-summary flex min-h-11 w-full cursor-pointer items-center"
               aria-haspopup="menu" aria-expanded="false" aria-controls="asset-scope-menu"
               aria-labelledby="asset-scope-label asset-scope-value">
-        <span id="asset-scope-value" class="w-full truncate text-center">All assets</span>
+        <span id="asset-scope-value" class="w-full truncate">All assets</span>
       </button>
       <div id="asset-scope-menu" role="menu" aria-labelledby="asset-scope-label"
-           class="absolute left-0 right-0 top-full z-30 mt-2 hidden rounded-md border border-line-strong
+           class="absolute left-0 top-full z-30 mt-2 hidden w-64 max-w-[calc(100vw-2rem)] rounded-md border border-line-strong
                   bg-panel p-1 shadow-2xl shadow-black/50">
         <button type="button" role="menuitemradio" aria-checked="true" tabindex="-1" data-scope-option="all"
-                class="flex min-h-11 w-full items-center justify-between rounded px-3 text-left text-phosphor
+                class="flex min-h-11 w-full items-center justify-between gap-3 whitespace-nowrap rounded px-3 text-left text-phosphor
                        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-phosphor/40">
           <span>All assets</span><span data-scope-count="all" class="tabular-nums text-faint">0</span>
         </button>
         <button type="button" role="menuitemradio" aria-checked="false" tabindex="-1" data-scope-option="crypto"
-                class="flex min-h-11 w-full items-center justify-between rounded px-3 text-left text-body
+                class="flex min-h-11 w-full items-center justify-between gap-3 whitespace-nowrap rounded px-3 text-left text-body
                        hover:bg-panel2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-phosphor/40">
           <span>Crypto</span><span data-scope-count="crypto" class="tabular-nums text-faint">0</span>
         </button>
         <div class="mx-2 my-1 border-t border-line/70"></div>
         <div class="px-3 pb-1 pt-2 text-label tracking-label uppercase text-faint">Traditional</div>
         <button type="button" role="menuitemradio" aria-checked="false" tabindex="-1" data-scope-option="traditional"
-                class="flex min-h-11 w-full items-center justify-between rounded px-3 text-left text-body
+                class="flex min-h-11 w-full items-center justify-between gap-3 whitespace-nowrap rounded px-3 text-left text-body
                        hover:bg-panel2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-phosphor/40">
           <span>All traditional</span><span data-scope-count="traditional" class="tabular-nums text-faint">0</span>
         </button>
         <button type="button" role="menuitemradio" aria-checked="false" tabindex="-1" data-scope-option="commodity"
-                class="flex min-h-11 w-full items-center justify-between rounded px-3 text-left text-body
+                class="flex min-h-11 w-full items-center justify-between gap-3 whitespace-nowrap rounded px-3 text-left text-body
                        hover:bg-panel2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-phosphor/40">
           <span>Commodities</span><span data-scope-count="commodity" class="tabular-nums text-faint">0</span>
         </button>
         <button type="button" role="menuitemradio" aria-checked="false" tabindex="-1" data-scope-option="index"
-                class="flex min-h-11 w-full items-center justify-between rounded px-3 text-left text-body
+                class="flex min-h-11 w-full items-center justify-between gap-3 whitespace-nowrap rounded px-3 text-left text-body
                        hover:bg-panel2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-phosphor/40">
           <span>Indices</span><span data-scope-count="index" class="tabular-nums text-faint">0</span>
         </button>
         <button type="button" role="menuitemradio" aria-checked="false" tabindex="-1" data-scope-option="equity"
-                class="flex min-h-11 w-full items-center justify-between rounded px-3 text-left text-body
+                class="flex min-h-11 w-full items-center justify-between gap-3 whitespace-nowrap rounded px-3 text-left text-body
                        hover:bg-panel2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-phosphor/40">
           <span>Equities</span><span data-scope-count="equity" class="tabular-nums text-faint">0</span>
         </button>
@@ -87,10 +77,10 @@
     <div class="relative min-w-0 sm:w-44" data-rate-menu data-rate-label="compact">
       <span id="table-rate-label" class="sr-only">Funding rate display</span>
       <button type="button" data-rate-trigger
-              class="select select-summary flex min-h-11 w-full cursor-pointer items-center px-4 py-2"
+              class="select select-summary flex min-h-11 w-full cursor-pointer items-center"
               aria-haspopup="menu" aria-expanded="false" aria-controls="table-rate-menu"
               aria-labelledby="table-rate-label table-rate-value">
-        <span id="table-rate-value" data-rate-value class="w-full truncate text-center">Annualized</span>
+        <span id="table-rate-value" data-rate-value class="w-full truncate">Annualized</span>
       </button>
       <div id="table-rate-menu" role="menu" aria-labelledby="table-rate-label"
            class="absolute left-0 right-0 top-full z-30 mt-2 hidden rounded-md border border-line-strong
@@ -109,7 +99,7 @@
     </div>
   </div>
   <button id="watchlist-filter" type="button" aria-pressed="false"
-          class="col-start-2 row-start-1 min-h-11 shrink-0 rounded-md border border-line px-3 py-1
+          class="toolbar-button col-start-2 row-start-1 shrink-0 border border-line
                  font-mono text-data text-dim transition-colors hover:text-body">
     Watchlist <span id="watchlist-count" class="text-faint">0</span></button>
 </div>
@@ -119,14 +109,14 @@
     <h2 id="market-pulse-title"
         class="mb-2 font-mono text-label tracking-label uppercase text-dim">Market pulse</h2>
     <div id="highlights"
-         class="grid grid-cols-2 gap-px overflow-hidden rounded-md border border-line bg-line sm:grid-cols-4"></div>
+         class="grid grid-cols-2 gap-2 sm:grid-cols-4"></div>
   </section>
   <div class="mb-2 font-mono text-label tracking-label uppercase text-dim">
     Markets <span id="market-count" class="tabular-nums text-body">0</span>
   </div>
-  <div class="flex h-[30rem] flex-col overflow-hidden rounded-md border border-line bg-panel/30 sm:h-[32.5rem]">
+  <div class="table-card flex h-[30rem] flex-col overflow-hidden sm:h-[32.5rem]">
     <div class="scroll-thin min-h-0 flex-1 overflow-x-auto overflow-y-auto">
-      <table class="w-full table-fixed text-data" id="ftable">
+      <table class="w-full text-data" id="ftable">
         <thead>
           <tr id="fhead" class="font-mono text-label tracking-label uppercase text-dim">
             <th class="px-4 py-2.5 text-left" style="width:12rem">coin</th></tr>
@@ -140,15 +130,15 @@
 </div>
 
 <div id="view-history" class="hidden" role="tabpanel" aria-labelledby="tab-history">
-  <div class="mb-3 flex flex-col gap-2 font-mono text-data sm:flex-row sm:items-start">
+  <div class="mb-3 flex flex-col gap-2 font-mono text-data sm:flex-row sm:flex-wrap sm:items-start">
     <div class="grid w-full grid-cols-[auto_minmax(0,1fr)] items-center gap-2 sm:flex sm:w-auto">
       <label for="hcoin" class="text-dim">Asset</label>
       <span class="select-shell min-w-0 w-full sm:w-56">
-        <select id="hcoin" class="funding-field select select-polished min-w-0"></select>
+        <select id="hcoin" class="select select-polished w-full min-w-0"></select>
       </span>
       <label for="hhours" class="text-dim">Window</label>
       <span class="select-shell min-w-0 w-full sm:w-28">
-        <select id="hhours" class="funding-field select select-polished min-w-0">
+        <select id="hhours" class="select select-polished w-full min-w-0">
           <option value="24">24h</option>
           <option value="48" selected>48h</option>
           <option value="168">7d</option>
@@ -163,10 +153,10 @@
         <span id="history-rate-label" class="text-dim">Rate</span>
         <div class="relative min-w-0" data-rate-menu>
           <button type="button" data-rate-trigger
-                  class="funding-field select select-summary flex min-h-11 w-full cursor-pointer items-center px-8 py-2"
+                  class="select select-summary flex min-h-11 w-full cursor-pointer items-center"
                   aria-haspopup="menu" aria-expanded="false" aria-controls="history-rate-menu"
                   aria-labelledby="history-rate-label history-rate-value">
-            <span id="history-rate-value" data-rate-value class="w-full truncate text-center">Annualized rate</span>
+            <span id="history-rate-value" data-rate-value class="w-full truncate">Annualized rate</span>
           </button>
           <div id="history-rate-menu" role="menu" aria-labelledby="history-rate-label"
                class="absolute left-0 right-0 top-full z-30 mt-2 hidden rounded-md border border-line-strong
@@ -185,7 +175,7 @@
         </div>
         <label for="hbucket" class="text-dim">OI bars</label>
         <span class="select-shell min-w-0">
-          <select id="hbucket" title="OI bar width" class="funding-field select select-sm select-polished min-w-0">
+          <select id="hbucket" title="OI bar width" class="select select-sm select-polished w-full min-w-0">
             <option value="5">5m bars</option>
             <option value="15">15m bars</option>
             <option value="60">1h bars</option>
@@ -197,20 +187,20 @@
         <div class="grid grid-cols-2 rounded-md border border-line bg-ink p-1"
              role="group" aria-label="Funding smoothing">
           <button id="smooth-raw" data-smooth="raw" aria-pressed="false"
-                  class="rounded px-3 py-1 text-center tracking-label uppercase transition-colors text-dim hover:text-body">raw</button>
+                  class="compact-button px-3 text-data tracking-label uppercase text-dim hover:text-body">raw</button>
           <button id="smooth-ewma" data-smooth="ewma" aria-pressed="true"
-                  class="rounded px-3 py-1 text-center tracking-label uppercase transition-colors text-ink bg-phosphor/85">smoothed</button>
+                  class="compact-button px-3 text-data tracking-label uppercase text-ink bg-phosphor/85">smoothed</button>
         </div>
       </div>
     </details>
   </div>
   <div id="hlegend" class="scroll-thin mb-3 flex flex-nowrap gap-2 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible sm:pb-0"></div>
-  <div class="flex h-[28rem] flex-col rounded-md border border-line bg-panel/30 p-2 sm:h-[35rem] sm:p-4">
+  <div class="chart-card flex h-[28rem] flex-col p-2 sm:h-[35rem] sm:p-4">
     <div id="hchart" class="min-h-0 flex-1"></div>
   </div>
-  <p id="history-help" class="mt-2 font-mono text-label text-faint">
-    Lines follow the selected rate display; stacked bars show open interest.
-    Select a venue to hide or show it.</p>
+  <p id="history-help" class="chart-caption">
+    Lines show annualized funding, EWMA-smoothed per venue (α = 0.35); legend values show the latest raw settlement.
+    Stacked bars show open interest. Select a venue to hide or show it.</p>
 </div>
 
 <div id="tip" role="tooltip" class="pointer-events-none fixed z-50 hidden w-72 max-w-[calc(100vw-2rem)] rounded-md border border-line
@@ -404,21 +394,6 @@ const assetScopeMenu = document.getElementById('asset-scope-menu');
 const assetScopeValue = document.getElementById('asset-scope-value');
 const assetScopeOptions = [...assetScopeMenu.querySelectorAll('[data-scope-option]')];
 
-const fundingFilterToolbar = document.getElementById('ffilter').parentElement;
-const fundingFilterControls = assetScopeControl.parentElement;
-const watchlistFilter = document.getElementById('watchlist-filter');
-const wideFundingFilters = window.matchMedia('(min-width: 640px)');
-
-function syncFundingFilterOrder() {
-  if (wideFundingFilters.matches) {
-    fundingFilterToolbar.append(watchlistFilter);
-  } else {
-    fundingFilterToolbar.insertBefore(watchlistFilter, fundingFilterControls);
-  }
-}
-
-wideFundingFilters.addEventListener('change', syncFundingFilterOrder);
-syncFundingFilterOrder();
 
 function currentAssetScope() {
   if (activeFamily === 'crypto') return 'crypto';
@@ -431,7 +406,7 @@ function syncAssetScopeMenu() {
   assetScopeOptions.forEach(option => {
     const selected = option.dataset.scopeOption === selectedValue;
     option.setAttribute('aria-checked', String(selected));
-    option.className = `flex min-h-11 w-full items-center justify-between rounded px-3 text-left
+    option.className = `flex min-h-11 w-full items-center justify-between gap-3 whitespace-nowrap rounded px-3 text-left
       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-phosphor/40 ${
         selected
           ? 'bg-phosphor/10 text-phosphor'
@@ -562,7 +537,7 @@ function renderAssetFilters(data) {
   syncAssetScopeMenu();
   const watchlistButton = document.getElementById('watchlist-filter');
   watchlistButton.setAttribute('aria-pressed', String(watchlistOnly));
-  watchlistButton.className = `col-start-2 row-start-1 min-h-11 shrink-0 rounded-md border px-3 py-1 font-mono text-data transition-colors ${
+  watchlistButton.className = `toolbar-button col-start-2 row-start-1 shrink-0 border font-mono text-data transition-colors ${
     watchlistOnly
       ? 'border-phosphor/50 bg-phosphor/10 text-phosphor'
       : 'border-line text-dim hover:text-body'}`;
@@ -648,9 +623,9 @@ async function load({ forceRefresh = false } = {}) {
             <button type="button" data-watch="${coin}" aria-pressed="${watched}"
                     aria-label="${watched ? 'Remove' : 'Add'} ${label || coin} ${watched ? 'from' : 'to'} watchlist"
                     title="${watched ? 'Remove' : 'Add'} ${label || coin} ${watched ? 'from' : 'to'} watchlist"
-                    class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-transparent transition-colors
+                    class="compact-button inline-flex w-11 shrink-0 items-center justify-center rounded-md border border-transparent p-0 transition-colors
                            focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-phosphor
-                           sm:h-8 sm:w-8 ${
+                           sm:w-8 ${
                       watched
                         ? 'bg-phosphor/10 text-phosphor'
                         : 'text-phosphor/70 hover:bg-phosphor/10 hover:text-phosphor'}">${
@@ -686,7 +661,7 @@ async function load({ forceRefresh = false } = {}) {
     const card = (label, big, cls, sub, href, href2) => `
       <a ${href ? `href="${href}" target="_blank" rel="noopener"` : ''}
          ${href2 ? `data-href2="${href2}"` : ''}
-         class="block min-w-0 bg-panel px-4 py-3 text-left transition-colors hover:bg-panel2/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-phosphor">
+         class="summary-card block min-w-0 text-left transition-colors hover:bg-panel2/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-phosphor">
         <div class="min-h-[2.125rem] font-mono text-label tracking-label uppercase text-dim sm:min-h-0">${label}</div>
         <div class="mt-0.5 font-mono text-hero tabular-nums ${cls}">${big}</div>
         <div class="mt-1 min-h-[3.25rem] break-words font-mono text-label leading-snug text-faint sm:min-h-[2.125rem]">${sub}</div></a>`;
@@ -696,9 +671,11 @@ async function load({ forceRefresh = false } = {}) {
         `${spreads2[0].coin} · ${spreads2[0].hi.venue_label} vs ${spreads2[0].lo.venue_label} · opens both`,
         tradeUrl(spreads2[0].hi.exchange, spreads2[0].hi.symbol),
         tradeUrl(spreads2[0].lo.exchange, spreads2[0].lo.symbol)),
-      richest && card('highest APR', `+${richest.apr_pct.toFixed(1)}%`, 'text-gain',
+      richest && card('highest APR', `${richest.apr_pct > 0 ? '+' : ''}${richest.apr_pct.toFixed(1)}%`,
+        richest.apr_pct > 0 ? 'text-gain' : richest.apr_pct < 0 ? 'text-loss' : 'text-dim',
         `${richest.coin} · ${richest.venue_label}`, tradeUrl(richest.exchange, richest.symbol)),
-      mostNeg && card('lowest APR', `${mostNeg.apr_pct.toFixed(1)}%`, 'text-loss',
+      mostNeg && card('lowest APR', `${mostNeg.apr_pct > 0 ? '+' : ''}${mostNeg.apr_pct.toFixed(1)}%`,
+        mostNeg.apr_pct > 0 ? 'text-gain' : mostNeg.apr_pct < 0 ? 'text-loss' : 'text-dim',
         `${mostNeg.coin} · ${mostNeg.venue_label}`, tradeUrl(mostNeg.exchange, mostNeg.symbol)),
       mostLiq && card('most liquid', fmtUsd(mostLiq.oi_notional), 'text-body',
         `${mostLiq.coin} · ${mostLiq.venue_label} open interest`,
@@ -887,9 +864,7 @@ function setRateMode(mode, redraw = true) {
   document.getElementById('table-help').textContent = rateMode === 'apr'
     ? `Sorted by widest APR spread · hover or focus a rate for liquidity details`
     : `Period rates use each venue's own interval · sorting remains APR-normalized`;
-  document.getElementById('history-help').textContent = rateMode === 'apr'
-    ? `Lines show annualized funding; stacked bars show open interest. Select a venue to hide or show it.`
-    : `Lines show each venue's rate per funding period; stacked bars show open interest.`;
+  updateHistoryHelp();
   if (redraw) {
     if (lastFundingData) load();
     if (lastHistoryData) renderHistoryChart();
@@ -1036,7 +1011,7 @@ const historyRate = point => rateMode === 'period' ? point.rate_pct : point.apr_
 function historyRateText(value, intervalHours = null) {
   const digits = rateMode === 'period' ? 4 : 1;
   const interval = rateMode === 'period' && intervalHours ? ` / ${intervalHours}h` : '';
-  return `${value >= 0 ? '+' : ''}${value.toFixed(digits)}%${interval}`;
+  return `${value > 0 ? '+' : ''}${value.toFixed(digits)}%${interval}`;
 }
 function ewma(points, alpha = 0.35) {
   let s = null;
@@ -1128,7 +1103,21 @@ function renderOiStack(chart, oiData, venueOrder) {
   return handles;
 }
 
+function updateHistoryHelp() {
+  const rateLabel = rateMode === 'apr' ? 'annualized funding' : "each venue's rate per funding period";
+  const smoothingLabel = smoothMode === 'ewma'
+    ? 'EWMA-smoothed per venue (α = 0.35)'
+    : 'raw, unsmoothed settlements';
+  document.getElementById('history-help').textContent =
+    `Lines show ${rateLabel}: ${smoothingLabel}. Legend values show the latest raw settlement. ` +
+    `Stacked bars show open interest. Select a venue to hide or show it.`;
+}
+
 function renderHistoryChart() {
+  const legendElement = document.getElementById('hlegend');
+  const focusedVenue = legendElement.contains(document.activeElement)
+    ? document.activeElement.closest('[data-venue]')?.dataset.venue
+    : null;
   const chart = ensureHistoryChart();
   hHandles.forEach(h => chart.removeSeries(h));
   hOiHandles.forEach(h => chart.removeSeries(h));
@@ -1178,18 +1167,23 @@ function renderHistoryChart() {
   if (hOiHandles.length) {
     chart.priceScale('oi').applyOptions({ scaleMargins: { top: 0.75, bottom: 0 } });
   }
-  document.getElementById('hlegend').innerHTML = legend.length
+  legendElement.innerHTML = legend.length
     ? legend.map(e => `
       <button data-venue="${e.venue}" aria-pressed="${e.visible}"
-        title="click to ${e.visible ? 'hide' : 'show'} ${e.label}"
-        class="inline-flex min-h-11 flex-none items-center gap-2 rounded-md border px-3 py-1 font-mono text-data transition
+        title="Click to ${e.visible ? 'hide' : 'show'} ${e.label}; value is the latest raw settlement"
+        class="toolbar-button inline-flex flex-none items-center gap-2 border font-mono text-data transition-colors
                ${e.visible ? 'border-line bg-panel hover:border-phosphor/50'
-                           : 'border-line/50 bg-panel/30 opacity-40 hover:opacity-70'}">
-        <span class="h-2 w-2 rounded-full" style="background:${e.color}"></span>
+                           : 'border-line/50 bg-panel/30 hover:border-line'}">
+        <span class="h-2 w-2 rounded-full ${e.visible ? '' : 'opacity-40'}" style="background:${e.color}"></span>
         <span class="text-body">${e.label}</span>
-        <span class="tabular-nums ${e.last >= 0 ? 'text-gain' : 'text-loss'}">${historyRateText(e.last, e.intervalHours)}</span>
+        <span class="text-label text-dim">latest raw</span>
+        <span class="tabular-nums ${e.last > 0 ? 'text-gain' : e.last < 0 ? 'text-loss' : 'text-dim'}">${historyRateText(e.last, e.intervalHours)}</span>
       </button>`).join('')
     : '<div class="font-mono text-data text-dim">no funding history for this coin yet</div>';
+  if (focusedVenue) {
+    [...legendElement.querySelectorAll('[data-venue]')]
+      .find(button => button.dataset.venue === focusedVenue)?.focus({ preventScroll: true });
+  }
   chart.timeScale().fitContent();
 }
 
@@ -1206,11 +1200,12 @@ function setSmooth(mode, redraw = true) {
   smoothMode = mode;
   fundingFilters.set('smoothing', mode);
   document.getElementById('smooth-raw').className =
-    `rounded px-3 py-1 tracking-label uppercase transition-colors ${mode === 'raw' ? 'text-ink bg-phosphor/85' : 'text-dim hover:text-body'}`;
+    `compact-button px-3 text-data tracking-label uppercase ${mode === 'raw' ? 'text-ink bg-phosphor/85' : 'text-dim hover:text-body'}`;
   document.getElementById('smooth-ewma').className =
-    `rounded px-3 py-1 tracking-label uppercase transition-colors ${mode === 'ewma' ? 'text-ink bg-phosphor/85' : 'text-dim hover:text-body'}`;
+    `compact-button px-3 text-data tracking-label uppercase ${mode === 'ewma' ? 'text-ink bg-phosphor/85' : 'text-dim hover:text-body'}`;
   document.getElementById('smooth-raw').setAttribute('aria-pressed', String(mode === 'raw'));
   document.getElementById('smooth-ewma').setAttribute('aria-pressed', String(mode === 'ewma'));
+  updateHistoryHelp();
   if (redraw) renderHistoryChart();
 }
 document.getElementById('smooth-raw').addEventListener('click', () => setSmooth('raw'));
@@ -1245,9 +1240,9 @@ function setView(view) {
   if (isTable) fundingState.ready('history');
   document.getElementById('view-history').classList.toggle('hidden', isTable);
   document.getElementById('tab-table').className =
-    `rounded px-3.5 py-1 tracking-label uppercase transition-colors ${isTable ? 'text-ink bg-phosphor/85' : 'text-dim hover:text-body'}`;
+    `compact-button px-3 text-data tracking-label uppercase ${isTable ? 'text-ink bg-phosphor/85' : 'text-dim hover:text-body'}`;
   document.getElementById('tab-history').className =
-    `rounded px-3.5 py-1 tracking-label uppercase transition-colors ${!isTable ? 'text-ink bg-phosphor/85' : 'text-dim hover:text-body'}`;
+    `compact-button px-3 text-data tracking-label uppercase ${!isTable ? 'text-ink bg-phosphor/85' : 'text-dim hover:text-body'}`;
   document.getElementById('tab-table').setAttribute('aria-selected', String(isTable));
   document.getElementById('tab-history').setAttribute('aria-selected', String(!isTable));
   document.getElementById('tab-table').tabIndex = isTable ? 0 : -1;

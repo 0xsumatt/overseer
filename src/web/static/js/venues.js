@@ -53,3 +53,7 @@ const CHART_THEME = Object.freeze({
 /* Unknown venues (a symbol still in the DB for a venue dropped from config)
  * get a neutral grey rather than a generated hue. */
 const colorFor = (v) => VENUE_COLORS[v] || CHART_THEME.text;
+
+/* Display names never replace venue keys used for data, colours or selection. */
+const labelFor = (venue) => VENUE_LABELS[venue] ||
+  (venue.startsWith('hyperliquid:') ? `hip3:${venue.slice('hyperliquid:'.length)}` : venue);

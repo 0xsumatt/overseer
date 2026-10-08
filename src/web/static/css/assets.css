@@ -107,9 +107,7 @@
   /* Dense filter rows use tighter padding without shrinking the hit target. */
   .select-sm { min-height: 2.75rem; @apply px-2 py-1; }
 
-  /* Native selects keep their keyboard, screen-reader, and mobile picker
-     behavior. This shell only normalizes the closed control: centered text,
-     a consistent chevron, and the same medium radius as the page menus. */
+  /* Keep native keyboard/mobile pickers; normalize only the closed control. */
   .select-shell {
     @apply relative inline-flex min-w-0 items-center;
   }
@@ -132,9 +130,9 @@
   }
   .select-polished {
     appearance: none;
-    text-align: center;
-    text-align-last: center;
-    @apply w-full rounded-md pl-9 pr-9;
+    text-align: left;
+    text-align-last: left;
+    @apply w-full rounded-md pl-3 pr-9;
   }
   .select-polished option,
   .select-polished optgroup {
@@ -142,10 +140,62 @@
   }
   .select-summary {
     list-style: none;
-    @apply relative justify-center rounded-md pl-9 pr-9;
+    @apply relative justify-start rounded-md pl-3 pr-9 text-left;
   }
   .select-summary::-webkit-details-marker {
     display: none;
+  }
+
+  .toolbar-button {
+    min-height: 2.75rem;
+    @apply rounded-md px-3 py-2 font-mono text-data transition-colors;
+  }
+  .compact-button {
+    min-height: 2rem;
+    @apply rounded px-2 py-1 font-mono text-label transition-colors;
+  }
+  .chart-card,
+  .summary-card,
+  .table-card {
+    @apply rounded-md border border-line bg-panel/50;
+  }
+  .summary-card { @apply p-4; }
+  .chart-caption { @apply mt-2 text-data text-dim; }
+
+  .dashboard-market-chart {
+    min-width: 0;
+    height: var(--market-chart-height, clamp(26rem, 58vh, 36rem));
+  }
+  .market-chart-grid[data-chart-count="1"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .market-chart-grid[data-chart-count="2"] {
+    --market-chart-height: clamp(24rem, 52vh, 30rem);
+  }
+  .market-chart-grid[data-chart-count="3"] {
+    --market-chart-height: clamp(23rem, 46vh, 26rem);
+  }
+  .market-chart-grid[data-chart-count="4"] {
+    --market-chart-height: 22rem;
+  }
+  @media (min-width: 640px) {
+    .dashboard-market-chart {
+      height: var(--market-chart-height, clamp(32rem, 62vh, 44rem));
+    }
+    .market-chart-grid[data-chart-count="2"] {
+      --market-chart-height: clamp(28rem, 52vh, 36rem);
+    }
+    .market-chart-grid[data-chart-count="3"] {
+      --market-chart-height: clamp(26rem, 44vh, 30rem);
+    }
+    .market-chart-grid[data-chart-count="4"] {
+      --market-chart-height: 25rem;
+    }
+  }
+  .chart-metric-options button { flex: 1 1 auto; }
+  button:disabled {
+    @apply cursor-not-allowed text-faint;
+    filter: none;
   }
 
   /* funding.html's table header.
@@ -166,8 +216,8 @@
   }
 }
 
-/* Phone and tablet controls expose a full finger-sized hit area. Funding
-   fields also stay at 1rem to prevent iOS Safari focus zoom. */
+/* Phone and tablet controls expose finger-sized targets; editable inputs
+   stay at 1rem to prevent iOS Safari focus zoom on every page. */
 button,
 a,
 input,
@@ -182,10 +232,12 @@ select {
   }
   .select,
   .input,
-  .select-sm {
+  .select-sm,
+  .compact-button {
     min-height: 2.75rem;
   }
-  .funding-field {
+  .input,
+  .select {
     font-size: 1rem;
   }
   footer a,
@@ -194,5 +246,11 @@ select {
     min-width: 2.75rem;
     min-height: 2.75rem;
     align-items: center;
+  }
+}
+
+@media (max-width: 639px) {
+  .chart-metric-options button {
+    padding-inline: 0.375rem;
   }
 }

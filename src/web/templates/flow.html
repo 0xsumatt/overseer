@@ -2,9 +2,9 @@
 {% block title %}flow · overseer{% endblock %}
 
 {% block content %}
-{# Mobile is a normal scrolling document; the desktop workspace keeps its
-   viewport-height charts and internally scrolling detail pane. #}
-<div class="flex h-auto min-h-0 flex-col gap-3 overflow-visible md:h-[calc(100vh-9.5rem)] md:min-h-[34rem] md:overflow-hidden">
+{# The workspace grows with its controls and detail table. Keep each chart's
+   deliberate height and bound only the table's own scroller. #}
+<div class="flex h-auto min-h-0 flex-col gap-3 overflow-visible md:min-h-[calc(100vh-9.5rem)]">
 
   <div class="flex shrink-0 flex-wrap items-end gap-3 sm:gap-4">
     <div>
@@ -14,47 +14,57 @@
     <div class="grid w-full grid-cols-2 items-end gap-2 sm:ml-auto sm:flex sm:w-auto">
       <label class="flex flex-col gap-1">
         <span class="font-mono text-label tracking-label uppercase text-faint">asset</span>
-        <select id="asset" class="select">
-          {% for a in assets %}<option value="{{ a }}">{{ a }}</option>{% endfor %}
-        </select>
+        <span class="select-shell">
+          <select id="asset" class="select select-polished w-full">
+            {% for a in assets %}<option value="{{ a }}">{{ a }}</option>{% endfor %}
+          </select>
+        </span>
       </label>
       <label class="flex flex-col gap-1">
         <span class="font-mono text-label tracking-label uppercase text-faint">window</span>
-        <select id="hours" class="select">
-          <option value="3">3h</option><option value="6" selected>6h</option>
-          <option value="12">12h</option><option value="24">24h</option>
-        </select>
+        <span class="select-shell">
+          <select id="hours" class="select select-polished w-full">
+            <option value="3">3h</option><option value="6" selected>6h</option>
+            <option value="12">12h</option><option value="24">24h</option>
+          </select>
+        </span>
       </label>
     </div>
   </div>
 
   <div id="tiles" class="grid shrink-0 grid-cols-2 gap-2 sm:grid-cols-4"></div>
 
-  {# Filters in one row above the charts. Venue toggles affect everything;
-     the numeric ones narrow the detail table, because dropping buckets out of
-     a time series would read as "nothing traded" rather than "filtered". #}
-  <div class="flex shrink-0 flex-wrap items-center gap-2 rounded-md border border-line
-              bg-panel/40 px-3 py-2 sm:gap-x-4">
-    <span id="venue-filter-label" class="font-mono text-label tracking-label uppercase text-faint">venues</span>
-    <div id="venue-filters" class="scroll-thin flex w-full flex-nowrap items-center gap-1.5 overflow-x-auto pb-1 sm:w-auto sm:flex-wrap sm:overflow-visible sm:pb-0"
-         role="group" aria-labelledby="venue-filter-label"></div>
-    <label for="f-imb" class="font-mono text-label tracking-label uppercase text-faint sm:ml-2">|imbalance| ≥</label>
-    <select id="f-imb" class="select select-sm">
-      <option value="0">any</option><option value="10">10%</option>
-      <option value="25">25%</option><option value="50">50%</option>
-    </select>
-    <label for="f-lrg" class="font-mono text-label tracking-label uppercase text-faint">large ≥</label>
-    <select id="f-lrg" class="select select-sm">
-      <option value="0">any</option><option value="5">5</option>
-      <option value="20">20</option><option value="50">50</option>
-    </select>
-    <button id="table-toggle" aria-expanded="false" aria-controls="table-wrap"
-            class="w-full rounded border border-line bg-panel px-2 py-0.5 font-mono text-data text-dim hover:text-body sm:ml-auto sm:w-auto">
-      detail <span id="match-count" class="text-faint"></span>
-    </button>
+  <div class="shrink-0 rounded-md border border-line bg-panel/40 px-3 py-2">
+    <div class="flex flex-wrap items-center gap-2">
+      <span id="venue-filter-label" class="font-mono text-label tracking-label uppercase text-faint">venues</span>
+      <div id="venue-filters" class="scroll-thin flex w-full flex-nowrap items-center gap-1.5 overflow-x-auto pb-1 sm:w-auto sm:flex-wrap sm:overflow-visible sm:pb-0"
+           role="group" aria-labelledby="venue-filter-label"></div>
+    </div>
+    <fieldset class="mt-2 flex min-w-0 flex-wrap items-center gap-2 border-t border-line pt-2 sm:gap-x-4">
+      <legend class="px-1 font-mono text-label tracking-label uppercase text-dim">Detail filters</legend>
+      <label for="f-imb" class="text-data text-dim">|Imbalance| ≥</label>
+      <span class="select-shell">
+        <select id="f-imb" class="select select-sm select-polished w-full">
+          <option value="0">any</option><option value="10">10%</option>
+          <option value="25">25%</option><option value="50">50%</option>
+        </select>
+      </span>
+      <label for="f-lrg" class="text-data text-dim">Large trades per minute ≥</label>
+      <span class="select-shell">
+        <select id="f-lrg" class="select select-sm select-polished w-full">
+          <option value="0">any</option><option value="5">5</option>
+          <option value="20">20</option><option value="50">50</option>
+        </select>
+      </span>
+      <button id="table-toggle" aria-expanded="false" aria-controls="table-wrap"
+              class="toolbar-button w-full border border-line bg-panel text-dim hover:text-body sm:ml-auto sm:w-auto">
+        Detail <span id="match-count" class="text-dim"></span>
+      </button>
+    </fieldset>
+    <p class="mt-2 text-data text-dim">Venues affect charts and totals; thresholds filter only the detail table.</p>
   </div>
 
-  <div class="relative h-[22rem] shrink-0 rounded-md border border-line bg-panel/40 md:h-auto md:min-h-[140px] md:flex-1">
+  <div class="chart-card relative h-[22rem] shrink-0 md:min-h-[140px] md:flex-1">
     <div class="absolute left-3 top-2 z-10 font-mono text-label tracking-label uppercase text-dim">
       taker imbalance <span class="text-faint normal-case tracking-normal">(buys−sells)÷volume</span>
     </div>
@@ -63,7 +73,7 @@
                              bg-ink/95 px-2.5 py-1.5 font-mono text-label shadow-lg"></div>
   </div>
 
-  <div class="relative h-[13rem] shrink-0 rounded-md border border-line bg-panel/40 md:h-[130px]">
+  <div class="chart-card relative h-[13rem] shrink-0 md:h-[130px]">
     <div class="absolute left-3 top-2 z-10 font-mono text-label tracking-label uppercase text-dim">
       large trades <span class="text-faint normal-case tracking-normal">≥$10k notional</span>
     </div>
@@ -74,12 +84,13 @@
 
   <div id="legend" class="scroll-thin flex shrink-0 flex-nowrap items-center gap-x-5 gap-y-1 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible sm:pb-0"></div>
 
-  {# Mobile gets a bounded two-axis table scroller; desktop keeps the pane
-     inside the fixed-height workspace. #}
-  <div id="table-wrap" class="scroll-thin hidden max-h-[28rem] shrink-0 overflow-auto
-                              rounded-md border border-line md:min-h-0 md:max-h-none md:basis-[36%]">
+  {# Detail stays reachable in the scrolling document, even on short tablets. #}
+  <div id="table-wrap" class="table-card scroll-thin hidden max-h-[28rem] shrink-0 overflow-auto">
     <table class="w-full min-w-[46rem] border-collapse font-mono text-data">
-      <caption class="sr-only">Order flow per venue per minute, filtered</caption>
+      <caption class="chart-caption px-3 pb-2 text-left font-sans">
+        <span id="detail-count">Latest 0 of 0 matching venue-minute rows.</span>
+        Each row is one venue in one minute; charts retain the full selected window.
+      </caption>
       <thead class="sticky top-0 z-10 bg-panel">
         <tr class="border-b border-line text-left text-label tracking-label uppercase text-faint">
           <th scope="col" class="px-3 py-1.5">time</th>
@@ -96,7 +107,7 @@
     </table>
   </div>
 
-  <p id="empty" class="hidden shrink-0 rounded-md border border-line bg-panel/40 px-4 py-4 text-center text-data text-dim">
+  <p id="empty" class="summary-card hidden shrink-0 text-center text-data text-dim">
     No flow recorded for this asset yet — the websocket streams write
     <code class="text-faint">trades_1m</code> once the scheduler is running.
   </p>
@@ -173,11 +184,14 @@ function renderFilters() {
   // A venue keeps its colour whether or not it is selected, so toggling never
   // reassigns hues to the survivors.
   const present = VENUE_ORDER.filter(v => data.series[v] && data.series[v].length);
-  document.getElementById('venue-filters').innerHTML = present.map(v => {
+  const filterHost = document.getElementById('venue-filters');
+  const focusedVenue = filterHost.contains(document.activeElement)
+    ? document.activeElement.dataset.venue : null;
+  filterHost.innerHTML = present.map(v => {
     const off = hidden.has(v);
     return `<button data-venue="${v}" aria-pressed="${!off}"
-      class="venue-chip flex min-h-11 items-center gap-1.5 rounded-md border px-1.5 py-0.5 font-mono text-label
-             ${off ? 'border-line text-faint' : 'border-line bg-panel2 text-body'}">
+      class="venue-chip toolbar-button flex items-center gap-1.5 border
+             ${off ? 'border-line text-dim' : 'border-line bg-panel2 text-body'}">
       <span class="inline-block h-2 w-2 rounded-full ${off ? 'opacity-30' : ''}"
             style="background:${colorFor(v)}"></span>${v}</button>`;
   }).join('') || '<span class="font-mono text-label text-faint">none streaming</span>';
@@ -187,6 +201,10 @@ function renderFilters() {
     flowFilters.setList('venues', hidden);
     renderFilters(); render();
   });
+  if (focusedVenue) {
+    Array.from(filterHost.querySelectorAll('.venue-chip'))
+      .find(button => button.dataset.venue === focusedVenue)?.focus({ preventScroll: true });
+  }
 }
 
 function clearSeries() {
@@ -246,7 +264,7 @@ function renderTiles(venues) {
                  ['large trades', large.toLocaleString(), 'text-body'],
                  ['largest trade', fmtUsd(maxTrade), 'text-phosphor']];
   document.getElementById('tiles').innerHTML = tiles.map(([l, v, c]) => `
-    <div class="rounded-md border border-line bg-panel/40 px-3 py-1.5">
+    <div class="summary-card">
       <div class="font-mono text-label tracking-label uppercase text-faint">${l}</div>
       <div class="font-mono text-hero tabular-nums ${c}">${v}</div>
     </div>`).join('');
@@ -280,9 +298,11 @@ function matchingRows(venues) {
 
 function renderTable(venues) {
   const rows = matchingRows(venues);
-  document.getElementById('match-count').textContent =
-    rows.length ? `(${rows.length})` : '(0)';
-  document.getElementById('table-body').innerHTML = rows.slice(0, 400).map(([v, d]) => `
+  const displayedRows = rows.slice(0, 400);
+  document.getElementById('match-count').textContent = `(${rows.length.toLocaleString()})`;
+  document.getElementById('detail-count').textContent =
+    `Latest ${displayedRows.length.toLocaleString()} of ${rows.length.toLocaleString()} matching venue-minute rows.`;
+  document.getElementById('table-body').innerHTML = displayedRows.map(([v, d]) => `
     <tr class="border-b border-line/50">
       <td class="px-3 py-1 text-faint">${hhmm(d.time)}</td>
       <td class="px-3 py-1"><span class="inline-block h-2 w-2 rounded-full align-middle"
@@ -334,8 +354,7 @@ function sync(from, to) {
 }
 sync(imbChart, lrgChart); sync(lrgChart, imbChart);
 
-// Each chart container is sized by flex, so observe both and push the computed
-// box into the chart — lightweight-charts needs explicit pixels.
+// Observe each deliberate chart box — lightweight-charts needs explicit pixels.
 for (const [chart, id] of [[imbChart, 'chart-imb'], [lrgChart, 'chart-lrg']]) {
   const el = document.getElementById(id);
   new ResizeObserver(() => chart.applyOptions({ width: el.clientWidth, height: el.clientHeight }))

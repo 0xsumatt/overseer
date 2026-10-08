@@ -15,6 +15,13 @@ def _store():
     return current_app.extensions["read_storage"]
 
 
+@bp.app_context_processor
+def _venue_labels():
+    return {
+        "venue_labels": current_app.extensions["symbols"].hip3_venue_labels(),
+    }
+
+
 @bp.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":

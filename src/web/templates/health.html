@@ -4,11 +4,10 @@
 {% set failing = jobs | selectattr('last_status', 'equalto', 'fail') | list %}
 {% set stale = freshness | selectattr('stale_factor', 'gt', 3) | list %}
 
-{# Same header shape as every other page: phosphor eyebrow, then the h1. This
-   page previously started at h2 with no h1 at all. #}
 <div class="mb-5 flex flex-wrap items-end justify-between gap-3 sm:gap-4">
   <div>
     <h1 class="text-title font-semibold text-body">Health</h1>
+    <p class="mt-1 text-data text-dim">Monitor collection jobs and data freshness.</p>
   </div>
   <div class="flex w-full flex-wrap items-center gap-2 font-mono text-data sm:w-auto">
     <span class="rounded border px-2 py-1
@@ -25,7 +24,7 @@
 </div>
 
 <h2 class="mb-2 font-mono text-label tracking-label uppercase text-dim">job heartbeat</h2>
-<div class="scroll-thin mb-8 max-h-[32rem] overflow-auto rounded border border-line sm:max-h-none">
+<div class="table-card scroll-thin mb-8 max-h-[32rem] overflow-auto sm:max-h-none">
   <table class="w-full min-w-[48rem] border-collapse text-data">
     <caption class="sr-only">Current state of every scheduled job</caption>
     <thead class="sticky top-0 z-10">
@@ -66,7 +65,8 @@
 </div>
 
 <h2 class="mb-2 font-mono text-label tracking-label uppercase text-dim">series freshness</h2>
-<div class="scroll-thin max-h-[32rem] overflow-auto rounded border border-line sm:max-h-none">
+<p class="mb-3 text-data text-dim">A series is stale when its newest bar is more than three bar intervals old.</p>
+<div class="table-card scroll-thin max-h-[32rem] overflow-auto sm:max-h-none">
   <table class="w-full min-w-[40rem] border-collapse text-data">
     <caption class="sr-only">
       Age of the newest bar per series, as a multiple of the bar interval</caption>

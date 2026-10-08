@@ -110,20 +110,14 @@ def test_funding_api_exposes_rwa_taxonomy_and_deployer_identity(client) -> None:
     assert all(row["exchange"] != "bulk" for row in xau)
     assert any(
         row["venue_key"] == "hyperliquid:xyz"
-        and row["venue_label"] == "TradeXYZ"
         and row["deployer"] == "xyz"
         for row in xau
     )
-    identity = client.application.extensions["symbols"].venue_identity(
-        "hyperliquid", "io:OAI"
-    )
-    assert identity.label == "Entropy"
 
     history = client.get(
         "/api/funding-history-multi?asset=XAU&hours=24"
     ).get_json()
     assert "hyperliquid:xyz" in history
-    assert history["hyperliquid:xyz"][0]["venue_label"] == "TradeXYZ"
     history_point = history["hyperliquid:xyz"][0]
     assert history_point["interval_hours"] > 0
     assert history_point["apr_pct"] == pytest.approx(

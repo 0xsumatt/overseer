@@ -21,42 +21,51 @@
   <div class="grid w-full gap-2 font-mono text-data sm:ml-auto sm:flex sm:w-auto sm:items-end">
     <label for="spot" class="flex min-w-0 flex-col gap-1">
       <span class="text-label tracking-label uppercase text-faint">Spot</span>
-      <select id="spot" class="select min-w-0 w-full sm:w-auto">
+      <span class="select-shell w-full sm:w-auto">
+      <select id="spot" class="select select-polished min-w-0">
         {% for s in series if s.market_type == 'spot' %}
         <option value="{{ s.exchange }}|{{ s.symbol }}">{{ s.exchange }} · {{ s.symbol }}</option>
         {% endfor %}
       </select>
+      </span>
     </label>
     <label for="perp" class="flex min-w-0 flex-col gap-1">
       <span class="text-label tracking-label uppercase text-faint">Perp</span>
-      <select id="perp" class="select min-w-0 w-full sm:w-auto">
+      <span class="select-shell w-full sm:w-auto">
+      <select id="perp" class="select select-polished min-w-0">
         {% for s in series if s.market_type == 'perp' %}
         <option value="{{ s.exchange }}|{{ s.symbol }}">{{ s.exchange }} · {{ s.symbol }}</option>
         {% endfor %}
       </select>
+      </span>
     </label>
     <label for="hours" class="flex min-w-0 flex-col gap-1">
       <span class="text-label tracking-label uppercase text-faint">Window</span>
-      <select id="hours" class="select min-w-0 w-full sm:w-auto">
+      <span class="select-shell w-full sm:w-24">
+      <select id="hours" class="select select-polished min-w-0">
         <option value="24">24h</option>
         <option value="48" selected>48h</option>
         <option value="168">7d</option>
       </select>
+      </span>
     </label>
   </div>
 </div>
 
-<div id="chart" class="h-[22rem] w-full rounded-md border border-line bg-panel/50 sm:h-[30rem]"></div>
+<div id="chart" class="chart-card h-[22rem] w-full sm:h-[30rem]"></div>
 
+<p class="chart-caption">Basis is how far the perpetual price is above or below spot:
+  (perpetual − spot) ÷ spot × 100. Compare the same asset on both sides.</p>
 <div class="mt-2 flex flex-wrap items-baseline justify-between gap-2">
-  <p class="font-mono text-label text-faint">
+  <p class="text-data text-dim">
     <span class="text-phosphor">—</span> basis % (right) ·
     <span class="inline-block h-2.5 w-1.5 align-middle bg-gain"></span><span
           class="inline-block h-2.5 w-1.5 align-middle bg-loss"></span>
     funding APR of the perp leg (left) ·
     long spot / short perp collects positive funding</p>
-  <p id="carry-stat" class="font-mono text-label text-dim"></p>
+  <p id="carry-stat" class="font-mono text-data text-dim"></p>
 </div>
+<p class="chart-caption">Funding APR annualises settled rates; it is not a promised return.</p>
 {% endblock %}
 
 {% block scripts %}
