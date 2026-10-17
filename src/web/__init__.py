@@ -3,9 +3,9 @@
     flask --app web:create_app run --debug            # dev
     gunicorn "web:create_app()" -w 2 -b 0.0.0.0:8000  # prod (behind a reverse proxy)
 
-This process only READS the database (storage.queries) plus the tiny users
-table. It never imports data_collection and never runs the scheduler — that
-stays its own process, as ever.
+This process reads market data and serves anonymous, transient account reads for
+the browser-local Positions tool. Wallet configuration and tokens never enter
+the database. Persistent market-data collection stays in the scheduler process.
 
 User accounts are CLI-only (no self-registration):
 
@@ -27,7 +27,9 @@ from core.symbols import SymbolRegistry
 from storage.queries import ReadStorage
 from web import auth as auth_module
 from web.cache import ResponseCache
-from web.views import api, pages
+from web.execution_reader import ExecutionReader
+from web.position_reader import PositionReader
+from web.views import api, execution, pages, positions
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -105,11 +107,15 @@ def create_app(database_url: str | None = None) -> Flask:
         w["address"]: w["label"] for w in app.extensions["tracked_wallets"]
     }
     app.extensions["read_storage"] = storage
+    app.extensions["position_reader"] = PositionReader()
+    app.extensions["execution_reader"] = ExecutionReader()
     app.extensions["response_cache"] = ResponseCache(ttl_seconds=30)
 
     auth_module.init_auth(app, storage)
     app.register_blueprint(pages.bp)
     app.register_blueprint(api.bp)
+    app.register_blueprint(positions.bp)
+    app.register_blueprint(execution.bp)
 
     @app.cli.command("create-user")
     @click.argument("email")

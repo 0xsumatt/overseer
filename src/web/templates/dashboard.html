@@ -11,6 +11,9 @@
   }
   @media (min-width: 640px) {
     .panel-maxed { inset: 1.25rem; }
+    #chart-filters,
+    #chart-filters-body { display: contents; }
+    #chart-filters > summary { display: none; }
   }
 </style>
 <div class="mb-5 flex flex-col gap-4">
@@ -28,6 +31,14 @@
     </div>
   </div>
 
+  <details id="chart-filters">
+    <summary id="chart-filters-summary"
+             class="select select-summary flex min-h-11 cursor-pointer flex-col items-start gap-1 py-2
+                    focus-visible:ring-1 focus-visible:ring-phosphor">
+      <span class="font-mono text-label tracking-label uppercase text-body">Filters</span>
+      <span id="chart-filter-selection" class="text-data text-dim"></span>
+    </summary>
+    <div id="chart-filters-body" class="mt-4 flex flex-col gap-4">
   <div class="grid grid-cols-1 items-end gap-3 rounded-md border border-line bg-panel/50 p-3 sm:grid-cols-2
               xl:grid-cols-[auto_auto_minmax(12rem,1fr)_minmax(12rem,1fr)_auto]"
        role="group" aria-label="Chart filters">
@@ -166,6 +177,8 @@
   </div>
   <div id="exchange-legend" class="flex flex-wrap gap-2"
        role="group" aria-label="Global exchange selection"></div>
+    </div>
+  </details>
 </div>
 
 <div id="overview-view">
@@ -337,6 +350,11 @@ let volumeOiRequest = 0;
 const volumeOiSeries = new Map();
 let volatilityHours = Number(dashboardFilters.get('volatility-hours'));
 if (![1, 6, 24].includes(volatilityHours)) volatilityHours = 24;
+const chartFilters = document.getElementById('chart-filters');
+const chartFiltersSummary = document.getElementById('chart-filters-summary');
+const chartFiltersBody = document.getElementById('chart-filters-body');
+const desktopFilters = window.matchMedia('(min-width: 640px)');
+let mobileFiltersOpen = false;
 
 
 
@@ -868,6 +886,7 @@ function renderAssetSummary() {
     `${assets.length} / ${MAX_CHARTS}`;
   trigger.title = assets.length ? `Selected charts: ${summary}` : 'Choose chart assets';
   trigger.setAttribute('aria-label', `${trigger.title}. ${assets.length} of ${MAX_CHARTS} selected.`);
+  renderChartFilterSelection();
 }
 
 function renderAssetOptions() {
@@ -975,6 +994,7 @@ function renderExchangeSummary() {
     }
   });
   buttons.forEach(button => button.remove());
+  renderChartFilterSelection();
 }
 
 function renderExchangeOptions() {
@@ -1006,6 +1026,32 @@ function setExchangePicker(open, restoreFocus = false) {
     picker.querySelector('input')?.focus();
   } else if (restoreFocus) {
     trigger.focus();
+  }
+}
+
+function renderChartFilterSelection() {
+  const assets = selectedAssets();
+  const assetSummary = dashboardView === 'overview'
+    ? document.getElementById('token').value || 'no asset'
+    : assets.length === 1 ? assets[0] : `${assets.length} assets`;
+  const history = document.getElementById('hours').selectedOptions[0]?.textContent || '';
+  const venues = selectedExchanges().length;
+  const metric = chartMetric === 'volatility' ? `volatility (${volatilityHours}h)` : chartMetric;
+  document.getElementById('chart-filter-selection').textContent =
+    `${market} · ${assetSummary} · ${metric} · ${history} · ${venues} ${venues === 1 ? 'venue' : 'venues'}`;
+}
+
+function syncChartFilterLayout() {
+  if (desktopFilters.matches) {
+    chartFilters.open = true;
+    // The mobile summary disappears on desktop; keep its keyboard focus usable.
+    if (document.activeElement === chartFiltersSummary) {
+      chartFilters.querySelector('[data-market][aria-pressed="true"]').focus();
+    }
+  } else {
+    // Do not hide a control someone is using when the viewport narrows.
+    if (chartFiltersBody.contains(document.activeElement)) mobileFiltersOpen = true;
+    chartFilters.open = mobileFiltersOpen;
   }
 }
 
@@ -1066,6 +1112,7 @@ function setDashboardView(nextView, reload = true) {
   setAssetPicker(false);
   setExchangePicker(false);
   if (isCharts) syncMultiCards();
+  renderChartFilterSelection();
   refreshPanels();
   if (reload) {
     loadActiveCharts();
@@ -1096,6 +1143,7 @@ function setMetric(nextMetric, reload = true) {
   document.querySelectorAll('[data-volatility-hours]').forEach(button => {
     setSegmentState(button, Number(button.dataset.volatilityHours) === volatilityHours);
   });
+  renderChartFilterSelection();
   if (reload) loadActiveCharts();
 }
 
@@ -1119,6 +1167,17 @@ function setMarket(nextMarket, reload = true) {
   if (reload) loadActiveCharts();
 }
 
+chartFilters.addEventListener('toggle', () => {
+  if (desktopFilters.matches) return;
+  mobileFiltersOpen = chartFilters.open;
+  if (!chartFilters.open) {
+    setAssetPicker(false);
+    setExchangePicker(false);
+    if (chartFiltersBody.contains(document.activeElement)) chartFiltersSummary.focus();
+  }
+});
+desktopFilters.addEventListener('change', syncChartFilterLayout);
+
 document.getElementById('view-overview').addEventListener('click', () => setDashboardView('overview'));
 document.getElementById('view-charts').addEventListener('click', () => setDashboardView('charts'));
 document.getElementById('mkt-perp').addEventListener('click', () => setMarket('perp'));
@@ -1128,10 +1187,12 @@ document.getElementById('metric-spread').addEventListener('click', () => setMetr
 document.getElementById('metric-volatility').addEventListener('click', () => setMetric('volatility'));
 document.getElementById('token').addEventListener('change', event => {
   dashboardFilters.set('token', event.target.value);
+  renderChartFilterSelection();
   loadActiveCharts();
 });
 document.getElementById('hours').addEventListener('change', event => {
   dashboardFilters.set('hours', event.target.value);
+  renderChartFilterSelection();
   loadActiveCharts();
   if (dashboardView === 'overview') loadVolumeOiRatio();
 });
@@ -1202,7 +1263,9 @@ document.addEventListener('click', event => {
     saveSelectedAssets(selectedAssets().filter(asset => asset !== remove.dataset.removeAsset));
     renderAssetSummary();
     syncMultiCards();
-    document.getElementById('asset-picker-trigger').focus();
+    (chartFilters.open
+      ? document.getElementById('asset-picker-trigger')
+      : chartFiltersSummary).focus();
     return;
   }
   const assetWrapper = document.getElementById('asset-picker-wrap');
@@ -1278,6 +1341,7 @@ document.addEventListener('keydown', e => {
 });
 refreshPanels();
 
+syncChartFilterLayout();
 dashboardFilters.restoreSelect(document.getElementById('hours'));
 populateTokens();
 renderAssetSummary();

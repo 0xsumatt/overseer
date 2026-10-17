@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}overseer{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='execution-price-hover') }}">
   <style>
     /* A restrained amber instrument glow over stepped blue-black surfaces.
        Fixed to the viewport so long operational pages keep one stable field. */
@@ -39,8 +39,9 @@
 <body class="flex min-h-full flex-col bg-ink text-body font-sans antialiased">
   {% set links = [('pages.dashboard','charts'), ('pages.basis','basis'),
                   ('pages.funding','funding')] %}
-  {% set tools = [('pages.flow','Trade flow'), ('pages.wallets','Tracked wallets')] %}
-  {% set tools_active = request.endpoint in ['pages.flow', 'pages.wallets'] %}
+  {% set tools = [('pages.flow','Trade flow'), ('pages.wallets','Tracked wallets'),
+                  ('pages.positions','Positions'), ('pages.execution','Execution estimates')] %}
+  {% set tools_active = request.endpoint in ['pages.flow', 'pages.wallets', 'pages.positions', 'pages.execution'] %}
   {% macro tools_links(id, floating=false) -%}
   <div id="{{ id }}" data-tools-links
        class="hidden rounded-md border border-line-strong bg-panel p-1
@@ -146,6 +147,7 @@
       </div>
     </div>
   </nav>
+  {% block market_freshness %}
   <div data-freshness data-state="checking" role="timer" aria-live="off"
        aria-label="Checking the age of the newest market-data bar"
        title="Age of the newest bar across all markets; individual charts may contain older data."
@@ -168,6 +170,7 @@
   <div id="stale-banner" role="status" aria-live="polite" aria-atomic="true"
        class="hidden border-b border-phosphor/40 bg-phosphor/10 px-4 py-1.5
               text-center font-mono text-label text-phosphor sm:px-6"></div>
+  {% endblock %}
   <main class="mx-auto w-full min-w-0 max-w-6xl flex-1 px-4 py-5 sm:px-6 sm:py-8">
     {% with messages = get_flashed_messages() %}
       {% for m in messages %}

@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, Response, current_app, jsonify, request
 from core.enums import Exchange, MarketType
+from core.positions import asset_id
 from web.volatility import rolling_volatility
 
 bp = Blueprint("api", __name__, url_prefix="/api")
@@ -47,40 +48,18 @@ def _float_or_none(value):
     return float(value) if value is not None else None
 
 
-_FUNDING_QUOTE_SUFFIXES = (
-    "FDUSD", "USDT", "USDC", "TUSD", "BUSD", "DAI", "USD",
-    "BTC", "ETH", "BNB", "EUR", "TRY", "GBP", "BRL",
-)
-
-
-def _funding_asset_id(registry, symbol: str) -> str:
-    """Group equivalent perp markets while retaining configured aliases."""
-    configured = registry.asset_for(symbol)
-    if configured is not None:
-        return configured
-
-    market = symbol.split(":", 1)[-1]
-    if "/" in market:
-        base, quote = market.rsplit("/", 1)
-        if base and quote:
-            return base
-    for quote in _FUNDING_QUOTE_SUFFIXES:
-        suffix = f"-{quote}"
-        if market.endswith(suffix) and len(market) > len(suffix):
-            return market[:-len(suffix)]
-    return market
 
 
 def _funding_symbols_for_asset(store, registry, requested_asset: str) -> list[str]:
     """Resolve every current venue symbol represented by one funding asset."""
     if not requested_asset:
         return []
-    asset = _funding_asset_id(registry, requested_asset)
+    asset = asset_id(registry, requested_asset)
     symbols = {requested_asset, asset, *registry.listings(asset).values()}
     symbols.update(
         row["symbol"]
         for row in store.funding_table()
-        if _funding_asset_id(registry, row["symbol"]) == asset
+        if asset_id(registry, row["symbol"]) == asset
     )
     symbols.discard("")
     return sorted(symbols)
@@ -261,7 +240,7 @@ def funding():
     rows = _store().funding_table()
     out: dict[str, list] = {}
     for r in rows:
-        asset = _funding_asset_id(registry, r["symbol"])
+        asset = asset_id(registry, r["symbol"])
         metadata = registry.metadata(asset)
         venue = registry.venue_identity(r["exchange"], r["symbol"])
         out.setdefault(asset, []).append({

@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Positions · overseer{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/positions.css', v='owned-account-discovery') }}">
+<section id="positions-app" aria-labelledby="positions-title">
+  <header class="positions-heading">
+    <div><p class="positions-eyebrow">Portfolio monitor</p><h1 id="positions-title">Positions</h1><p class="positions-muted">Read-only · tab-local · no exchange writes</p></div>
+    <div class="positions-refresh-group">
+      <button id="positions-refresh" class="toolbar-button positions-button" type="button" aria-describedby="positions-positions-read-age positions-funding-read-age" title="Requests fresh exchange readings; read ages are not summary recalculation times.">Fetch fresh readings</button>
+      <div id="positions-read-freshness" class="positions-read-freshness" role="group" aria-label="Exchange read freshness" title="Oldest successful exchange read among accounts with data; unread accounts are shown separately. Read age does not imply complete funding coverage. Manage shows timestamps and coverage." hidden>
+        <span id="positions-positions-read-age">Positions · No accounts</span>
+        <span id="positions-funding-read-age">Funding · No accounts</span>
+      </div>
+    </div>
+  </header>
+  <div id="positions-watchlist-anchor" aria-hidden="true"></div>
+  <div id="positions-watchlist-sticky" class="positions-watchlist-sticky" data-compact="false"
+       data-exchange-logos='{{ {"hyperliquid": url_for("static", filename="img/exchanges/hyperliquid.svg"), "risex": url_for("static", filename="img/exchanges/risex.svg"), "lighter": url_for("static", filename="img/exchanges/lighter.svg"), "bulk": url_for("static", filename="img/exchanges/bulk.svg")} | tojson }}'>
+    <header class="positions-watchlist-bar">
+      <div class="positions-watchlist-overview">
+        <h2 id="positions-accounts-title" aria-label="Watchlist, 0 accounts"><span class="positions-watchlist-prefix">Watchlist · </span><span id="positions-watchlist-count">0</span></h2>
+        <span id="positions-watchlist-health" class="positions-watchlist-health positions-muted" role="status" aria-live="polite" data-attention="0"><span id="positions-watchlist-health-full">No accounts</span><span id="positions-watchlist-health-short" aria-hidden="true"></span></span>
+      </div>
+      <div id="positions-watchlist-tiles" class="positions-watchlist-tiles" role="group" aria-label="Accounts · inspect a tile without filtering portfolio totals" hidden></div>
+      <div class="positions-watchlist-controls">
+        <button id="positions-manage" class="toolbar-button positions-button" type="button" aria-expanded="false" aria-controls="positions-management">Manage</button>
+        <button id="positions-open-add" class="toolbar-button positions-button" type="button" aria-expanded="false" aria-controls="positions-add" aria-label="Add account">Add</button>
+      </div>
+    </header>
+  </div>
+  <div id="positions-watchlist-space" aria-hidden="true"></div>
+  <section class="positions-accounts" aria-labelledby="positions-accounts-title">
+    <div id="positions-management" hidden>
+      <div id="positions-account-list"></div>
+      <div class="positions-watchlist-footer">
+        <details class="positions-help">
+          <summary>Watchlist &amp; subaccount privacy</summary>
+          <p class="positions-muted">Add a wallet once to discover the main account and owned subaccounts exposed by each selected exchange. Re-add an existing wallet to find newly owned accounts: existing venue/address identities are skipped, not counted twice. Discovery failures and coverage limits are shown in the add results; RISEx currently exposes only the entered account, not an owned-subaccount list. Bulk isolated lanes are included in their parent account, not added again.</p>
+          <p class="positions-muted">No login is needed. No wallet, label, token, snapshot or funding history is saved in the server database. Only addresses, labels and local account identifiers are retained in this tab’s sessionStorage. Removing an account does not modify the exchange.</p>
+        </details>
+        <button id="positions-clear" class="toolbar-button positions-button positions-error" type="button">Clear tab watchlist</button>
+      </div>
+    </div>
+    <details id="positions-add" class="positions-card">
+      <summary id="positions-add-title">Add read-only accounts</summary>
+      <form id="positions-add-form" class="positions-form">
+        <fieldset class="positions-exchange-options positions-wide" aria-describedby="positions-exchange-help">
+          <legend>Exchanges</legend>
+          <label class="positions-exchange-choice"><input id="positions-exchange-hyperliquid" name="venues" type="checkbox" value="hyperliquid" checked>Hyperliquid</label>
+          <label class="positions-exchange-choice"><input id="positions-exchange-lighter" name="venues" type="checkbox" value="lighter">Lighter</label>
+          <label class="positions-exchange-choice"><input id="positions-exchange-risex" name="venues" type="checkbox" value="risex" checked>RISEx</label>
+          <label class="positions-exchange-choice"><input id="positions-exchange-bulk" name="venues" type="checkbox" value="bulk">Bulk</label>
+          <p id="positions-exchange-help" class="positions-exchange-help positions-muted">Choose exchanges for this address. Hyperliquid, RISEx and Lighter use EVM wallets; Bulk uses Solana public keys.</p>
+        </fieldset>
+        <label><span id="positions-address-label">Wallet address / public key / known Lighter index</span><input id="positions-address" name="address" class="input" required autocomplete="off" spellcheck="false" maxlength="128" aria-describedby="positions-address-help positions-entry-result"></label>
+        <label>Shared account label<input id="positions-label" name="label" class="input" required maxlength="80" autocomplete="off" placeholder="e.g. Main hedge"></label>
+        <p id="positions-address-help" class="positions-muted positions-wide">Enter a wallet and shared label once. Discovered subaccounts use exchange names or readable generated labels. All returned pages are followed automatically, and existing identities are skipped. Coverage limits and failures appear below; this tab holds up to 32 accounts.</p>
+        <div id="positions-token-fields" class="positions-wide" hidden>
+          <label>Optional Lighter read-only token<input id="positions-token" name="read_only_token" type="password" class="input" autocomplete="off" spellcheck="false" maxlength="2048" placeholder="ro:…"></label>
+          <p class="positions-muted">Lighter only · a single-account token is applied only to its matching index; an all-accounts token can cover discovered accounts. Other accounts use public reads, which may have incomplete private funding. Tokens stay in page memory and are lost on refresh. Never enter a signer or trading key. <a href="https://app.lighter.xyz/read-only-tokens/" target="_blank" rel="noopener noreferrer">Create an official read-only token</a>.</p>
+        </div>
+        <div id="positions-entry-result" class="positions-muted positions-wide" role="status" aria-live="polite"></div>
+        <button id="positions-add-submit" type="submit" class="toolbar-button positions-button">Discover and add accounts to this tab</button>
+        <button id="positions-edit-cancel" type="button" class="toolbar-button positions-button" hidden>Cancel edit</button>
+      </form>
+    </details>
+  </section>
+  <details class="positions-help">
+    <summary>Readings, privacy &amp; tab storage</summary>
+    <p class="positions-muted">Positions target 60s · settled funding target 5min. Requests run one at a time; bounded history catch-up may take longer. Financial readings and read-only tokens stay only in page memory and are lost on refresh. The market-feed strip above is not account freshness.</p>
+    <p id="positions-storage-message" class="positions-muted" role="status">Addresses and labels use only this tab’s sessionStorage, not a login or address database. They survive refresh; browser session restoration may retain them. Other fresh tabs are independent. Use Manage to clear this tab’s saved list.</p>
+  </details>
+  <div id="positions-notice" class="positions-notice" role="status" aria-live="polite">Preparing anonymous tab watchlist…</div>
+  <section aria-labelledby="funding-period-title" class="positions-toolbar">
+    <label id="funding-period-title" for="positions-period">Settled funding period</label>
+    <select id="positions-period" class="select"><option value="24">24 hours</option><option value="168" selected>7 days</option><option value="720">30 days</option></select>
+    <span class="positions-muted">+ received / − paid · excludes unsettled funding and dividends</span>
+  </section>
+  <div id="positions-summary" class="positions-summary" aria-label="Current in-memory portfolio summary"></div>
+  <p id="positions-fx" class="positions-muted"></p>
+  <section aria-labelledby="positions-exposure-title">
+    <h2 id="positions-exposure-title">Perpetual hedge exposure</h2>
+    <p class="positions-muted">Blue long / purple short · green received or gain / red paid or loss. Expand a coin for account legs, then a value for exact precision; ≈ indicates display shortening.</p>
+    <details class="positions-help">
+      <summary>Exposure &amp; currency methodology</summary>
+      <p class="positions-muted">Longs and shorts offset only within the same asset; different coins are never treated as a hedge. Token balances and collateral are separate from perpetual exposure. Native amounts retain their reported currency, with no assumed stablecoin peg. USD estimates use current FX, not historical settlement FX. Unavailable amounts are not zero.</p>
+    </details>
+    <div id="positions-assets"><p class="positions-muted">Awaiting fresh readings — exposure unknown.</p></div>
+  </section>
+</section>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/positions.js', v='owned-account-discovery') }}" defer></script>{% endblock %}

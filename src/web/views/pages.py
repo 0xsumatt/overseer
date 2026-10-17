@@ -7,6 +7,9 @@ from flask import (Blueprint, current_app, flash, redirect, render_template,
 from flask_login import login_required, login_user, logout_user
 
 from web.auth import role_required, verify_credentials
+from core.execution import MAX_BOOK_AGE_SECONDS, NOTIONALS
+from web.execution_fees import FEE_SCHEDULES
+from web.views.execution import execution_assets
 
 bp = Blueprint("pages", __name__)
 
@@ -80,6 +83,27 @@ def wallets():
                  for w in tracked]
     return render_template("wallets.html", wallets=tracked,
                            symbols=symbols, summaries=summaries)
+
+
+@bp.get("/positions")
+def positions():
+    response = current_app.make_response(render_template("positions.html"))
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
+@bp.get("/execution")
+def execution():
+    config = {
+        "assets": execution_assets(current_app.extensions["symbols"]),
+        "fee_schedules": FEE_SCHEDULES,
+        "notionals": [str(value) for value in NOTIONALS],
+        "max_book_age_seconds": MAX_BOOK_AGE_SECONDS,
+        "endpoint": url_for("execution_api.quote"),
+    }
+    response = current_app.make_response(render_template("execution.html", execution_config=config))
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
 
 
 @bp.get("/health")
