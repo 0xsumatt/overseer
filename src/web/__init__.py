@@ -19,17 +19,18 @@ import secrets
 import tomllib
 
 import click
-from flask import Flask
+from flask import Flask, jsonify, render_template, request, send_from_directory
+from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from core.config import settings
 from core.symbols import SymbolRegistry
+from data_collection.execution_reader import ExecutionReader
 from storage.queries import ReadStorage
 from web import auth as auth_module
 from web.cache import ResponseCache
-from web.execution_reader import ExecutionReader
 from web.position_reader import PositionReader
-from web.views import api, execution, pages, positions
+from web.views import api, execution, margin, pages, positions
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -79,12 +80,14 @@ def create_app(database_url: str | None = None) -> Flask:
 
     mock = os.getenv("OVERSEER_MOCK", "").lower() in ("1", "true", "yes")
     app.config["MOCK"] = mock
+    app.extensions["symbols"] = SymbolRegistry.load(settings.symbols_file)
+    with open(settings.symbols_file, "rb") as f:
+        symbols_cfg = tomllib.load(f)
     if mock:
         # UI testing with no database: storage.mock serves every read query with
         # deterministic realistic data; log in as mock@overseer.local / mock.
         from storage.mock import MockStorage
         storage = MockStorage()
-        app.extensions["symbols"] = SymbolRegistry.load(settings.symbols_file)
         app.logger.warning("MOCK MODE — serving generated data, no database")
         from storage.mock import MOCK_FILLS
         app.extensions["tracked_wallets"] = [
@@ -94,15 +97,21 @@ def create_app(database_url: str | None = None) -> Flask:
         ]
     else:
         storage = ReadStorage(database_url or settings.database_url)
-        app.extensions["symbols"] = SymbolRegistry.load(settings.symbols_file)
         # tracked wallets ([[fills]] in symbols.toml) — the wallets page and
         # fills-pulse labels come from here, not the database.
-        with open(settings.symbols_file, "rb") as f:
-            fills_cfg = tomllib.load(f).get("fills", [])
         app.extensions["tracked_wallets"] = [
             {"venue": e["venue"], "address": e["address"], "label": e["label"]}
-            for e in fills_cfg
+            for e in symbols_cfg.get("fills", [])
         ]
+    # Trade flow only exists where a venue streams trades (`stream` in
+    # symbols.toml), so the Flow page offers only those assets.
+    stream_venues = {
+        venue for venue, section in symbols_cfg.get("venues", {}).items() if section.get("stream")
+    }
+    registry = app.extensions["symbols"]
+    app.extensions["flow_assets"] = [
+        asset for asset in registry.assets() if registry.listings(asset).keys() & stream_venues
+    ]
     app.extensions["fills_labels"] = {
         w["address"]: w["label"] for w in app.extensions["tracked_wallets"]
     }
@@ -116,6 +125,32 @@ def create_app(database_url: str | None = None) -> Flask:
     app.register_blueprint(api.bp)
     app.register_blueprint(positions.bp)
     app.register_blueprint(execution.bp)
+    app.register_blueprint(margin.bp)
+
+    # Errors keep the site's frame; API routes keep answering in JSON.
+    titles = {
+        403: ("Not allowed", "Your account can't open this page."),
+        404: ("Page not found", "There's nothing at this address."),
+        500: ("Something went wrong", "The page failed to load. Try again in a moment."),
+    }
+
+    @app.errorhandler(HTTPException)
+    def http_error(error: HTTPException):
+        if request.path.startswith("/api/"):
+            return jsonify(error=error.description), error.code
+        title, message = titles.get(error.code, (error.name, error.description))
+        return render_template("error.html", code=error.code, title=title, message=message), error.code
+
+    @app.errorhandler(500)
+    def server_error(error):
+        if request.path.startswith("/api/"):
+            return jsonify(error="Internal server error"), 500
+        title, message = titles[500]
+        return render_template("error.html", code=500, title=title, message=message), 500
+
+    @app.get("/favicon.ico")
+    def favicon():
+        return send_from_directory(f"{app.static_folder}/img", "favicon-32.png", mimetype="image/png")
 
     @app.cli.command("create-user")
     @click.argument("email")

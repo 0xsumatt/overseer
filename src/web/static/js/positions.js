@@ -1,7 +1,7 @@
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
-  const labels = {hyperliquid: 'Hyperliquid', lighter: 'Lighter', bulk: 'Bulk', risex: 'RISEx'};
+  const labels = {hyperliquid: VENUE_LABELS.hyperliquid, lighter: VENUE_LABELS.lighter, bulk: VENUE_LABELS.bulk, risex: VENUE_LABELS.rise};
   const exchangeLogos = JSON.parse($('positions-watchlist-sticky').dataset.exchangeLogos);
   const storageKey = 'overseer.positions.watchlist.v1';
   const accounts = [];
@@ -39,6 +39,16 @@
     if (className) el.className = className;
     return el;
   };
+  const badge = (text, tone = '') => {
+    const el = node('span', text, 'badge');
+    if (tone) el.dataset.tone = tone;
+    return el;
+  };
+  function emptyState(title, hint, className = '') {
+    const el = node('div', undefined, `empty-state${className ? ' ' + className : ''}`);
+    el.append(node('p', title, 'empty-state-title'), node('p', hint, 'empty-state-hint'));
+    return el;
+  }
   // Presentation only: supplied financial strings never change in API payloads.
   function decimalParts(value) {
     if (value === null || value === undefined || value === '') return null;
@@ -63,11 +73,11 @@
       const exponent = whole === '0' ? -(first + 1) : whole.length - 1;
       const tail = digits.slice(1, 5).replace(/0+$/, '');
       const approximate = /[1-9]/.test(digits.slice(5));
-      return `${approximate ? '≈ ' : ''}${sign}${digits[0]}${tail ? '.' + tail : ''}e${exponent}`;
+      return `${approximate ? '~' : ''}${sign}${digits[0]}${tail ? '.' + tail : ''}e${exponent}`;
     }
     const places = whole.length >= 4 ? 2 : 4;
     const tail = fraction.slice(0, places).replace(/0+$/, '');
-    return `${/[1-9]/.test(fraction.slice(places)) ? '≈ ' : ''}${sign}${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}${tail ? '.' + tail : ''}`;
+    return `${/[1-9]/.test(fraction.slice(places)) ? '~' : ''}${sign}${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}${tail ? '.' + tail : ''}`;
   }
   function numberValue(value, currency = '', signed = false, estimated = false) {
     const parts = decimalParts(value);
@@ -108,9 +118,11 @@
     const parts = decimalParts(value);
     return !parts ? 'Unknown' : !parts.nonzero ? 'Flat' : parts.negative ? 'Short' : 'Long';
   }
-  function disclosure(title, content, className = 'positions-help') {
+  function disclosure(title, content, className = 'disclosure') {
     const el = node('details', undefined, className);
-    el.append(node('summary', title), content);
+    const body = node('div', undefined, 'disclosure-body');
+    body.append(content);
+    el.append(node('summary', title), body);
     return el;
   }
   function field(title, value) {
@@ -120,15 +132,10 @@
   }
   function age(ts) {
     const time = Date.parse(ts);
-    if (!Number.isFinite(time)) return 'age unknown';
-    const seconds = Math.max(0, Math.floor((Date.now() - time) / 1000));
-    if (seconds < 60) return `${seconds}s ago`;
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s ago`;
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ${Math.floor(seconds % 3600 / 60)}m ago`;
-    return `${Math.floor(seconds / 86400)}d ${Math.floor(seconds % 86400 / 3600)}h ago`;
+    return Number.isFinite(time) ? `${Fmt.age((Date.now() - time) / 1000)} ago` : 'Age unknown';
   }
   function renderReadFreshness(items) {
-    $('positions-read-freshness').hidden = !items.length;
+    $('positions-funding-read-age').hidden = !items.length;
     for (const kind of ['positions', 'funding']) {
       let oldest = null, oldestTime = Infinity, unread = 0, failed = 0;
       let retained = false, partial = false;
@@ -143,21 +150,26 @@
         if (reading?.state === 'error') failed += 1;
         partial ||= kind === 'funding' && (reading?.catching_up || reading?.state === 'fresh' && !reading.complete);
       }
-      const details = [!items.length ? 'No accounts' : oldest ? `oldest ${age(oldest)}` : partial ? 'Awaiting complete read' : failed ? 'No successful reads' : 'Awaiting reads'];
+      // "12s ago" for positions (the bar's label says Readings) and "Funding 3m
+      // ago": short enough for one line on a phone. "Oldest" is in the tooltip.
+      const details = [!items.length ? 'No accounts' : oldest ? age(oldest) : partial ? 'Awaiting complete read' : failed ? 'No successful reads' : 'Awaiting reads'];
       if (oldest && unread) details.push(`${unread} unread`);
       if (failed) details.push(`${failed} ${failed === 1 ? 'error' : 'errors'}`);
       if (retained) details.push('retained');
       if (partial) details.push('partial');
       const el = $(`positions-${kind}-read-age`);
-      const text = `${kind === 'positions' ? 'Positions' : 'Funding'} · ${details.join(' · ')}`;
+      const lead = details.shift();
+      const first = kind === 'positions' ? lead : `Funding ${lead.charAt(0).toLowerCase()}${lead.slice(1)}`;
+      const text = [first, ...details].join(' · ');
       if (el.textContent !== text) el.textContent = text;
-      el.className = failed ? 'positions-error' : unread || retained || partial ? 'positions-warning' : '';
-      el.title = oldest ? `Oldest successful ${kind} read: ${oldest}` : `No successful ${kind} read timestamp`;
+      el.classList.toggle('positions-error', failed > 0);
+      el.classList.toggle('positions-warning', !failed && Boolean(unread || retained || partial));
+      el.title = oldest ? `Oldest successful ${kind} read: ${Fmt.dateTime(oldest)}` : `No successful ${kind} read timestamp`;
     }
   }
   function timestamp(ts) {
     const el = node('span');
-    if (ts) { el.dataset.positionsAge = ts; el.title = ts; el.textContent = age(ts); }
+    if (ts) { el.dataset.positionsAge = ts; el.title = Fmt.dateTime(ts); el.textContent = age(ts); }
     else el.textContent = 'never successfully read';
     return el;
   }
@@ -165,8 +177,8 @@
     const line = node('div', undefined, 'positions-account-state');
     line.dataset.positionStatusKind = label === 'Positions' ? 'positions' : 'funding';
     const data = state || {state: 'pending'};
-    const severity = data.state === 'error' ? 'positions-error' : data.state === 'fresh' ? 'positions-muted' : 'positions-warning';
-    line.append(node('span', `${label}: ${data.state || 'pending'}`, `positions-badge ${severity}`), timestamp(data.checked_at));
+    const tone = data.state === 'error' ? 'error' : data.state === 'fresh' ? '' : 'warning';
+    line.append(badge(`${label}: ${data.state || 'pending'}`, tone), timestamp(data.checked_at));
     if (data.state !== 'fresh') line.append(node('span', data.checked_at ? 'Retained / not current' : 'Unknown, not zero', 'positions-warning'));
     if (data.error) line.append(node('p', data.error, 'positions-error'));
     if (data.catching_up) line.append(node('span', 'Catching up · known subtotal', 'positions-warning'));
@@ -182,26 +194,28 @@
   }
   function notice(text, state = '') {
     $('positions-notice').textContent = text;
-    $('positions-notice').dataset.state = state;
+    if (state) $('positions-notice').dataset.tone = state;
+    else delete $('positions-notice').dataset.tone;
   }
   function metric(title, value, note, kind, status) {
-    const el = node('div', undefined, 'positions-metric');
+    const el = node('div', undefined, 'kpi positions-metric');
     el.dataset.kind = kind;
     const header = node('div', undefined, 'positions-metric-heading');
-    header.append(node('span', title, 'positions-metric-title'), node('span', status, `positions-badge ${status.startsWith('Partial') ? 'positions-warning' : 'positions-muted'}`));
-    const reading = node('div', undefined, 'positions-metric-value');
+    header.append(node('span', title, 'kpi-label'), badge(status, status.startsWith('Partial') ? 'warning' : ''));
+    const reading = node('div', undefined, 'kpi-value positions-metric-value');
     reading.append(typeof value === 'string' ? node('span', value) : value);
-    const footer = node('div', undefined, 'positions-metric-note');
-    footer.append(typeof note === 'string' ? node('p', note, 'positions-muted') : note);
+    const footer = node('div', undefined, 'kpi-meta positions-metric-note');
+    footer.append(typeof note === 'string' ? node('p', note) : note);
     el.append(header, reading, footer);
     return el;
   }
   function markRetainedScreen() {
+    document.querySelector('[data-positions-offline]')?.remove();
     if (!screenOffline) return;
-    const retained = node('p', 'SCREEN OFFLINE / RETAINED IN MEMORY — do not treat these totals as current.', 'positions-error positions-wide');
+    const retained = node('div', 'Screen offline · retained in memory — do not treat these totals as current.', 'notice positions-offline');
+    retained.dataset.tone = 'error';
     retained.dataset.positionsOffline = '';
-    $('positions-summary').querySelector('[data-positions-offline]')?.remove();
-    $('positions-summary').prepend(retained);
+    $('positions-summary').before(retained);
   }
   function renderTotals(data) {
     const totals = data.totals || {};
@@ -213,13 +227,13 @@
     const fundingFx = field('Current-FX estimate', empty || !anyFundingRead ? 'Unavailable' : usd(totals.funding_usd));
     const pnlFx = field('Current-FX estimate', empty ? 'Unavailable' : currentEstimate(totals.unrealized_pnl));
     $('positions-summary').replaceChildren(
-      metric('Unmatched exposure', empty ? 'No accounts' : anyPositionRead ? usd(totals.net_delta_usd) : 'Awaiting snapshot', exposureKnown ? 'Absolute net deltas per coin' : 'Partial / unknown portfolio', 'exposure', empty ? 'Waiting' : exposureKnown ? 'USD estimate' : 'Partial'),
+      metric('Unmatched exposure', empty ? 'No accounts' : anyPositionRead ? usd(totals.net_delta_usd) : 'Awaiting snapshot', exposureKnown ? 'Absolute net deltas per asset' : 'Partial / unknown portfolio', 'exposure', empty ? 'Waiting' : exposureKnown ? 'USD estimate' : 'Partial'),
       metric('Settled funding', empty ? 'No accounts' : buckets(totals.funding, fundingKnown ? 'No settled payments in period' : 'Unknown · no payments available'), fundingFx, 'funding', empty ? 'Waiting' : fundingKnown ? 'Native' : 'Partial subtotal'),
-      metric('Unrealized P&L', empty ? 'No accounts' : buckets(totals.unrealized_pnl, 'Unavailable'), pnlFx, 'pnl', empty ? 'Waiting' : exposureKnown ? 'Native' : 'Partial subtotal')
+      metric('Unrealised P&L', empty ? 'No accounts' : buckets(totals.unrealized_pnl, 'Unavailable'), pnlFx, 'pnl', empty ? 'Waiting' : exposureKnown ? 'Native' : 'Partial subtotal')
     );
     markRetainedScreen();
     const target = $('positions-fx');
-    target.replaceChildren(node('span', `Current FX source: ${data.fx?.source || 'unavailable'} · updated `), timestamp(data.fx?.checked_at));
+    target.replaceChildren(node('span', `Current FX source: ${data.fx?.source || 'Unavailable'} · updated `), timestamp(data.fx?.checked_at));
     if (fxError) target.append(node('span', ` · ${fxError}`, 'positions-warning'));
   }
   function detail(grid, title, value) {
@@ -245,7 +259,7 @@
     return el;
   }
   function scanMetric(title, reading, kind) {
-    const el = node('span', undefined, `positions-scan-metric positions-asset-${kind}`);
+    const el = node('span', undefined, 'positions-scan-metric');
     el.dataset.kind = kind;
     el.append(node('span', title, 'positions-scan-label'), reading);
     return el;
@@ -255,16 +269,19 @@
     const opened = new Set([...target.querySelectorAll('details[data-asset][open]')].map(el => el.dataset.asset));
     target.replaceChildren();
     if (!data.assets.length) {
-      const text = !data.accounts.length ? 'Add an account below to read exposure. No accounts means unknown, not flat.' : data.totals?.positions_complete ? 'No open positions or settled payments in this period.' : 'Awaiting complete readings · exposure and funding unknown, not zero.';
-      target.append(node('p', text, 'positions-empty'));
+      target.append(!data.accounts.length
+        ? emptyState('No accounts in this tab', 'Add an account to read exposure. No accounts means unknown, not flat.')
+        : data.totals?.positions_complete
+          ? emptyState('No open positions', 'No open positions or settled payments in this period.')
+          : emptyState('Awaiting complete readings', 'Exposure and funding are unknown, not zero.'));
       return;
     }
-    const listHeading = node('div', undefined, 'positions-list-head');
+    const listHeading = node('div', undefined, 'list-head positions-list-head');
     listHeading.setAttribute('aria-hidden', 'true');
-    for (const title of ['', 'Coin / reading quality', 'Net delta · USD', 'Funding · native', 'P&L · native']) listHeading.append(node('span', title));
+    for (const title of ['', 'Asset / reading quality', 'Net delta, USD', 'Funding, native', 'Unrealised P&L, native']) listHeading.append(node('span', title));
     target.append(listHeading);
     for (const asset of data.assets) {
-      const card = node('details', undefined, 'positions-card positions-asset');
+      const card = node('details', undefined, 'positions-asset');
       card.dataset.asset = asset.asset;
       card.dataset.state = asset.partial ? 'partial' : 'complete';
       card.open = opened.has(asset.asset);
@@ -281,15 +298,15 @@
       const quality = stale ? 'Stale / retained' : asset.partial ? `Partial${retained ? ' / retained' : ''}` : retained ? 'Delayed / retained' : 'Current';
       name.append(
         node('span', asset.label || asset.asset, 'positions-asset-title'),
-        node('span', quality, `positions-badge ${asset.partial || retained ? 'positions-warning' : 'positions-muted'}`)
+        badge(quality, asset.partial || retained ? 'warning' : '')
       );
       identity.append(name, node('span', `${direction} · ${amount(asset.net_quantity, true)}`, `positions-asset-net ${direction === 'Long' ? 'positions-long' : direction === 'Short' ? 'positions-short' : 'positions-muted'}`));
       const heading = node('summary', undefined, 'positions-asset-heading');
       heading.append(
         identity,
-        scanMetric('Net Δ · USD', scanValue(asset.net_delta_usd, 'USD', true), 'delta'),
+        scanMetric('Net delta, USD', scanValue(asset.net_delta_usd, 'USD', true), 'delta'),
         scanMetric(`Funding${data.totals?.funding_complete ? '' : ' · partial'}`, scanBuckets(asset.funding, data.totals?.funding_complete ? 'No payments' : 'Unavailable'), 'funding'),
-        scanMetric(`P&L${data.totals?.positions_complete ? '' : ' · partial'}`, scanBuckets(asset.unrealized_pnl, 'Unavailable'), 'pnl')
+        scanMetric(`Unrealised P&L${data.totals?.positions_complete ? '' : ' · partial'}`, scanBuckets(asset.unrealized_pnl, 'Unavailable'), 'pnl')
       );
       const body = node('div', undefined, 'positions-details');
       const overview = node('div', undefined, 'positions-asset-overview');
@@ -297,22 +314,22 @@
       line.append(field('Net base', numberValue(asset.net_quantity, asset.asset, true)), field('Long', numberValue(asset.long_quantity, asset.asset)), field('Short', numberValue(asset.short_quantity, asset.asset)), field('Net delta estimate', usd(asset.net_delta_usd)));
       overview.append(line);
       const totals = node('div', undefined, 'positions-asset-line');
-      totals.append(field('uPnL · native', buckets(asset.unrealized_pnl, 'Unavailable')), field(`Funding · ${data.totals?.funding_complete ? 'native' : 'PARTIAL subtotal'}`, buckets(asset.funding, data.totals?.funding_complete ? 'No settled payments' : 'Unavailable / incomplete')));
+      totals.append(field('Unrealised P&L, native', buckets(asset.unrealized_pnl, 'Unavailable')), field(`Funding, ${data.totals?.funding_complete ? 'native' : 'partial subtotal'}`, buckets(asset.funding, data.totals?.funding_complete ? 'No settled payments' : 'Unavailable / incomplete')));
       overview.append(totals);
       const estimates = node('dl', undefined, 'positions-leg-grid');
       detail(estimates, 'USD reference', numberValue(asset.reference_price_usd, 'USD'));
-      detail(estimates, 'uPnL · current-FX USD estimate', currentEstimate(asset.unrealized_pnl));
-      detail(estimates, 'Funding · current-FX USD estimate', usd(asset.funding_usd));
+      detail(estimates, 'Unrealised P&L, current-FX USD estimate', currentEstimate(asset.unrealized_pnl));
+      detail(estimates, 'Funding, current-FX USD estimate', usd(asset.funding_usd));
       overview.append(disclosure('USD reference & estimates', estimates));
       body.append(node('p', 'Scroll sideways for size, prices and funding.', 'positions-table-hint positions-muted'));
-      const scroll = node('div', undefined, 'positions-table-scroll');
+      const scroll = node('div', undefined, 'positions-table-scroll table-card scroll-thin');
       scroll.tabIndex = 0; scroll.setAttribute('role', 'region'); scroll.setAttribute('aria-label', `${asset.label || asset.asset} account legs; horizontally scrollable table`);
-      const table = node('table', undefined, 'positions-table');
+      const table = node('table', undefined, 'data-table positions-table');
       table.append(node('caption', 'Native amounts · expand a value for exact precision'));
       const thead = node('thead');
       const headers = node('tr');
-      for (const title of ['Venue / account', 'Side', 'Base size', 'Entry · quote', 'Mark · quote', 'uPnL · native', 'Settled funding · native', 'Positions freshness']) {
-        const th = node('th', title); th.scope = 'col'; headers.append(th);
+      for (const [index, title] of ['Venue / account', 'Side', 'Base size', 'Entry, quote', 'Mark, quote', 'Unrealised P&L, native', 'Settled funding, native', 'Positions freshness'].entries()) {
+        const th = node('th', title, index >= 2 && index <= 6 ? 'num' : undefined); th.scope = 'col'; headers.append(th);
       }
       thead.append(headers); table.append(thead);
       const rows = node('tbody');
@@ -338,18 +355,18 @@
           numberValue(leg.entry_price, leg.quote_currency || 'Unknown currency'),
           numberValue(leg.mark_price, leg.quote_currency || 'Unknown currency'),
           numberValue(leg.unrealized_pnl, leg.unrealized_pnl_currency || leg.settlement_currency || 'Unknown currency', true)
-        ]) { const cell = node('td', undefined, 'positions-numeric'); cell.append(reading); row.append(cell); }
-        const fundingCell = node('td', undefined, 'positions-numeric');
+        ]) { const cell = node('td', undefined, 'num'); cell.append(reading); row.append(cell); }
+        const fundingCell = node('td', undefined, 'num');
         fundingCell.append(buckets(leg.funding, funding?.complete ? 'No settled payments' : 'Unavailable / incomplete'));
-        fundingCell.append(node('span', `Funding: ${funding?.state || 'unknown'}${funding?.complete ? '' : ' · PARTIAL'}`, funding?.state === 'error' ? 'positions-error positions-cell-state' : funding?.state === 'fresh' && funding.complete ? 'positions-muted positions-cell-state' : 'positions-warning positions-cell-state'));
+        fundingCell.append(node('span', `Funding: ${funding?.state || 'Unknown'}${funding?.complete ? '' : ' · partial'}`, funding?.state === 'error' ? 'positions-error positions-cell-state' : funding?.state === 'fresh' && funding.complete ? 'positions-muted positions-cell-state' : 'positions-warning positions-cell-state'));
         if (funding?.state !== 'fresh' && funding?.checked_at) fundingCell.append(node('span', 'Retained', 'positions-warning positions-cell-state'));
         row.append(fundingCell);
         const freshness = node('td', undefined, 'positions-freshness');
-        freshness.append(node('span', leg.state || 'unknown', `positions-badge ${leg.state === 'error' ? 'positions-error' : leg.state === 'fresh' ? 'positions-muted' : 'positions-warning'}`), timestamp(leg.checked_at));
+        freshness.append(badge(leg.state || 'Unknown', leg.state === 'error' ? 'error' : leg.state === 'fresh' ? '' : 'warning'), timestamp(leg.checked_at));
         if (leg.state !== 'fresh') freshness.append(node('span', leg.checked_at ? 'Retained / not current' : 'Unknown, not zero', 'positions-warning positions-cell-state'));
         row.append(freshness); rows.append(row);
       }
-      table.append(rows); scroll.append(table); body.append(scroll, disclosure('Coin totals & valuation', overview));
+      table.append(rows); scroll.append(table); body.append(scroll, disclosure('Asset totals & valuation', overview));
       card.append(heading, body); target.append(card);
     }
   }
@@ -364,13 +381,13 @@
       if (!/^[0-9]{1,15}$/.test(address) || Number(address) > 2 ** 48 - 1) throw new Error('Lighter account identities are numeric indices. Add a wallet to discover its owned accounts automatically.');
       return String(Number(address));
     }
-    if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) throw new Error('Bulk requires a Solana-style base58 account public key.');
+    if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) throw new Error('BULK requires a Solana-style base58 account public key.');
     const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
     let value = 0n;
     for (const char of address) value = value * 58n + BigInt(alphabet.indexOf(char));
     const leading = address.match(/^1*/)[0].length;
     const bytes = value === 0n ? 0 : Math.ceil(value.toString(2).length / 8);
-    if (leading + bytes !== 32) throw new Error('Bulk account public key must decode to 32 bytes.');
+    if (leading + bytes !== 32) throw new Error('BULK account public key must decode to 32 bytes.');
     return address;
   }
   function validLabel(raw) {
@@ -399,7 +416,7 @@
       if (!accounts.length) sessionStorage.removeItem(storageKey);
       else sessionStorage.setItem(storageKey, JSON.stringify({version: 1, accounts: accounts.map(({id, venue, address, label, created_at}) => ({id, venue, address, label, created_at}))}));
       $('positions-storage-message').textContent = 'Only this tab’s addresses, labels and local account identifiers use sessionStorage, with no login or server database association. They survive refresh; browser session restoration may retain them. Other fresh tabs are independent. Tokens and financial readings stay only in page memory.';
-      $('positions-storage-message').className = 'positions-muted';
+      $('positions-storage-message').className = '';
     } catch (_) {
       $('positions-storage-message').textContent = 'Tab storage is unavailable or full. The latest watchlist change exists only in page memory and may not survive refresh; an older tab list may remain. No tokens or financial readings are saved.';
       $('positions-storage-message').className = 'positions-error';
@@ -486,8 +503,9 @@
       renderTotals(empty); renderAssets(empty);
       $('positions-fx').replaceChildren();
     } else {
-      $('positions-summary').replaceChildren(node('p', text, 'positions-warning positions-wide'));
-      $('positions-assets').replaceChildren(node('p', 'Awaiting exact summaries for the current tab watchlist and funding period. Previous totals are hidden.', 'positions-muted'));
+      markRetainedScreen();
+      $('positions-summary').replaceChildren(emptyState('Totals hidden', text, 'positions-wide positions-placeholder'));
+      $('positions-assets').replaceChildren(emptyState('Updating summaries', 'Previous totals stay hidden until exact summaries for this watchlist and period arrive.'));
       $('positions-fx').replaceChildren();
     }
     renderAccounts(localAccounts(), true);
@@ -621,15 +639,15 @@
     if (!force && target.contains(document.activeElement)) return;
     const opened = new Set([...target.querySelectorAll('details[data-account-id][open]')].map(el => el.dataset.accountId));
     target.replaceChildren();
-    if (!data.accounts.length) target.append(node('p', 'No accounts in this tab. Add a wallet address to begin.', 'positions-empty'));
+    if (!data.accounts.length) target.append(emptyState('No accounts in this tab', 'Add a wallet address to begin.'));
     else {
-      const titles = node('div', undefined, 'positions-account-summary positions-account-list-head');
+      const titles = node('div', undefined, 'list-head positions-account-summary positions-account-list-head');
       titles.setAttribute('aria-hidden', 'true');
       for (const title of ['Account', 'Exchange', 'Address / index', 'Positions', 'Funding']) titles.append(node('span', title));
       target.append(titles);
     }
     for (const account of data.accounts) {
-      const card = node('details', undefined, 'positions-card positions-account');
+      const card = node('details', undefined, 'positions-account');
       card.dataset.accountId = String(account.id);
       card.id = `positions-account-${account.id}`;
       card.addEventListener('toggle', syncWatchlistExpansion);
@@ -640,29 +658,30 @@
       const body = node('div', undefined, 'positions-account-body');
       body.append(node('p', account.address, 'positions-account-address'), status('Positions', account.positions), status('Settled funding', account.funding));
       const balances = node('div', undefined, 'positions-asset-line');
-      balances.append(field('Balances · native', buckets(account.balances, 'Unavailable')), field('Equity · native', buckets(account.equity, 'Unavailable')));
+      balances.append(field('Balances, native', buckets(account.balances, 'Unavailable')), field('Equity, native', buckets(account.equity, 'Unavailable')));
       body.append(disclosure('Balances & equity · separate from exposure', balances));
       if (account.notes?.length) {
         const notes = node('div');
         for (const note of account.notes) notes.append(node('p', note, 'positions-warning'));
-        body.append(disclosure(`Account notes (${account.notes.length})`, notes, 'positions-help positions-warning'));
+        body.append(disclosure(`Account notes (${account.notes.length})`, notes, 'disclosure positions-warning'));
       }
       const form = node('form', undefined, 'positions-account-actions');
       form.dataset.accountForm = String(account.id);
-      const label = node('label', 'Account label');
+      const label = node('label', undefined, 'field');
       const input = node('input', undefined, 'input');
       input.name = 'label'; input.value = account.label; input.required = true; input.maxLength = 80;
-      label.append(input); form.append(label);
+      label.append(node('span', 'Label', 'field-label'), input); form.append(label);
       let token = null;
       if (account.venue === 'lighter') {
         body.append(node('p', `Read-only token: ${account.has_read_only_token ? 'present only in page memory; lost on refresh' : 'not present; re-enter after refresh if private funding requires it'}`, 'positions-muted'));
-        const tokenLabel = node('label', 'Set / replace read-only token (blank preserves)');
+        const tokenLabel = node('label', undefined, 'field');
+        tokenLabel.append(node('span', 'Read-only token (blank keeps current)', 'field-label'));
         token = node('input', undefined, 'input'); token.type = 'password'; token.name = 'read_only_token'; token.autocomplete = 'off'; token.spellcheck = false; token.maxLength = 2048; token.placeholder = 'ro:…';
         tokenLabel.append(token); form.append(tokenLabel);
-        const link = node('a', 'Create an official Lighter read-only token');
+        const link = node('a', 'Create a Lighter read-only token');
         link.href = 'https://app.lighter.xyz/read-only-tokens/'; link.target = '_blank'; link.rel = 'noopener noreferrer'; body.append(link);
       }
-      const save = node('button', 'Save changes in this tab', 'toolbar-button positions-button'); save.type = 'submit'; form.append(save);
+      const save = node('button', 'Save changes', 'btn btn-secondary'); save.type = 'submit'; form.append(save);
       form.addEventListener('submit', event => {
         event.preventDefault();
         const current = accounts.find(item => item.id === account.id);
@@ -682,7 +701,7 @@
         finally { if (token) token.value = ''; }
       });
       if (account.venue === 'lighter' && account.has_read_only_token) {
-        const clear = node('button', 'Clear token from memory', 'toolbar-button positions-button'); clear.type = 'button'; clear.dataset.clearToken = String(account.id);
+        const clear = node('button', 'Clear token', 'btn btn-ghost'); clear.type = 'button'; clear.dataset.clearToken = String(account.id);
         clear.addEventListener('click', () => {
           const current = accounts.find(item => item.id === account.id);
           if (!current) return;
@@ -693,14 +712,14 @@
         });
         form.append(clear);
       }
-      const edit = node('button', 'Edit address / venue', 'toolbar-button positions-button'); edit.type = 'button';
+      const edit = node('button', 'Edit account', 'btn btn-ghost'); edit.type = 'button';
       edit.addEventListener('click', () => {
         const current = accounts.find(item => item.id === account.id);
         if (!current) return;
         beginAccountEdit(current);
       });
       form.append(edit);
-      const remove = node('button', 'Remove account', 'toolbar-button positions-button positions-error'); remove.type = 'button'; remove.dataset.deleteAccount = String(account.id);
+      const remove = node('button', 'Remove', 'btn btn-danger'); remove.type = 'button'; remove.dataset.deleteAccount = String(account.id);
       remove.addEventListener('click', () => {
         const index = accounts.findIndex(item => item.id === account.id);
         if (index < 0 || !window.confirm(`Remove ${accounts[index].label} from this tab? This does not modify the exchange account.`)) return;
@@ -724,7 +743,7 @@
     const el = node('span', undefined, 'positions-account-reading');
     el.append(
       node('span', title, 'positions-account-reading-label'),
-      node('span', text, `positions-badge ${state === 'error' ? 'positions-error' : state !== 'fresh' || !reading?.complete ? 'positions-warning' : 'positions-muted'}`)
+      badge(text, state === 'error' ? 'error' : state !== 'fresh' || !reading?.complete ? 'warning' : '')
     );
     return el;
   }
@@ -1060,12 +1079,12 @@
       input.checked = !input.disabled && chosenVenues.has(input.value);
     }
     const lighter = selectedVenues().includes('lighter');
-    const help = type === 'evm' ? 'EVM wallet — Hyperliquid, RISEx and Lighter. Bulk needs a Solana address.' : type === 'solana' ? 'Solana address — select Bulk.' : type === 'index' ? 'Known account index — Lighter only; enter its wallet instead to discover other owned accounts.' : 'Select exchanges: EVM → Hyperliquid, RISEx, Lighter · Solana → Bulk · known account index → Lighter.';
-    $('positions-exchange-help').textContent = editingId ? `Editing one account — choose one exchange. ${help}` : help;
-    $('positions-address-label').textContent = editingId ? 'Account address / public key / Lighter index' : 'Wallet address / public key / known Lighter index';
+    const help = type === 'evm' ? 'EVM wallet: Hyperliquid, RISEx and Lighter. BULK needs a Solana address.' : type === 'solana' ? 'Solana address: select BULK.' : type === 'index' ? 'Known account index: Lighter only. Enter its wallet to discover sibling accounts.' : 'EVM wallets use Hyperliquid, RISEx and Lighter; Solana keys use BULK; a known index uses Lighter.';
+    $('positions-exchange-help').textContent = editingId ? `Editing one account: choose one exchange. ${help}` : help;
+    $('positions-address-label').textContent = editingId ? 'Address, public key or Lighter index' : 'Wallet, public key or Lighter index';
     $('positions-address-help').textContent = editingId
-      ? 'Edit this one tracked account using its native address or Lighter index. Use Add to discover accounts exposed for a wallet; exchange coverage limits are shown.'
-      : 'Enter a wallet and shared label once. Discovered subaccounts use exchange names or generated labels, and all returned pages are followed automatically. Re-add a wallet to find missing accounts; existing identities are skipped. Coverage limits and failures appear below. This tab holds up to 32 accounts.';
+      ? 'Changes this one account only. Use Add to discover a wallet’s accounts.'
+      : 'Discovers owned subaccounts; up to 32 accounts per tab.';
     $('positions-token-fields').hidden = !lighter;
     $('positions-address').inputMode = 'text';
     $('positions-address').removeAttribute('pattern');
@@ -1084,7 +1103,7 @@
     $('positions-add-form').reset();
     $('positions-token').value = '';
     $('positions-add-title').textContent = 'Add read-only accounts';
-    $('positions-add-submit').textContent = 'Discover and add accounts to this tab';
+    $('positions-add-submit').textContent = 'Discover accounts';
     entryMessage('');
     tokenFields();
     $('positions-add').open = !accounts.length;
@@ -1095,7 +1114,7 @@
     resetAddForm(); editingId = current.id; chosenVenues = new Set([current.venue]);
     $('positions-address').value = current.address; $('positions-label').value = current.label;
     $('positions-add-title').textContent = 'Edit this tab account';
-    $('positions-add-submit').textContent = 'Save account in this tab';
+    $('positions-add-submit').textContent = 'Save account';
     $('positions-add').open = true;
     updateWatchlistMode();
     tokenFields(); $('positions-address').focus();
@@ -1184,7 +1203,7 @@
     tokenFields();
     $('positions-refresh').disabled = resolving || Boolean(activeRead);
     try {
-      if (!venues.length) throw new Error('Choose at least one compatible exchange. A Solana public key uses Bulk; a known numeric index uses Lighter.');
+      if (!venues.length) throw new Error('Choose at least one compatible exchange. A Solana public key uses BULK; a known numeric index uses Lighter.');
       const label = validLabel(rawLabel);
       if (editId) {
         if (venues.length !== 1) throw new Error('Editing changes one existing account. Choose exactly one exchange.');

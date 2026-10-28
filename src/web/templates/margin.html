@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui %}
+{% block title %}margin · overseer{% endblock %}
+{% block status_bar %}
+{% call(slot) ui.status_bar('Order books') %}
+  {%- if slot == 'value' %}<span id="margin-status" class="status-bar-value" role="status" aria-live="polite" aria-atomic="true" data-state="loading">Calculating…</span>
+  <span id="margin-status-state" class="status-bar-state" hidden><span class="status-dot" aria-hidden="true"></span><span data-status-text></span></span>
+  <button id="margin-refresh" type="button" class="bracket-btn" aria-label="Recalculate with fresh order books" aria-describedby="margin-status">Refresh</button>
+  {%- else %}<span>Prices move — refresh before trading</span>{% endif %}
+{% endcall %}
+{% endblock %}
+{% block content %}
+{% macro asset_options(selected, optional=False) -%}
+{% if optional %}<option value="">None</option>{% endif %}
+{% for asset in margin_config.assets %}
+<option value="{{ asset.id }}"{% if asset.id == selected %} selected{% endif %}>{{ asset.id }}{% if asset.label != asset.id %} · {{ asset.label }}{% endif %}</option>
+{% endfor %}
+{%- endmacro %}
+<section id="margin-app" aria-labelledby="margin-title">
+  {{ ui.page_header('Margin calculator', 'Compare the capital each venue needs to keep a position open through a price move, and the full cost of holding it.', title_id='margin-title') }}
+
+  {% call ui.filters('margin-filters') %}
+  <div class="toolbar" role="group" aria-label="Position">
+    <label class="field" for="margin-asset">
+      <span class="field-label">Asset</span>
+      <span class="select-shell"><select id="margin-asset" class="select select-polished">{{ asset_options('BTC') }}</select></span>
+    </label>
+    <label class="field" for="margin-direction">
+      <span class="field-label">Direction</span>
+      <span class="select-shell"><select id="margin-direction" class="select select-polished">
+        <option value="long">Long</option>
+        <option value="short">Short</option>
+      </select></span>
+    </label>
+    <label class="field" for="margin-size">
+      <span class="field-label">Size, USD</span>
+      <input id="margin-size" class="input margin-number-wide" type="text" inputmode="decimal" autocomplete="off" value="100000">
+    </label>
+    <label class="field" for="margin-goal">
+      <span class="field-label">Compare</span>
+      <span class="select-shell"><select id="margin-goal" class="select select-polished">
+        <option value="cost">Lowest total cost</option>
+        <option value="capital">Least capital needed</option>
+      </select></span>
+    </label>
+    <label class="field" for="margin-move">
+      <span class="field-label">Survive a move, %</span>
+      <input id="margin-move" class="input margin-number" type="text" inputmode="decimal" autocomplete="off" value="10" aria-describedby="margin-move-help">
+      <span id="margin-move-help" class="sr-only">Every venue must keep the position open through this price move against you.</span>
+    </label>
+    <label class="field" for="margin-hold">
+      <span class="field-label">Hold</span>
+      <span class="select-shell"><select id="margin-hold" class="select select-polished">
+        {% for hours, text in margin_config.holds %}
+        <option value="{{ hours }}"{% if hours == 24 %} selected{% endif %}>{{ text }}</option>
+        {% endfor %}
+      </select></span>
+    </label>
+    <label class="field" for="margin-rate">
+      <span class="field-label">Capital, % a year</span>
+      <input id="margin-rate" class="input margin-number" type="text" inputmode="decimal" autocomplete="off" placeholder="0">
+    </label>
+  </div>
+
+  <div class="toolbar" role="group" aria-label="Second position, for a pair trade">
+    <label class="field" for="margin-pair-asset">
+      <span class="field-label">Second position</span>
+      <span class="select-shell"><select id="margin-pair-asset" class="select select-polished">{{ asset_options(None, optional=True) }}</select></span>
+    </label>
+    <label class="field" for="margin-pair-direction">
+      <span class="field-label">Direction</span>
+      <span class="select-shell"><select id="margin-pair-direction" class="select select-polished" disabled>
+        <option value="short">Short</option>
+        <option value="long">Long</option>
+      </select></span>
+    </label>
+    <label class="field" for="margin-pair-size">
+      <span class="field-label">Size, USD</span>
+      <input id="margin-pair-size" class="input margin-number-wide" type="text" inputmode="decimal" autocomplete="off" value="100000" disabled>
+    </label>
+    <p class="margin-pair-help caption">A pair holds both positions on the same venue, sharing collateral.</p>
+  </div>
+  {% endcall %}
+
+  {{ ui.page_status() }}
+
+  <section aria-labelledby="margin-best-title" class="mb-6">
+    <h2 id="margin-best-title" class="section-label">Best venue <span id="margin-best-help" class="section-count">Lowest total cost to open, hold and close</span></h2>
+    <div id="margin-best" class="kpi-grid">
+      <article class="kpi"><h3 class="kpi-label">Venue</h3><p class="kpi-value" data-best="venue"><span class="skeleton" style="width: 8ch" aria-hidden="true"></span></p><p class="kpi-meta" data-best="venue-meta"></p></article>
+      <article class="kpi"><h3 class="kpi-label" data-best="cost-label">Total cost</h3><p class="kpi-value" data-best="cost"><span class="skeleton" style="width: 7ch" aria-hidden="true"></span></p><p class="kpi-meta" data-best="cost-meta"></p></article>
+      <article class="kpi"><h3 class="kpi-label">Capital needed</h3><p class="kpi-value" data-best="margin"><span class="skeleton" style="width: 7ch" aria-hidden="true"></span></p><p class="kpi-meta" data-best="margin-meta"></p></article>
+      <article class="kpi"><h3 class="kpi-label" data-best="risk-label">Liquidation</h3><p class="kpi-value" data-best="risk"><span class="skeleton" style="width: 6ch" aria-hidden="true"></span></p><p class="kpi-meta" data-best="risk-meta"></p></article>
+    </div>
+  </section>
+
+  <details id="margin-fee-settings" class="disclosure mb-6">
+    <summary>Fees &amp; VIP tiers <span id="margin-fee-summary" class="section-count">Base tiers</span></summary>
+    <div class="disclosure-body">
+      <p>Costs include each venue's base taker fee on the way in and out. Choose your tier to compare; eligibility is not verified and choices are not saved.</p>
+      <div id="margin-fee-controls" class="margin-fee-controls"></div>
+    </div>
+  </details>
+
+  <section aria-labelledby="margin-compare-title" class="mb-6">
+    <h2 id="margin-compare-title" class="section-label">Compare all venues</h2>
+    <p id="margin-legend" class="meta-line mb-2"></p>
+    <div class="table-card overflow-x-auto scroll-thin" role="region" aria-label="Margin and cost by venue, horizontally scrollable" tabindex="0">
+      <table id="margin-table" class="data-table margin-table font-mono" aria-busy="true">
+        <caption class="sr-only">Per-venue maximum leverage, capital needed to survive the chosen move, the leverage that amounts to, maintenance margin now, and the costs of opening, holding and closing the position.</caption>
+        <colgroup>
+          <col class="margin-col-venue"><col class="margin-col-leverage"><col class="margin-col-money">
+          <col class="margin-col-small"><col class="margin-col-wide"><col class="margin-col-small">
+          <col class="margin-col-money"><col class="margin-col-small"><col class="margin-col-money">
+        </colgroup>
+        <thead><tr>
+          <th scope="col" class="sticky-col">Venue</th>
+          <th scope="col" class="num">Max leverage</th>
+          <th scope="col" class="num">Capital needed</th>
+          <th scope="col" class="num">Leverage</th>
+          <th scope="col" class="num">Maintenance</th>
+          <th scope="col" class="num">Trading</th>
+          <th scope="col" class="num">Funding</th>
+          <th scope="col" class="num">Capital cost</th>
+          <th scope="col" class="num">Total</th>
+        </tr></thead>
+        <tbody id="margin-rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <details class="disclosure">
+    <summary>How this works</summary>
+    <div class="disclosure-body">
+      <p>Each calculation captures every venue's public order book, its published margin rules and, for a hold, its stored funding. Margin is USDC-style cash margin: no spot collateral, borrowing or account discounts.</p>
+      <p>At the same leverage every venue asks for the same margin, size ÷ leverage, so margin cannot make one venue cheaper there. Venues are compared at the same safety instead: each must keep your position open through the price move you choose. Capital needed is your loss at that move plus the venue's maintenance margin at the moved price, the equity below which liquidation starts. It is never less than the venue's minimum, your size divided by the most leverage it allows at that size: Bullet allows 20x up to $500k but only 2x above $1m, so its minimum, not your move, sets the capital there and pushes liquidation further out. A higher maintenance rate or a lower leverage cap means more capital for the same safety, and at your capital rate that is the margin cost in the total. Liquidation is where the position would be liquidated with the capital needed posted in isolation, before fees and funding.</p>
+      <p>For a pair, both positions share one cross-margin account on the same venue, and the test moves each against you at once (long down, short up): severe for a hedge, since correlated assets rarely move that far apart, but the same test on every venue. Every venue here except BULK adds the two positions' maintenance margins: their portfolio and multi-asset modes change what counts as collateral, not how opposite positions in different assets offset. BULK publishes portfolio margin: each position's maintenance is read from its risk surface and the two are combined with its live correlation between the assets, so a hedge such as long BTC and short ETH needs less capital than the two positions held on their own. The same surfaces raise the maintenance rate for large positions at low leverage, and a hedge lowers the account's leverage, so on large legs (from a few hundred thousand dollars, depending on the market and BULK's current volatility regime) the pair can need more. Capital needed shows either difference; elsewhere a difference appears only when one position's leverage cap leaves spare collateral the other can use. This follows BULK's published calculator; its engine's correlation discount is undocumented and not applied.</p>
+      <p>Trading costs come from the live books, as on Execution estimates: buy and sell the same quantity, with the spread, slippage and both taker fees. Funding follows that page's rule: the current rate for holds up to a day, the previous 24 hours of settled funding beyond. Capital cost is capital needed × your yearly rate × the hold. The cheapest venue ranks only venues with a complete quote, a known fee and funding, and published margin rules covering your size; Least capital needed ranks on capital alone.</p>
+      <p>In the table, leverage is size ÷ capital needed, and a leverage cap note marks capital set by the venue's minimum. Trading is the spread, slippage and taker fees to open and close; funding is what the position pays or receives over the hold; capital cost is what the capital needed would earn at your rate, nothing until you enter one. A total marked received means funding received outweighs the costs. Open Details for each position's numbers and the venue's margin rules.</p>
+      <p>Margin rules come from public venue data: Bybit and Bullet tier tables are cached for an hour, BULK's risk surfaces for ten minutes, and other venues' rules arrive with their market details, refreshed each minute. Binance's need an API key, so they are a dated copy of its public Leverage &amp; Margin page. Venues change tiers without notice, and accounts can differ: Binance caps new accounts at 20x for 30 days.</p>
+    </div>
+  </details>
+  <noscript><div class="notice mt-4" data-tone="warning">JavaScript is required to calculate margin.</div></noscript>
+</section>
+<script id="margin-config" type="application/json">{{ margin_config | tojson }}</script>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/venues.js', v='ui-consistency') }}"></script>
+<script src="{{ url_for('static', filename='js/margin.js', v='risex-sort') }}" defer></script>
+{% endblock %}

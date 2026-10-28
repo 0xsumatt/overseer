@@ -1,83 +1,53 @@
 <!doctype html>
+{% import "_ui.html" as ui %}
 <html lang="en" class="h-full">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}overseer{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='execution-price-hover') }}">
-  <style>
-    /* A restrained amber instrument glow over stepped blue-black surfaces.
-       Fixed to the viewport so long operational pages keep one stable field. */
-    body {
-      background-image:
-        radial-gradient(58rem 26rem at 50% -10rem, rgba(230,184,92,.055), transparent 62%),
-        linear-gradient(180deg, #101722 0%, #080B12 48%, #060910 100%);
-      background-attachment: fixed;
-    }
-    @keyframes cursorblink { 0%,55% {opacity:1} 56%,100% {opacity:0} }
-    /* Drawn, not a glyph. U+25AE ▮ is outside the IBM Plex Mono latin subsets,
-       so as text it renders from a fallback font and sits at a different width
-       and weight than the wordmark beside it. A box painted in currentColor
-       always matches the type it follows, at any size. */
-    .cursor {
-      display: inline-block; width: .52em; height: 1em;
-      margin-left: .1em; vertical-align: -.14em;
-      background: currentColor;
-      animation: cursorblink 1.2s steps(1) infinite;
-    }
-    @media (prefers-reduced-motion: reduce) { .cursor { animation: none; } }
-    ::-webkit-scrollbar { width: 10px; height: 10px; }
-    ::-webkit-scrollbar-thumb { background: #344156; border-radius: 5px; }
-    ::-webkit-scrollbar-track { background: transparent; }
-    .scroll-thin::-webkit-scrollbar { width: 6px; }
-    .scroll-thin::-webkit-scrollbar-thumb { background: rgba(230,184,92,.62); border-radius: 3px; }
-    .scroll-thin::-webkit-scrollbar-thumb:hover { background: #E6B85C; }
-    .scroll-thin { scrollbar-width: thin; scrollbar-color: rgba(230,184,92,.62) transparent; }
-    :focus-visible { outline: 2px solid #E6B85C; outline-offset: 3px; }
-  </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='risex-sort') }}">
+  <link rel="icon" href="{{ url_for('static', filename='img/favicon.svg') }}" type="image/svg+xml">
+  <link rel="icon" href="{{ url_for('static', filename='img/favicon-32.png') }}" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/apple-touch-icon.png') }}">
+  <meta name="theme-color" content="#111721">
 </head>
-<body class="flex min-h-full flex-col bg-ink text-body font-sans antialiased">
+<body class="flex min-h-full flex-col font-sans text-body antialiased">
   {% set links = [('pages.dashboard','charts'), ('pages.basis','basis'),
                   ('pages.funding','funding')] %}
   {% set tools = [('pages.flow','Trade flow'), ('pages.wallets','Tracked wallets'),
-                  ('pages.positions','Positions'), ('pages.execution','Execution estimates')] %}
-  {% set tools_active = request.endpoint in ['pages.flow', 'pages.wallets', 'pages.positions', 'pages.execution'] %}
+                  ('pages.positions','Positions'), ('pages.execution','Execution estimates'),
+                  ('pages.margin','Margin calculator'), ('pages.depth','Depth heatmap')] %}
+  {% set tools_active = request.endpoint in ['pages.flow', 'pages.wallets', 'pages.positions', 'pages.execution', 'pages.margin', 'pages.depth'] %}
   {% macro tools_links(id, floating=false) -%}
   <div id="{{ id }}" data-tools-links
-       class="hidden rounded-md border border-line-strong bg-panel p-1
-              {{ 'absolute left-0 top-full z-50 mt-2 w-56 shadow-2xl shadow-black/50' if floating
-                 else 'col-span-2 mt-1' }}">
+       class="hidden p-1 {{ 'popover absolute left-1/2 top-full z-50 mt-2 w-60 -translate-x-1/2' if floating
+                             else 'col-span-2 mt-1 rounded-md border border-line-soft' }}">
     {% for endpoint, label in tools %}
     <a href="{{ url_for(endpoint) }}"
        {% if request.endpoint == endpoint %}aria-current="page"{% endif %}
-       class="flex min-h-11 items-center rounded px-3 font-mono text-data
-              {{ 'bg-panel2 text-body' if request.endpoint == endpoint
-                 else 'text-dim hover:bg-panel2 hover:text-body' }}">{{ label }}</a>
+       class="menu-item uppercase tracking-label">{{ label }}</a>
     {% endfor %}
   </div>
   {%- endmacro %}
-  <nav class="border-b border-line bg-panel px-4 sm:px-6">
-    <div class="flex h-12 w-full items-center gap-2 sm:gap-4">
-      <a href="{{ url_for('pages.dashboard') }}"
-         class="flex h-12 shrink-0 items-center font-mono text-data font-semibold tracking-label text-phosphor">
+  {% block nav %}
+  <nav class="border-b border-line-soft bg-panel" aria-label="Primary">
+    <div class="shell flex h-12 items-center gap-4 lg:grid lg:grid-cols-[1fr_auto_1fr]">
+      <a href="{{ url_for('pages.dashboard') }}" class="wordmark justify-self-start">
         OVERSEER<span class="cursor" aria-hidden="true"></span>
       </a>
 
-      <div class="hidden h-12 min-w-0 flex-1 items-stretch justify-center gap-6 xl:flex">
+      <div class="hidden h-12 items-stretch gap-6 lg:flex">
         {% for endpoint, label in links %}
         <a href="{{ url_for(endpoint) }}"
            {% if request.endpoint == endpoint %}aria-current="page"{% endif %}
-           class="flex h-12 items-center border-b-2 pt-px font-mono text-data tracking-label uppercase -mb-px
-                  {{ 'border-phosphor text-body' if request.endpoint == endpoint
-                     else 'border-transparent text-dim hover:text-body' }}">{{ label }}</a>
+           class="nav-link">{{ label }}</a>
         {% endfor %}
-        <div data-tools-nav class="relative">
+        <div data-tools-nav class="relative flex">
           <button type="button" data-tools-trigger aria-expanded="false"
                   aria-controls="desktop-tools-links"
                   aria-label="{{ 'Tools, current section' if tools_active else 'Tools' }}"
-                  class="flex h-12 items-center gap-2 border-b-2 pt-px font-mono text-data tracking-label uppercase -mb-px
-                         {{ 'border-phosphor text-body' if tools_active
-                            else 'border-transparent text-dim hover:text-body' }}">
+                  {% if tools_active %}data-active="true"{% endif %}
+                  class="nav-link gap-2">
             tools
             <span aria-hidden="true" class="h-1.5 w-1.5 -translate-y-px rotate-45 border-b border-r border-current"></span>
           </button>
@@ -86,44 +56,35 @@
         {% if current_user.is_authenticated and current_user.can_view_internal %}
         <a href="{{ url_for('pages.health') }}"
            {% if request.endpoint == 'pages.health' %}aria-current="page"{% endif %}
-           class="flex h-12 items-center border-b-2 pt-px font-mono text-data tracking-label uppercase -mb-px
-                  {{ 'border-phosphor text-body' if request.endpoint == 'pages.health'
-                     else 'border-transparent text-dim hover:text-body' }}">health</a>
+           class="nav-link">health</a>
         {% endif %}
       </div>
 
-      <div class="ml-auto hidden shrink-0 items-center gap-5 xl:flex">
-        <span data-utc-clock class="shrink-0 whitespace-nowrap font-mono text-data text-faint tabular-nums"></span>
+      <div class="hidden min-w-0 items-center gap-5 justify-self-end lg:flex">
+        <span data-utc-clock class="shrink-0 whitespace-nowrap font-mono text-data tabular-nums text-faint"></span>
         {% if current_user.is_authenticated %}
-        <span class="max-w-48 truncate whitespace-nowrap font-mono text-data text-dim">{{ current_user.email }}</span>
-        <a href="{{ url_for('pages.logout') }}"
-           class="shrink-0 whitespace-nowrap font-mono text-data text-dim hover:text-loss">log out</a>
+        <a href="{{ url_for('pages.logout') }}" title="Signed in as {{ current_user.email }}"
+           class="shrink-0 whitespace-nowrap font-mono text-data text-dim transition-colors hover:text-loss">log out</a>
         {% endif %}
       </div>
       <button id="mobile-menu-trigger" type="button" aria-expanded="false"
               aria-controls="mobile-primary-nav"
-              class="toolbar-button ml-auto inline-flex shrink-0 items-center border border-line-strong
-                     bg-ink tracking-label uppercase text-body xl:hidden">
-        menu
-      </button>
+              class="btn btn-secondary btn-sm ml-auto lg:hidden">Menu</button>
     </div>
 
-    <div id="mobile-primary-nav" class="mx-auto hidden max-w-6xl border-t border-line/60 pb-3 pt-2 xl:hidden">
+    <div id="mobile-primary-nav" class="shell hidden border-t border-line-soft pb-3 pt-2 lg:hidden">
       <div class="grid grid-cols-2 gap-1">
         {% for endpoint, label in links %}
         <a href="{{ url_for(endpoint) }}"
            {% if request.endpoint == endpoint %}aria-current="page"{% endif %}
-           class="flex min-h-11 items-center rounded px-3 font-mono text-data tracking-label uppercase
-                  {{ 'bg-panel2 text-body' if request.endpoint == endpoint
-                     else 'text-dim hover:bg-panel2 hover:text-body' }}">{{ label }}</a>
+           class="menu-item uppercase tracking-label">{{ label }}</a>
         {% endfor %}
         <div data-tools-nav class="contents">
           <button type="button" data-tools-trigger aria-expanded="false"
                   aria-controls="mobile-tools-links"
                   aria-label="{{ 'Tools, current section' if tools_active else 'Tools' }}"
-                  class="flex min-h-11 items-center justify-between gap-2 rounded px-3 font-mono text-data tracking-label uppercase
-                         {{ 'bg-panel2 text-body' if tools_active
-                            else 'text-dim hover:bg-panel2 hover:text-body' }}">
+                  {% if tools_active %}data-active="true"{% endif %}
+                  class="menu-item justify-between uppercase tracking-label">
             tools
             <span aria-hidden="true" class="h-1.5 w-1.5 -translate-y-px rotate-45 border-b border-r border-current"></span>
           </button>
@@ -132,142 +93,66 @@
         {% if current_user.is_authenticated and current_user.can_view_internal %}
         <a href="{{ url_for('pages.health') }}"
            {% if request.endpoint == 'pages.health' %}aria-current="page"{% endif %}
-           class="flex min-h-11 items-center rounded px-3 font-mono text-data tracking-label uppercase
-                  {{ 'bg-panel2 text-body' if request.endpoint == 'pages.health'
-                     else 'text-dim hover:bg-panel2 hover:text-body' }}">health</a>
+           class="menu-item uppercase tracking-label">health</a>
         {% endif %}
       </div>
-      <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-line/60 px-3 pt-3">
-        <span data-utc-clock class="font-mono text-data text-faint tabular-nums"></span>
+      <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-line-soft px-3 pt-3">
+        <span data-utc-clock class="font-mono text-data tabular-nums text-faint"></span>
         {% if current_user.is_authenticated %}
         <span class="min-w-0 flex-1 truncate font-mono text-data text-dim">{{ current_user.email }}</span>
         <a href="{{ url_for('pages.logout') }}"
-           class="flex min-h-11 items-center font-mono text-data text-dim hover:text-loss">log out</a>
+           class="flex min-h-11 items-center font-mono text-data text-dim transition-colors hover:text-loss">log out</a>
         {% endif %}
       </div>
     </div>
   </nav>
-  {% block market_freshness %}
-  <div data-freshness data-state="checking" role="timer" aria-live="off"
-       aria-label="Checking the age of the newest market-data bar"
-       title="Age of the newest bar across all markets; individual charts may contain older data."
-       class="border-b border-line bg-panel/50 px-4 py-2 sm:px-6">
-    <div class="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-6 gap-y-1">
-      <div class="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono">
-        <span class="text-label tracking-label uppercase text-faint">market feed</span>
-        <span data-freshness-label class="text-data font-semibold tabular-nums text-body">Age unknown</span>
-        <span data-freshness-status class="inline-flex items-center gap-1.5 text-label text-dim">
-          <span data-freshness-dot aria-hidden="true" class="h-1.5 w-1.5 rounded-full bg-faint"></span>
-          <span data-freshness-state>Checking</span>
-        </span>
-      </div>
-      <div class="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 font-mono text-label text-dim">
-        <time data-freshness-timestamp>Latest bar —</time>
-        <span data-freshness-check class="tabular-nums">Checking screen refresh</span>
-      </div>
-    </div>
-  </div>
-  <div id="stale-banner" role="status" aria-live="polite" aria-atomic="true"
-       class="hidden border-b border-phosphor/40 bg-phosphor/10 px-4 py-1.5
-              text-center font-mono text-label text-phosphor sm:px-6"></div>
   {% endblock %}
-  <main class="mx-auto w-full min-w-0 max-w-6xl flex-1 px-4 py-5 sm:px-6 sm:py-8">
+  {% block status_bar %}
+  {% call(slot) ui.status_bar('Market feed', {
+       'data-freshness': '', 'data-state': 'checking', 'role': 'timer', 'aria-live': 'off',
+       'aria-label': 'Checking the age of the newest market-data bar',
+       'title': 'Age of the newest bar across all markets; individual charts may contain older data.'}) %}
+    {%- if slot == 'value' %}
+      <span data-freshness-label class="status-bar-value">Age unknown</span>
+      <span data-freshness-status class="status-bar-state">
+        <span data-freshness-dot aria-hidden="true" class="status-dot bg-faint"></span>
+        <span data-freshness-state>Checking</span>
+      </span>
+    {%- else %}
+      <time data-freshness-timestamp>Latest bar —</time>
+      <span data-freshness-check>Checking screen refresh</span>
+    {%- endif %}
+  {% endcall %}
+  {# Screen readers hear feed problems here; sighted users see the status bar tint. #}
+  <div id="stale-banner" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+  {% endblock %}
+  <main class="shell min-w-0 flex-1 py-5 sm:py-8">
+    {% block flash %}
     {% with messages = get_flashed_messages() %}
       {% for m in messages %}
-        <div class="mb-5 rounded border border-loss/40 bg-loss/10 px-4 py-2.5 font-mono text-data text-loss">
-          {{ m }}</div>
+      <div class="notice mb-5" data-tone="error" role="alert">{{ m }}</div>
       {% endfor %}
     {% endwith %}
-    <div id="page-status" class="hidden" role="status" aria-live="polite" aria-atomic="true">
-      <span data-status-message class="min-w-0 flex-1"></span>
-      <button data-status-retry type="button"
-              class="toolbar-button hidden shrink-0 border border-current/40
-                     tracking-label uppercase hover:bg-loss/10 disabled:hover:bg-transparent">
-        try again
-      </button>
-    </div>
+    {% endblock %}
     {% block content %}{% endblock %}
   </main>
-  <footer class="border-t border-line px-4 py-3 sm:px-6">
-    <div class="mx-auto flex max-w-6xl flex-col items-start gap-2 font-mono text-label text-faint sm:flex-row sm:items-center sm:justify-between">
+  <footer class="border-t border-line-soft">
+    <div class="shell flex flex-col items-start gap-x-6 gap-y-1 py-3 font-mono text-label text-faint sm:flex-row sm:items-center sm:justify-between">
       <span>overseer · market operations console</span>
-      <div class="flex items-center gap-4">
+      <div class="flex flex-wrap items-center gap-x-4">
+        <a href="https://www.tradingview.com/" target="_blank" rel="noopener"
+           title="Charts: TradingView Lightweight Charts™, Copyright (c) TradingView, Inc."
+           class="transition-colors hover:text-body">charts · TradingView</a>
         <a href="https://x.com/sumatt" target="_blank" rel="noopener"
-           class="hover:text-body">x / twitter</a>
+           class="transition-colors hover:text-body">x / twitter</a>
         <a href="https://github.com/0xsumatt" target="_blank" rel="noopener"
-           class="hover:text-body">github</a>
+           class="transition-colors hover:text-body">github</a>
       </div>
     </div>
   </footer>
-  <script src="{{ url_for('static', filename='js/reliability.js') }}"></script>
-  <script>
-    (function tick(){
-      const time = new Date().toISOString().slice(11,19) + ' UTC';
-      document.querySelectorAll('[data-utc-clock]').forEach(el => {
-        el.textContent = time;
-      });
-      setTimeout(tick, 1000);
-    })();
-
-    const toolsNavControls = [...document.querySelectorAll('[data-tools-nav]')];
-    function setToolsMenu(control, open, restoreFocus = false) {
-      const trigger = control.querySelector('[data-tools-trigger]');
-      control.querySelector('[data-tools-links]').classList.toggle('hidden', !open);
-      trigger.setAttribute('aria-expanded', String(open));
-      if (restoreFocus) trigger.focus();
-    }
-    toolsNavControls.forEach(control => {
-      const trigger = control.querySelector('[data-tools-trigger]');
-      trigger.addEventListener('click', () => {
-        const open = trigger.getAttribute('aria-expanded') !== 'true';
-        toolsNavControls.forEach(other => setToolsMenu(other, other === control && open));
-      });
-      control.addEventListener('keydown', event => {
-        if (event.key === 'Escape' && trigger.getAttribute('aria-expanded') === 'true') {
-          event.preventDefault();
-          event.stopPropagation();
-          setToolsMenu(control, false, true);
-        } else if (event.target === trigger && ['ArrowDown', 'ArrowUp'].includes(event.key)) {
-          event.preventDefault();
-          toolsNavControls.forEach(other => setToolsMenu(other, other === control));
-          const links = control.querySelectorAll('[data-tools-links] a');
-          links[event.key === 'ArrowDown' ? 0 : links.length - 1].focus();
-        }
-      });
-    });
-    document.addEventListener('pointerdown', event => {
-      toolsNavControls.forEach(control => {
-        if (!control.contains(event.target)) setToolsMenu(control, false);
-      });
-    });
-    document.addEventListener('focusin', event => {
-      toolsNavControls.forEach(control => {
-        if (!control.contains(event.target)) setToolsMenu(control, false);
-      });
-    });
-
-    const mobileMenuTrigger = document.getElementById('mobile-menu-trigger');
-    const mobilePrimaryNav = document.getElementById('mobile-primary-nav');
-    function setMobileMenu(open) {
-      if (!mobileMenuTrigger || !mobilePrimaryNav) return;
-      mobilePrimaryNav.classList.toggle('hidden', !open);
-      mobileMenuTrigger.setAttribute('aria-expanded', String(open));
-      mobileMenuTrigger.textContent = open ? 'close' : 'menu';
-      if (!open) toolsNavControls.forEach(control => setToolsMenu(control, false));
-    }
-    mobileMenuTrigger?.addEventListener('click', () => {
-      setMobileMenu(mobileMenuTrigger.getAttribute('aria-expanded') !== 'true');
-    });
-    document.addEventListener('keydown', event => {
-      if (event.key === 'Escape' && mobileMenuTrigger?.getAttribute('aria-expanded') === 'true') {
-        setMobileMenu(false);
-        mobileMenuTrigger.focus();
-      }
-    });
-    window.matchMedia('(min-width: 1280px)').addEventListener('change', event => {
-      setMobileMenu(false);
-    });
-  </script>
+  <script src="{{ url_for('static', filename='js/format.js', v='risex-sort') }}"></script>
+  <script src="{{ url_for('static', filename='js/reliability.js', v='ui-consistency') }}"></script>
+  <script src="{{ url_for('static', filename='js/nav.js', v='ui-consistency') }}"></script>
   <script>Overseer.startFreshness();</script>
   <script>const VENUE_LABELS = {{ venue_labels | tojson }};</script>
   {% block scripts %}{% endblock %}

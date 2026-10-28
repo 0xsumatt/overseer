@@ -1,116 +1,160 @@
 {% extends "base.html" %}
-{% block title %}Execution · overseer{% endblock %}
-{% block market_freshness %}{% endblock %}
+{% import "_ui.html" as ui %}
+{% block title %}execution · overseer{% endblock %}
+{% block status_bar %}
+{% call(slot) ui.status_bar('Order books') %}
+  {%- if slot == 'value' %}<span id="execution-status" class="status-bar-value" role="status" aria-live="polite" aria-atomic="true" data-state="loading">Fetching…</span>
+  <span id="execution-status-state" class="status-bar-state" hidden><span class="status-dot" aria-hidden="true"></span><span data-status-text></span></span>
+  <button id="execution-refresh" type="button" class="bracket-btn" aria-label="Refresh prices" aria-describedby="execution-status">Refresh</button>
+  {%- else %}<span id="execution-status-context" hidden></span><span id="execution-refresh-cadence" aria-live="off">Auto-refresh every minute</span>{% endif %}
+{% endcall %}
+{% endblock %}
 {% block content %}
+{#- The one source for trade-size labels; execution.js reads them from the table headers. -#}
+{% macro notional_label(notional) -%}
+{% if notional == '10000' %}$10K{% elif notional == '100000' %}$100K{% elif notional == '1000000' %}$1M{% elif notional == '10000000' %}$10M{% else %}${{ notional }}{% endif %}
+{%- endmacro %}
+{% set max_age = execution_config.max_book_age_seconds %}
 <section id="execution-app" aria-labelledby="execution-title">
-  <header class="mb-5 flex flex-wrap items-end justify-between gap-3 sm:gap-4">
-    <div>
-      <h1 id="execution-title" class="text-title font-semibold text-body">Execution estimates</h1>
-      <p class="mt-1 text-data text-dim">Compare estimated buy and sell prices across perpetual venues.</p>
-    </div>
-    <div class="execution-toolbar" role="group" aria-label="Trade to compare">
-      <label class="execution-control" for="execution-asset">
-        <span>Coin</span>
-        <span class="select-shell"><select id="execution-asset" class="select select-polished">
-          {% for asset in execution_config.assets %}
-          <option value="{{ asset.id }}"{% if asset.id == 'BTC' %} selected{% endif %}>{{ asset.id }}{% if asset.label != asset.id %} · {{ asset.label }}{% endif %}</option>
-          {% endfor %}
-        </select></span>
-      </label>
-      <label class="execution-control" for="execution-side">
-        <span>Side</span>
-        <span class="select-shell"><select id="execution-side" class="select select-polished">
-          <option value="buy">Buy</option>
-          <option value="sell">Sell</option>
-        </select></span>
-      </label>
-      <button id="execution-refresh" type="button" class="toolbar-button border border-line bg-panel text-dim hover:text-body" aria-describedby="execution-status">Refresh prices</button>
-    </div>
-  </header>
+  {{ ui.page_header('Execution estimates', 'Compare estimated prices and trading costs across perpetual venues.', title_id='execution-title') }}
 
-  <p id="execution-status" class="execution-notice" role="status" aria-live="polite" aria-atomic="true">Fetching current prices…</p>
-  <p id="execution-refresh-cadence" class="mb-4 text-label text-dim" aria-live="off">Auto-refresh every minute while this page is visible.</p>
+  {% call ui.filters('execution-filters') %}
+  <div class="toolbar" role="group" aria-label="Trade to compare">
+    <label class="field" for="execution-asset">
+      <span class="field-label">Asset</span>
+      <span class="select-shell"><select id="execution-asset" class="select select-polished">
+        {% for asset in execution_config.assets %}
+        <option value="{{ asset.id }}"{% if asset.id == 'BTC' %} selected{% endif %}>{{ asset.id }}{% if asset.label != asset.id %} · {{ asset.label }}{% endif %}</option>
+        {% endfor %}
+      </select></span>
+    </label>
+    <label class="field" for="execution-trade">
+      <span class="field-label">Trade</span>
+      <span class="select-shell"><select id="execution-trade" class="select select-polished">
+        <option value="buy">Buy</option>
+        <option value="sell">Sell</option>
+        <option value="buy_sell">Buy, then sell</option>
+        <option value="sell_buy">Sell, then buy</option>
+      </select></span>
+    </label>
+    <label class="field" for="execution-hold">
+      <span class="field-label">Hold</span>
+      <span class="select-shell"><select id="execution-hold" class="select select-polished">
+        {% for hours, text in execution_config.holds %}
+        <option value="{{ hours }}">{{ text }}</option>
+        {% endfor %}
+      </select></span>
+    </label>
+  </div>
+  {% endcall %}
 
-  <section aria-labelledby="execution-best-title" class="mb-5">
-    <div class="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-      <h2 id="execution-best-title" class="text-data font-semibold text-body">Best venue by trade size</h2>
-      <p id="execution-best-help" class="text-label text-dim">Lowest buy price including taker fees · captured quotes, not guaranteed fills</p>
-    </div>
-    <div id="execution-best" class="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
+  {{ ui.page_status() }}
+  <div id="execution-warning" class="notice mb-6" data-tone="warning" role="status" hidden></div>
+
+  <section aria-labelledby="execution-best-title" class="mb-6">
+    <h2 id="execution-best-title" class="section-label">Best venue by trade size <span id="execution-best-help" class="section-count">Lowest buy price after taker fees</span></h2>
+    <div id="execution-best" class="kpi-grid">
       {% for notional in execution_config.notionals %}
-      <article class="summary-card execution-best-card" data-best-notional="{{ notional }}">
-        <h3 class="font-mono text-label tracking-label uppercase text-faint">{% if notional == '10000' %}$10k{% elif notional == '100000' %}$100k{% elif notional == '1000000' %}$1m{% else %}$10m{% endif %} trade</h3>
-        <p data-best-venue class="execution-best-venue">Awaiting prices</p>
+      <article class="kpi execution-best-card" data-best-notional="{{ notional }}" data-state="loading">
+        <div class="execution-best-head">
+          <h3 class="kpi-label">{{ notional_label(notional) }} trade</h3>
+          <span data-best-badge class="badge" data-tone="warning" hidden></span>
+        </div>
         <details class="execution-best-detail" data-best-detail>
-          <summary data-best-price class="execution-best-price" aria-disabled="true" tabindex="-1">—</summary>
-          <div data-best-breakdown></div>
+          <summary data-best-price class="kpi-value" aria-disabled="true" tabindex="-1"><span class="skeleton" style="width: 9ch" aria-hidden="true"></span></summary>
+          <div data-best-breakdown class="popover execution-best-breakdown"></div>
         </details>
-        <p data-best-cost class="execution-all-in-cost" hidden></p>
-        <p data-best-note class="text-label text-dim">No quote captured yet</p>
+        <p class="kpi-meta execution-best-venue"><span data-best-dot class="status-dot" aria-hidden="true" hidden></span><span data-best-venue><span class="skeleton" style="width: 12ch" aria-hidden="true"></span></span></p>
+        <p data-best-cost class="kpi-meta" hidden></p>
+        <p data-best-note class="kpi-meta" hidden></p>
       </article>
       {% endfor %}
     </div>
   </section>
 
-  <details id="execution-fee-settings" class="execution-disclosure table-card mb-4">
-    <summary>Fees &amp; VIP tiers <span id="execution-fee-summary" class="text-label text-dim">· base tiers</span></summary>
-    <div class="execution-disclosure-body">
-      <p class="text-data text-dim">Base taker fees are included by default. Choose your actual venue tier to compare after-fee prices. Eligibility is not verified; choices stay in this page only.</p>
+  <details id="execution-fee-settings" class="disclosure mb-6">
+    <summary>Fees &amp; VIP tiers <span id="execution-fee-summary" class="section-count">Base tiers</span></summary>
+    <div class="disclosure-body">
+      <p>Prices include each venue's base taker fee. Choose your tier to compare after-fee prices; eligibility is not verified and choices are not saved. Schedules are public, static estimates checked on the dates shown, not a live account lookup.</p>
       <div id="execution-fee-controls" class="execution-fee-controls"></div>
-    </div>
-  </details>
-
-  <div class="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-    <h2 class="text-data font-semibold text-body">Compare all venues</h2>
-    <p id="execution-price-heading" class="text-data text-dim">Effective buy price per coin · USD · after taker fees</p>
-  </div>
-  <p id="execution-cost-legend" class="mb-2 text-data text-dim">Cost bps = taker fee + book slippage · one way</p>
-  <p id="execution-swipe-hint" class="mb-2 text-label text-dim sm:hidden">Swipe for larger trade sizes →</p>
-  <p id="execution-snapshot-help" class="sr-only">Columns are trade sizes, not coin prices. Prices are per one coin and include one-way taker fees unless marked before fees. The line beneath each price is estimated total trading cost in basis points: taker fee plus book slippage. Slippage is measured against that venue's best ask for buys or best bid for sells, not a common USD midpoint. For example, 6 bps fee plus 4 bps slippage is 10 bps total. Spread, venue price differences, funding, settlement, gas, latency and account-specific extras are excluded. Unknown fees mean total cost is unknown, not zero. Expand a price for exact total, fee and slippage. Scroll horizontally on narrow screens.</p>
-  <div id="execution-table-region" class="table-card execution-table-scroll" role="region" aria-label="Execution estimates, horizontally scrollable" tabindex="0" aria-describedby="execution-snapshot-help execution-cost-legend execution-swipe-hint">
-    <table id="execution-table">
-      <caption class="sr-only">Per-venue effective USD price per base coin at common reference sizes, with total trading cost beneath each price: one-way taker fee bps plus book slippage bps against the venue's own best ask or bid. Spread, cross-venue price differences and holding costs are not included. Expand a price for exact total cost, fee rate, slippage and gross/native prices.</caption>
-      <thead><tr>
-        <th scope="col">Venue</th>
-        {% for notional in execution_config.notionals %}
-        <th scope="col" data-execution-notional="{{ notional }}">
-          <span class="execution-notional">{% if notional == '10000' %}$10k{% elif notional == '100000' %}$100k{% elif notional == '1000000' %}$1m{% elif notional == '10000000' %}$10m{% else %}${{ notional }}{% endif %}</span>
-          <span class="execution-quantity">Base qty pending</span>
-        </th>
-        {% endfor %}
-      </tr></thead>
-      <tbody id="execution-rows"><tr><td colspan="5" class="execution-empty">Fetching current prices…</td></tr></tbody>
-    </table>
-  </div>
-  <p class="chart-caption">Hover or focus a price for order-book, slippage and per-coin fees; select it for the exact breakdown, including on touch screens. Quotes expire after 10 seconds; refresh before trading. Automatic minute refresh pauses while this page is hidden.</p>
-
-  <details class="execution-disclosure table-card">
-    <summary>How estimates work &amp; quote details</summary>
-    <div class="execution-disclosure-body execution-muted">
-      <div class="execution-reference">
-        <p id="execution-reference">Reference price: awaiting snapshots.</p>
-        <p id="execution-fx">USD reference FX: awaiting snapshots; no stablecoin peg assumed.</p>
+      <div id="execution-fee-disclosure" class="execution-fee-sources">
+        <h3 class="field-label">Official schedules</h3>
+        <div id="execution-fee-sources"></div>
       </div>
-      <p>A fresh USD midpoint median provides one reference price and the same base quantity at every venue for each column. Visible asks are walked for buys and bids for sells. Effective USD price adds buy taker fees or subtracts sell taker fees. Unknown fees are shown explicitly before fees and never ranked; unknown FX never becomes a dollar price.</p>
-      <p>Total trading cost beneath each price is the additive sum of the selected one-way taker fee in bps and visible-book slippage in bps. Buy slippage is (average native fill price / best ask − 1) × 10,000; sell slippage is (1 − average native fill price / best bid) × 10,000. A 6 bps fee plus 4 bps slippage displays 10 bps total. This does not compare venue prices with the common USD midpoint or include spread; fee-adjusted USD price rankings remain separate. Zero is valid. Tiny nonzero costs rounded to zero are marked approximately zero, with exact bps in the tooltip and expanded breakdown. Unknown fees mean unknown total cost; incomplete or capped sizes have no full-order cost. FX is not required for fee-plus-slippage bps, but is still required for USD prices and ranking.</p>
-      <p>When a captured slice cannot cover the full size, only the percentage of size captured is shown; no full-order price is extrapolated. Hyperliquid's <a class="execution-source-link" href="https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint#l2-book-snapshot" target="_blank" rel="noopener noreferrer">public full-precision book</a> returns at most 20 price levels per side, not the entire book. Price-grouped snapshots can expose more depth but introduce price-rounding uncertainty. Known public maximum market-order quantity or notional limits are separate restrictions. A fresh capture is not a promise of execution or complete exchange liquidity.</p>
-      <p>“Snapshot too shallow” means our captured slice does not cover that size—not that the venue's full book is illiquid. Unknown fees mean unknown total cost. Bps do not need FX, but FX-unknown native prices remain unranked. Quotes expire after 10 seconds, before the next automatic minute refresh; refresh now before trading. Automatic refresh pauses while this page is hidden.</p>
-      <p>Total here means estimated one-way taker fee plus book slippage, not all trading or holding costs: spread, cross-venue price differences, funding, settlement, gas, latency and account-specific extras are excluded. USD reference FX is not an executed currency conversion, and quote currency is not necessarily collateral or settlement currency. Quanto settlement economics, lot rounding, funding, rebates, staking/referral/promotional discounts, builder/integrator charges, account-specific fee overrides, margin, order acceptance and latency are excluded. No secrets, authentication, account reads or persisted order books are used.</p>
     </div>
   </details>
-  <details id="execution-fee-disclosure" class="execution-disclosure table-card">
-    <summary>Static fee schedules · official sources &amp; caveats</summary>
-    <div class="execution-disclosure-body">
-      <p class="execution-muted">Public schedules are static estimates checked on the dates below, not a live account fee lookup. Base/default native tiers are selected initially. Verify your actual venue rate and tier eligibility before trading.</p>
-      <div id="execution-fee-sources"></div>
+
+  <section aria-labelledby="execution-compare-title" class="mb-6">
+    <h2 id="execution-compare-title" class="section-label">Compare all venues <span id="execution-price-heading" class="section-count">Buy price per BTC in USD after taker fees</span></h2>
+    <p class="meta-line mb-2">
+      <span>Best first at the size marked ↓; select a size to reorder</span>
+      <span id="execution-cost-legend">Beneath: one-way cost in bps (taker fee + book slippage)</span>
+      <span id="execution-swipe-hint" class="sm:hidden">Swipe for larger sizes</span>
+    </p>
+    <p id="execution-snapshot-help" class="sr-only">Columns are trade sizes, not asset prices. For a buy or sell each cell shows the price per unit of the asset after taker fees, and funding while held; for a round trip it shows the whole trade's cost in USD. The cost in basis points sits beneath. Expand a value for the exact breakdown. Scroll horizontally on narrow screens.</p>
+    <div id="execution-table-region" class="table-card overflow-x-auto scroll-thin" role="region" aria-label="Execution estimates, horizontally scrollable" tabindex="0" aria-describedby="execution-snapshot-help execution-cost-legend execution-swipe-hint">
+      <table id="execution-table" class="data-table execution-table font-mono" aria-busy="true">
+        <caption class="sr-only">Per-venue estimates at common trade sizes: the price per unit of the asset for a buy or sell, or the total cost of a round trip, with the cost in basis points beneath.</caption>
+        <thead><tr>
+          <th scope="col" class="sticky-col">Venue</th>
+          {% for notional in execution_config.notionals %}
+          <th scope="col" class="num" data-execution-notional="{{ notional }}">
+            <button type="button" class="execution-sort" data-execution-sort="{{ loop.index0 }}"><span class="execution-notional">{{ notional_label(notional) }}</span></button>
+            <span class="execution-quantity"><span class="skeleton" style="width: 8ch" aria-hidden="true"></span></span>
+          </th>
+          {% endfor %}
+        </tr></thead>
+        <tbody id="execution-rows">
+          {% for _ in execution_config.fee_schedules %}
+          <tr>
+            <th scope="row" class="sticky-col"><span class="skeleton" style="width: 12ch" aria-hidden="true"></span></th>
+            {% for notional in execution_config.notionals %}<td class="num"><span class="skeleton" style="width: 10ch" aria-hidden="true"></span></td>{% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  {% set history = execution_config.history %}
+  <section id="execution-history" aria-labelledby="execution-history-title" class="mb-6">
+    <h2 id="execution-history-title" class="section-label">Cheapest venue history</h2>
+    <div class="execution-history-head">
+      <p id="execution-history-meta" class="meta-line"></p>
+      <div class="segmented" role="group" aria-label="History window">
+        {% for days in history.windows_days %}
+        <button type="button" data-history-days="{{ days }}" aria-pressed="{{ 'true' if loop.first else 'false' }}"><span class="unit">{{ days }}d</span></button>
+        {% endfor %}
+      </div>
+    </div>
+    <div id="execution-history-grid" class="execution-history-grid" aria-live="polite"></div>
+    <p id="execution-history-empty" class="empty-cell" hidden></p>
+  </section>
+
+  <details class="disclosure">
+    <summary>How this works</summary>
+    <div class="disclosure-body">
+      <div class="execution-reference">
+        <p id="execution-reference">Reference price: awaiting capture.</p>
+        <p id="execution-fx">USD reference FX: awaiting capture.</p>
+      </div>
+      <p>Each column uses one common base quantity, sized from a fresh median of venue USD midpoints. Buys walk the visible asks and sells walk the bids; the effective USD price adds the selected taker fee to a buy or deducts it from a sell. Best compares these fee-adjusted USD prices, and rows run best first at the size marked ↓ (cheapest to buy, highest to sell, cheapest round trip); venues that can't be ranked at that size follow in name order. Select another size's header to reorder; the choice is remembered.</p>
+      <p>The line beneath each price is the one-way taker fee plus book slippage, in bps. Buy slippage is (average fill / best ask − 1) × 10,000; sell slippage is (1 − average fill / best bid) × 10,000, so a 6 bps fee plus 4 bps slippage shows 10.00 bps total. Slippage is measured against each venue's own best price, not the common USD midpoint, so spread and cross-venue price differences are not included. Zero is valid; tiny costs that round to zero show as &lt;0.01 bps. Hover or focus a value for book, fee and funding detail; select it, or a best price above, for the exact breakdown.</p>
+      <p>A round trip buys and sells the same quantity against the same capture. Its cost is the fee-adjusted buy minus the fee-adjusted sell for the whole quantity, so the spread, slippage on both sides and both taker fees count, while a venue's price level cancels out. It assumes the book you close into looks like today's. The lowest total wins.</p>
+      <p>A hold adds funding on the opening leg: a buy holds a long and a sell a short, and positive funding means longs pay shorts. Holds of up to a day use each venue's current rate, pro rata. Longer holds repeat the previous 24 hours of settled funding instead, so one live rate is not stretched over a week or a month. Neither predicts future rates. A venue without a current rate from the last 15 minutes, or with settled funding covering under 12 of the last 24 hours, is not ranked. BULK's collector records its predicted hourly rate every 15 minutes, so its previous day is the average of those readings.</p>
+      <p>Unknown fees mean unknown total cost, never zero: those prices are shown before fees and are not ranked. Without a USD conversion, prices stay in native units and are not ranked. No stablecoin peg is assumed, and the USD reference FX is not an executed conversion.</p>
+      <p>“Snapshot too shallow” means the captured slice of the book cannot fill that size, not that the venue is illiquid: only the share captured is shown and no full-size price is extrapolated. Hyperliquid's <a class="execution-source-link" href="https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint#l2-book-snapshot" target="_blank" rel="noopener noreferrer">public full-precision book</a> returns at most 20 price levels per side; price-grouped snapshots reach deeper but add rounding uncertainty. “Above venue limit” marks sizes over a published maximum market order.</p>
+      <p>Quotes expire {{ max_age }} seconds after capture, well before the next automatic refresh a minute later, so refresh before trading. Expired quotes stay on screen, marked, until a new capture replaces them. Automatic refresh pauses while this page is hidden. A capture is not a promise of execution.</p>
+      <p>Cheapest venue history comes from a separate capture every five minutes for {{ history.assets | join(', ') }}, ranked by the same rules as this table. <em>Cheapest</em> is the share of comparisons in which a venue had the best fee-adjusted price, or for round trips the lowest round-trip cost, with ties split; a comparison needs at least two venues with complete, fresh quotes and known fees. <em>Gap</em> is the median extra cost, in bps, when the venue was not cheapest. <em>Quoted</em> is the share of captures with a complete, fresh quote at that size, on both sides for round trips. Funding is not included in the history. Base taker fees apply unless you choose tiers under Fees &amp; VIP tiers. {{ notional_label('10000000') }} is omitted: Hyperliquid's 20-level public book is too shallow to compare at that size.</p>
+      <p>One-way prices exclude the spread; round trips include it. Funding counts only when you choose a hold, from the rates Overseer stores. Never included: settlement, gas, latency, lot rounding, quanto settlement economics, rebates, staking, referral or promotional discounts, builder or integrator charges, account-specific fee overrides, margin and order acceptance. Quote currency is not necessarily the collateral or settlement currency. No account access or credentials are used, and the live comparison never uses stored order books.</p>
     </div>
   </details>
-  <noscript><p class="execution-notice">JavaScript is required to request fresh public snapshots. No estimates have been fetched.</p></noscript>
-  <div id="execution-price-tooltip" class="execution-price-tooltip" role="tooltip" aria-labelledby="execution-price-tooltip-heading" hidden></div>
+  <noscript><div class="notice mt-4" data-tone="warning">JavaScript is required to request current prices. No estimates have been fetched.</div></noscript>
+  <div id="execution-price-tooltip" class="tooltip execution-price-tooltip" role="tooltip" aria-labelledby="execution-price-tooltip-heading" hidden></div>
 </section>
 <script id="execution-config" type="application/json">{{ execution_config | tojson }}</script>
 {% endblock %}
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/venues.js') }}"></script>
-<script src="{{ url_for('static', filename='js/execution.js', v='execution-hover-compact') }}" defer></script>
+<script src="{{ url_for('static', filename='js/venues.js', v='ui-consistency') }}"></script>
+<script src="{{ url_for('static', filename='js/execution.js', v='risex-sort') }}" defer></script>
 {% endblock %}

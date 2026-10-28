@@ -7,7 +7,7 @@ from decimal import Decimal
 import pytest
 
 from core.enums import Side
-from core.execution import BookLevel, DepthBook, execution_estimates
+from core.execution import BookLevel, DepthBook, execution_estimates, round_trip_estimates
 
 D = Decimal
 NOW = datetime(2026, 10, 12, 12, tzinfo=timezone.utc)
@@ -223,3 +223,63 @@ def test_six_bps_fee_plus_four_bps_slippage_is_ten_bps_total(side):
     assert D(cell["fee_per_coin"]) == expected_fee
     assert D(cell["fee_per_coin_usd"]) == expected_fee
     assert D(cell["fee_usd"]) == expected_fee * 100
+
+
+def test_round_trip_cost_is_spread_slippage_and_both_fees_while_price_level_cancels():
+    # b is cheaper to buy, but a's tighter book is cheaper to get in and out of.
+    books = [book("a", bids=(("109", "2000000"),), asks=(("110", "2000000"),)),
+             book("b", bids=(("98", "2000000"),), asks=(("100", "2000000"),))]
+    fees = {"a": D("10"), "b": D("10")}
+    assert first(execution_estimates(books, Side.BUY, fees, {}, NOW), "b")["best"]
+    result = round_trip_estimates(books, Side.BUY, fees, {}, NOW)
+    a, b = first(result, "a"), first(result, "b")
+    quantity = D(a["quantity"])
+    # The estimator works at 40 digits; this side multiplies at Python's 28.
+    assert abs(D(a["spread_slippage_usd"]) - quantity) < D("1e-20")
+    assert abs(D(a["fees_usd"]) - quantity * D("0.219")) < D("1e-20")
+    assert abs(D(a["total_cost_usd"]) - quantity * (D("110.11") - D("108.891"))) < D("1e-20")
+    assert abs(D(a["total_cost_bps"]) - D("1.219") / D(result["reference_price_usd"]) * 10000) < D("1e-20")
+    assert a["best"] and not b["best"]
+
+
+def test_round_trip_is_as_shallow_as_its_shorter_side():
+    shallow_bids = book("a", bids=(("99", "10"),))
+    result = round_trip_estimates([shallow_bids, book("b")], Side.BUY, {"a": D("5"), "b": D("5")}, {}, NOW)
+    cell = first(result)
+    assert cell["status"] == "insufficient_depth" and cell["short_side"] == "sell"
+    assert D(cell["fill_percent"]) == D(cell["sell"]["fill_percent"]) == 10
+    assert cell["total_cost_usd"] is None and not cell["best"]
+    assert first(result, "b")["best"]
+
+
+def test_held_round_trip_adds_funding_on_the_opening_leg_and_needs_it_to_rank():
+    # a's tighter book wins an immediate round trip; holding it costs 20 bps.
+    books = [book("a"), book("b", bids=(("98.9", "2000000"),))]
+    fees = {"a": D("5"), "b": D("5")}
+    assert first(round_trip_estimates(books, Side.BUY, fees, {}, NOW))["best"]
+    held = round_trip_estimates(books, Side.BUY, fees, {}, NOW, {"a": D("20"), "b": D("0")})
+    a = first(held)
+    opening_value = D(a["quantity"]) * D(a["buy"]["average_price_usd"])
+    assert abs(D(a["funding_usd"]) - opening_value * D("0.002")) < D("1e-20")
+    assert abs(D(a["total_cost_usd"]) - D(a["trading_cost_usd"]) - D(a["funding_usd"])) < D("1e-20")
+    assert first(held, "b")["best"] and not a["best"]
+    unknown = first(round_trip_estimates(books, Side.BUY, fees, {}, NOW, {"a": None, "b": D("0")}))
+    assert unknown["status"] == "funding_unknown" and not unknown["best"]
+    assert unknown["total_cost_usd"] is None and unknown["trading_cost_usd"] is not None
+
+
+@pytest.mark.parametrize("side", [Side.BUY, Side.SELL])
+def test_one_way_holds_rank_on_price_after_funding(side):
+    # a has the better price before funding but pays 30 bps to hold.
+    books = [book("a"), book("b", bids=(("98.99", "2000000"),), asks=(("101.01", "2000000"),))]
+    fees = {"a": D("5"), "b": D("5")}
+    assert first(execution_estimates(books, side, fees, {}, NOW))["best"]
+    result = execution_estimates(books, side, fees, {}, NOW, {"a": D("30"), "b": D("0")})
+    a = first(result)
+    factor = 1 + D("0.003") if side == Side.BUY else 1 - D("0.003")
+    assert D(a["held_price_usd"]) == D(a["effective_price_usd"]) * factor
+    assert D(a["total_cost_bps"]) == D(a["all_in_cost_bps"]) + 30
+    assert first(result, "b")["best"] and not a["best"]
+    unknown = first(execution_estimates(books, side, fees, {}, NOW, {"a": None, "b": D("0")}))
+    assert unknown["status"] == "funding_unknown" and not unknown["best"]
+    assert unknown["effective_price_usd"] is not None and unknown["held_price_usd"] is None

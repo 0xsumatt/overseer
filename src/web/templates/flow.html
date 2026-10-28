@@ -1,391 +1,132 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui %}
 {% block title %}flow · overseer{% endblock %}
 
 {% block content %}
-{# The workspace grows with its controls and detail table. Keep each chart's
-   deliberate height and bound only the table's own scroller. #}
-<div class="flex h-auto min-h-0 flex-col gap-3 overflow-visible md:min-h-[calc(100vh-9.5rem)]">
+{% set default_asset = 'BTC' if 'BTC' in assets else (assets | first) %}
+{{ ui.page_header('Trade flow', 'Compare taker pressure and large trades by venue.') }}
 
-  <div class="flex shrink-0 flex-wrap items-end gap-3 sm:gap-4">
-    <div>
-      <h1 class="text-title font-semibold text-body">Trade flow</h1>
-      <p class="mt-1 text-data text-dim">Compare taker pressure and large trades by venue.</p>
-    </div>
-    <div class="grid w-full grid-cols-2 items-end gap-2 sm:ml-auto sm:flex sm:w-auto">
-      <label class="flex flex-col gap-1">
-        <span class="font-mono text-label tracking-label uppercase text-faint">asset</span>
-        <span class="select-shell">
-          <select id="asset" class="select select-polished w-full">
-            {% for a in assets %}<option value="{{ a }}">{{ a }}</option>{% endfor %}
-          </select>
-        </span>
-      </label>
-      <label class="flex flex-col gap-1">
-        <span class="font-mono text-label tracking-label uppercase text-faint">window</span>
-        <span class="select-shell">
-          <select id="hours" class="select select-polished w-full">
-            <option value="3">3h</option><option value="6" selected>6h</option>
-            <option value="12">12h</option><option value="24">24h</option>
-          </select>
-        </span>
-      </label>
-    </div>
+{% call ui.filters('flow-filters') %}<div class="toolbar">
+  <label class="field">
+    <span class="field-label">Asset</span>
+    <span class="select-shell">
+      <select id="asset" class="select select-polished">
+        {% for a in assets %}<option value="{{ a }}"{% if a == default_asset %} selected{% endif %}>{{ a }}</option>{% endfor %}
+      </select>
+    </span>
+  </label>
+  <label class="field">
+    <span class="field-label">Window</span>
+    <span class="select-shell">
+      <select id="hours" class="select select-polished">
+        <option value="3">3h</option><option value="6" selected>6h</option>
+        <option value="12">12h</option><option value="24">24h</option>
+      </select>
+    </span>
+  </label>
+  <div class="field flow-venues">
+    <span id="venue-filter-label" class="field-label">Venues</span>
+    <div id="venue-filters" class="flex flex-wrap items-center gap-1.5"
+         role="group" aria-labelledby="venue-filter-label"></div>
   </div>
+  <label class="field">
+    <span class="field-label">Min |imbalance|</span>
+    <span class="select-shell">
+      <select id="f-imb" class="select select-sm select-polished">
+        <option value="0">Any</option><option value="10">10%</option>
+        <option value="25">25%</option><option value="50">50%</option>
+      </select>
+    </span>
+  </label>
+  <label class="field">
+    <span class="field-label">Min large trades / min</span>
+    <span class="select-shell">
+      <select id="f-lrg" class="select select-sm select-polished">
+        <option value="0">Any</option><option value="5">5</option>
+        <option value="20">20</option><option value="50">50</option>
+      </select>
+    </span>
+  </label>
+  <button id="table-toggle" type="button" aria-expanded="false" aria-controls="table-wrap"
+          class="btn btn-secondary flow-detail-toggle">
+    Detail <span id="match-count" class="tabular-nums text-faint"></span>
+  </button>
+</div>{% endcall %}
 
-  <div id="tiles" class="grid shrink-0 grid-cols-2 gap-2 sm:grid-cols-4"></div>
+{{ ui.page_status() }}
 
-  <div class="shrink-0 rounded-md border border-line bg-panel/40 px-3 py-2">
-    <div class="flex flex-wrap items-center gap-2">
-      <span id="venue-filter-label" class="font-mono text-label tracking-label uppercase text-faint">venues</span>
-      <div id="venue-filters" class="scroll-thin flex w-full flex-nowrap items-center gap-1.5 overflow-x-auto pb-1 sm:w-auto sm:flex-wrap sm:overflow-visible sm:pb-0"
-           role="group" aria-labelledby="venue-filter-label"></div>
+<div class="space-y-6">
+  <div id="tiles" class="kpi-grid"></div>
+
+  <section class="chart-card" aria-labelledby="imb-title">
+    <div class="panel-header">
+      <h2 id="imb-title" class="panel-title">Taker imbalance<span class="panel-subtitle">(buys − sells) ÷ volume</span></h2>
     </div>
-    <fieldset class="mt-2 flex min-w-0 flex-wrap items-center gap-2 border-t border-line pt-2 sm:gap-x-4">
-      <legend class="px-1 font-mono text-label tracking-label uppercase text-dim">Detail filters</legend>
-      <label for="f-imb" class="text-data text-dim">|Imbalance| ≥</label>
-      <span class="select-shell">
-        <select id="f-imb" class="select select-sm select-polished w-full">
-          <option value="0">any</option><option value="10">10%</option>
-          <option value="25">25%</option><option value="50">50%</option>
-        </select>
-      </span>
-      <label for="f-lrg" class="text-data text-dim">Large trades per minute ≥</label>
-      <span class="select-shell">
-        <select id="f-lrg" class="select select-sm select-polished w-full">
-          <option value="0">any</option><option value="5">5</option>
-          <option value="20">20</option><option value="50">50</option>
-        </select>
-      </span>
-      <button id="table-toggle" aria-expanded="false" aria-controls="table-wrap"
-              class="toolbar-button w-full border border-line bg-panel text-dim hover:text-body sm:ml-auto sm:w-auto">
-        Detail <span id="match-count" class="text-dim"></span>
-      </button>
-    </fieldset>
-    <p class="mt-2 text-data text-dim">Venues affect charts and totals; thresholds filter only the detail table.</p>
-  </div>
-
-  <div class="chart-card relative h-[22rem] shrink-0 md:min-h-[140px] md:flex-1">
-    <div class="absolute left-3 top-2 z-10 font-mono text-label tracking-label uppercase text-dim">
-      taker imbalance <span class="text-faint normal-case tracking-normal">(buys−sells)÷volume</span>
+    <div id="legend" class="legend px-3 pt-2 sm:px-4"></div>
+    <div class="flow-chart-box h-[18rem] md:h-[22rem]">
+      <div id="chart-imb" class="absolute inset-0"></div>
+      <div id="empty-imb" class="empty-overlay hidden">
+        <p class="empty-state-title" data-empty-title></p>
+        <p class="empty-state-hint" data-empty-hint></p>
+      </div>
     </div>
-    <div id="chart-imb" class="h-full w-full"></div>
-    <div id="tip-imb" class="pointer-events-none absolute z-20 hidden rounded border border-line
-                             bg-ink/95 px-2.5 py-1.5 font-mono text-label shadow-lg"></div>
-  </div>
+  </section>
 
-  <div class="chart-card relative h-[13rem] shrink-0 md:h-[130px]">
-    <div class="absolute left-3 top-2 z-10 font-mono text-label tracking-label uppercase text-dim">
-      large trades <span class="text-faint normal-case tracking-normal">≥$10k notional</span>
+  <section class="chart-card" aria-labelledby="lrg-title">
+    <div class="panel-header">
+      <h2 id="lrg-title" class="panel-title">Large trades<span class="panel-subtitle">$10K+ notional, per minute</span></h2>
     </div>
-    <div id="chart-lrg" class="h-full w-full"></div>
-    <div id="tip-lrg" class="pointer-events-none absolute z-20 hidden rounded border border-line
-                             bg-ink/95 px-2.5 py-1.5 font-mono text-label shadow-lg"></div>
-  </div>
+    <div id="legend-lrg" class="legend px-3 pt-2 sm:px-4"></div>
+    <div class="flow-chart-box h-[12rem] md:h-[11rem]">
+      <div id="chart-lrg" class="absolute inset-0"></div>
+      <div id="empty-lrg" class="empty-overlay hidden">
+        <p class="empty-state-title" data-empty-title></p>
+        <p class="empty-state-hint" data-empty-hint></p>
+      </div>
+    </div>
+  </section>
 
-  <div id="legend" class="scroll-thin flex shrink-0 flex-nowrap items-center gap-x-5 gap-y-1 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible sm:pb-0"></div>
+  <section id="table-wrap" class="table-card hidden" aria-labelledby="detail-title">
+    <div class="panel-header">
+      <h2 id="detail-title" class="panel-title">Venue minutes<span id="detail-count" class="panel-subtitle"></span></h2>
+    </div>
+    <p class="meta-line mx-3 mt-2 sm:mx-4">
+      <span>One row per venue per minute</span><span>Charts keep the full window</span>
+    </p>
+    <div class="scroll-thin max-h-[28rem] overflow-auto">
+      <table class="data-table min-w-[46rem]">
+        <thead>
+          <tr>
+            <th scope="col">Time</th>
+            <th scope="col">Venue</th>
+            <th scope="col" class="num">Trades</th>
+            <th scope="col" class="num">Volume</th>
+            <th scope="col" class="num">Imbalance</th>
+            <th scope="col" class="num">Large</th>
+            <th scope="col" class="num">Large imb.</th>
+            <th scope="col" class="num">Max trade</th>
+          </tr>
+        </thead>
+        <tbody id="table-body" class="font-mono text-dim"></tbody>
+      </table>
+    </div>
+  </section>
 
-  {# Detail stays reachable in the scrolling document, even on short tablets. #}
-  <div id="table-wrap" class="table-card scroll-thin hidden max-h-[28rem] shrink-0 overflow-auto">
-    <table class="w-full min-w-[46rem] border-collapse font-mono text-data">
-      <caption class="chart-caption px-3 pb-2 text-left font-sans">
-        <span id="detail-count">Latest 0 of 0 matching venue-minute rows.</span>
-        Each row is one venue in one minute; charts retain the full selected window.
-      </caption>
-      <thead class="sticky top-0 z-10 bg-panel">
-        <tr class="border-b border-line text-left text-label tracking-label uppercase text-faint">
-          <th scope="col" class="px-3 py-1.5">time</th>
-          <th scope="col" class="px-3 py-1.5">venue</th>
-          <th scope="col" class="px-3 py-1.5 text-right">trades</th>
-          <th scope="col" class="px-3 py-1.5 text-right">volume</th>
-          <th scope="col" class="px-3 py-1.5 text-right">imbalance</th>
-          <th scope="col" class="px-3 py-1.5 text-right">large</th>
-          <th scope="col" class="px-3 py-1.5 text-right">large imb.</th>
-          <th scope="col" class="px-3 py-1.5 text-right">max trade</th>
-        </tr>
-      </thead>
-      <tbody id="table-body" class="text-dim"></tbody>
-    </table>
-  </div>
-
-  <p id="empty" class="summary-card hidden shrink-0 text-center text-data text-dim">
-    No flow recorded for this asset yet — the websocket streams write
-    <code class="text-faint">trades_1m</code> once the scheduler is running.
-  </p>
+  <details class="disclosure">
+    <summary>How this works</summary>
+    <div class="disclosure-body">
+      <p>Taker imbalance is (taker buys − taker sells) ÷ volume for each venue minute: +100% means every
+        aggressive trade bought, −100% means every one sold. Settlement times are marked on the line.</p>
+      <p>Large trades counts fills of $10K+ notional per minute; large imb. is the same imbalance measured on
+        those fills only.</p>
+      <p>Venues affect charts and totals; thresholds filter only the detail table.</p>
+    </div>
+  </details>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/lightweight-charts.standalone.js') }}"></script>
-<script src="{{ url_for('static', filename='js/venues.js') }}"></script>
-<script>
-// VENUE_COLORS / VENUE_ORDER / colorFor come from venues.js.
-const CHART_OPTS = {
-  layout: { background: { color: 'transparent' }, textColor: CHART_THEME.text,
-            fontFamily: CHART_THEME.font, fontSize: 12 },
-  grid: { vertLines: { color: CHART_THEME.grid }, horzLines: { color: CHART_THEME.grid } },
-  crosshair: { mode: 0,
-    vertLine: { color: CHART_THEME.crosshair, width: 1, style: 3, labelVisible: true },
-    horzLine: { color: CHART_THEME.crosshair, width: 1, style: 3, labelVisible: true } },
-  timeScale: { timeVisible: true, secondsVisible: false, borderColor: CHART_THEME.border },
-  rightPriceScale: { borderColor: CHART_THEME.border, scaleMargins: { top: 0.18, bottom: 0.08 } },
-  handleScale: { axisPressedMouseMove: false },
-};
-
-const imbChart = LightweightCharts.createChart(document.getElementById('chart-imb'), CHART_OPTS);
-const lrgChart = LightweightCharts.createChart(document.getElementById('chart-lrg'), CHART_OPTS);
-const zeroLine = imbChart.addLineSeries({ color: CHART_THEME.zero, lineWidth: 1,
-  priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
-
-const flowFilters = Overseer.filterState('flow');
-let imbSeries = {}, lrgSeries = {};
-let data = { series: {}, settlements: {} };
-let hidden = new Set(flowFilters.getList('venues'));
-const flowState = Overseer.pageState();
-let flowRequest = 0;
-
-const fmtVol = (v) => {
-  if (v == null) return '—';
-  const a = Math.abs(v);
-  if (a >= 1e6) return (v / 1e6).toFixed(2) + 'M';
-  if (a >= 1e3) return (v / 1e3).toFixed(2) + 'k';
-  return v.toFixed(a >= 1 ? 2 : 4);
-};
-const fmtUsd = (v) => v == null ? '—' : '$' + fmtVol(v);
-const fmtPct = (v) => v == null ? '—' : (v >= 0 ? '+' : '') + v.toFixed(1) + '%';
-const hhmm = (t) => new Date(t * 1000).toISOString().slice(11, 16);
-
-const activeVenues = () =>
-  VENUE_ORDER.filter(v => data.series[v] && data.series[v].length && !hidden.has(v));
-
-async function load({ forceRefresh = false } = {}) {
-  const request = ++flowRequest;
-  const asset = document.getElementById('asset').value;
-  const hours = document.getElementById('hours').value;
-  flowState.loading('Loading streamed trade flow…');
-  try {
-    const next = await Overseer.requestJSON(
-      `/api/trade-flow?asset=${encodeURIComponent(asset)}&hours=${hours}`,
-      { forceRefresh },
-    );
-    if (request !== flowRequest) return;
-    data = next;
-    data.series = data.series || {};
-    renderFilters();
-    render();
-    const hasRows = Object.values(data.series).some(rows => rows.length);
-    if (hasRows) flowState.ready();
-    else flowState.empty('No trade-flow buckets exist for this asset and window.', load);
-  } catch (error) {
-    if (request === flowRequest) flowState.error('Trade flow', load);
-  }
-}
-
-function renderFilters() {
-  // A venue keeps its colour whether or not it is selected, so toggling never
-  // reassigns hues to the survivors.
-  const present = VENUE_ORDER.filter(v => data.series[v] && data.series[v].length);
-  const filterHost = document.getElementById('venue-filters');
-  const focusedVenue = filterHost.contains(document.activeElement)
-    ? document.activeElement.dataset.venue : null;
-  filterHost.innerHTML = present.map(v => {
-    const off = hidden.has(v);
-    return `<button data-venue="${v}" aria-pressed="${!off}"
-      class="venue-chip toolbar-button flex items-center gap-1.5 border
-             ${off ? 'border-line text-dim' : 'border-line bg-panel2 text-body'}">
-      <span class="inline-block h-2 w-2 rounded-full ${off ? 'opacity-30' : ''}"
-            style="background:${colorFor(v)}"></span>${v}</button>`;
-  }).join('') || '<span class="font-mono text-label text-faint">none streaming</span>';
-  document.querySelectorAll('.venue-chip').forEach(b => b.onclick = () => {
-    const v = b.dataset.venue;
-    hidden.has(v) ? hidden.delete(v) : hidden.add(v);
-    flowFilters.setList('venues', hidden);
-    renderFilters(); render();
-  });
-  if (focusedVenue) {
-    Array.from(filterHost.querySelectorAll('.venue-chip'))
-      .find(button => button.dataset.venue === focusedVenue)?.focus({ preventScroll: true });
-  }
-}
-
-function clearSeries() {
-  Object.values(imbSeries).forEach(s => imbChart.removeSeries(s));
-  Object.values(lrgSeries).forEach(s => lrgChart.removeSeries(s));
-  imbSeries = {}; lrgSeries = {};
-}
-
-function render() {
-  clearSeries();
-  const venues = activeVenues();
-  document.getElementById('empty').classList.toggle('hidden', venues.length > 0);
-
-  for (const venue of venues) {
-    const rows = data.series[venue], color = colorFor(venue);
-    imbSeries[venue] = imbChart.addLineSeries({
-      color, lineWidth: 2, priceLineVisible: false, title: venue,
-      lastValueVisible: true, crosshairMarkerRadius: 4,
-      priceFormat: { type: 'custom', formatter: v => v.toFixed(0) + '%' },
-    });
-    imbSeries[venue].setData(rows.filter(d => d.imbalance_pct != null)
-      .map(d => ({ time: d.time, value: d.imbalance_pct })));
-
-    lrgSeries[venue] = lrgChart.addLineSeries({
-      color, lineWidth: 2, priceLineVisible: false, title: venue,
-      lastValueVisible: true, crosshairMarkerRadius: 4,
-      priceFormat: { type: 'custom', formatter: v => v.toFixed(0) },
-    });
-    lrgSeries[venue].setData(rows.map(d => ({ time: d.time, value: d.large_trades })));
-
-    const marks = (data.settlements || {})[venue] || [];
-    if (marks.length) imbSeries[venue].setMarkers(marks.map(t => ({
-      time: t, position: 'inBar', color, shape: 'arrowDown', size: 0, text: '⋮' })));
-  }
-  // keep the zero baseline spanning whatever is visible
-  const anyRows = venues.length ? data.series[venues[0]] : [];
-  zeroLine.setData(anyRows.map(d => ({ time: d.time, value: 0 })));
-
-  renderTiles(venues);
-  renderLegend(venues);
-  renderTable(venues);
-  imbChart.timeScale().fitContent();
-  lrgChart.timeScale().fitContent();
-}
-
-function renderTiles(venues) {
-  let vol = 0, large = 0, maxTrade = 0, buy = 0, sell = 0;
-  for (const v of venues) for (const d of data.series[v]) {
-    vol += d.volume || 0; large += d.large_trades || 0;
-    buy += d.buy_volume || 0; sell += d.sell_volume || 0;
-    maxTrade = Math.max(maxTrade, d.max_trade_notional || 0);
-  }
-  const imb = (buy + sell) ? (buy - sell) / (buy + sell) * 100 : null;
-  const tone = imb == null ? 'text-body' : imb >= 0 ? 'text-gain' : 'text-loss';
-  const tiles = [['window volume', fmtVol(vol), 'text-body'],
-                 ['net imbalance', fmtPct(imb), tone],
-                 ['large trades', large.toLocaleString(), 'text-body'],
-                 ['largest trade', fmtUsd(maxTrade), 'text-phosphor']];
-  document.getElementById('tiles').innerHTML = tiles.map(([l, v, c]) => `
-    <div class="summary-card">
-      <div class="font-mono text-label tracking-label uppercase text-faint">${l}</div>
-      <div class="font-mono text-hero tabular-nums ${c}">${v}</div>
-    </div>`).join('');
-}
-
-function renderLegend(venues) {
-  // Present for >= 2 series and direct-labelled with current values, so the
-  // reading never depends on telling two hues apart.
-  document.getElementById('legend').innerHTML = venues.map(v => {
-    const rows = data.series[v], d = rows[rows.length - 1] || {};
-    return `<span class="flex items-center gap-2">
-      <span class="inline-block h-0.5 w-4 rounded" style="background:${colorFor(v)}"></span>
-      <span class="font-mono text-data text-body">${v}</span>
-      <span class="font-mono text-label tabular-nums text-dim">
-        ${fmtPct(d.imbalance_pct)} · ${d.large_trades ?? 0} large</span></span>`;
-  }).join('') || '<span class="font-mono text-data text-faint">all venues hidden</span>';
-}
-
-function matchingRows(venues) {
-  const minImb = +document.getElementById('f-imb').value;
-  const minLrg = +document.getElementById('f-lrg').value;
-  const out = [];
-  for (const v of venues) for (const d of data.series[v]) {
-    if (Math.abs(d.imbalance_pct ?? 0) < minImb) continue;
-    if ((d.large_trades || 0) < minLrg) continue;
-    out.push([v, d]);
-  }
-  out.sort((a, b) => b[1].time - a[1].time);
-  return out;
-}
-
-function renderTable(venues) {
-  const rows = matchingRows(venues);
-  const displayedRows = rows.slice(0, 400);
-  document.getElementById('match-count').textContent = `(${rows.length.toLocaleString()})`;
-  document.getElementById('detail-count').textContent =
-    `Latest ${displayedRows.length.toLocaleString()} of ${rows.length.toLocaleString()} matching venue-minute rows.`;
-  document.getElementById('table-body').innerHTML = displayedRows.map(([v, d]) => `
-    <tr class="border-b border-line/50">
-      <td class="px-3 py-1 text-faint">${hhmm(d.time)}</td>
-      <td class="px-3 py-1"><span class="inline-block h-2 w-2 rounded-full align-middle"
-            style="background:${colorFor(v)}"></span>
-        <span class="ml-2 align-middle text-body">${v}</span></td>
-      <td class="px-3 py-1 text-right tabular-nums">${d.trades}</td>
-      <td class="px-3 py-1 text-right tabular-nums">${fmtVol(d.volume)}</td>
-      <td class="px-3 py-1 text-right tabular-nums ${d.imbalance_pct >= 0 ? 'text-gain' : 'text-loss'}">
-        ${fmtPct(d.imbalance_pct)}</td>
-      <td class="px-3 py-1 text-right tabular-nums">${d.large_trades}</td>
-      <td class="px-3 py-1 text-right tabular-nums">${fmtPct(d.large_imbalance_pct)}</td>
-      <td class="px-3 py-1 text-right tabular-nums">${fmtUsd(d.max_trade_notional)}</td>
-    </tr>`).join('') ||
-    `<tr><td colspan="8" class="px-3 py-6 text-center text-faint">no buckets match these filters</td></tr>`;
-}
-
-function wireTooltip(chart, tipId, seriesMap, format) {
-  const tip = document.getElementById(tipId);
-  chart.subscribeCrosshairMove(param => {
-    if (!param.time || !param.point) { tip.classList.add('hidden'); return; }
-    const lines = [];
-    for (const venue of VENUE_ORDER) {
-      const s = seriesMap[venue]; if (!s) continue;
-      const v = param.seriesData.get(s); if (v == null) continue;
-      lines.push(`<div class="flex items-center gap-2">
-        <span class="inline-block h-0.5 w-3 rounded" style="background:${colorFor(venue)}"></span>
-        <span class="text-dim">${venue}</span>
-        <span class="ml-auto tabular-nums text-body">${format(v.value)}</span></div>`);
-    }
-    if (!lines.length) { tip.classList.add('hidden'); return; }
-    tip.innerHTML = `<div class="mb-1 text-faint">${hhmm(param.time)} UTC</div>
-                     <div class="min-w-[9rem] space-y-0.5">${lines.join('')}</div>`;
-    tip.classList.remove('hidden');
-    const box = tip.getBoundingClientRect();
-    const host = tip.parentElement.clientWidth;
-    tip.style.left = Math.min(param.point.x + 14, host - box.width - 8) + 'px';
-    tip.style.top = Math.max(6, param.point.y - box.height - 10) + 'px';
-  });
-}
-wireTooltip(imbChart, 'tip-imb', imbSeries, v => (v >= 0 ? '+' : '') + v.toFixed(1) + '%');
-wireTooltip(lrgChart, 'tip-lrg', lrgSeries, v => v.toFixed(0));
-
-let syncing = false;
-function sync(from, to) {
-  from.timeScale().subscribeVisibleLogicalRangeChange(r => {
-    if (syncing || !r) return;
-    syncing = true; to.timeScale().setVisibleLogicalRange(r); syncing = false;
-  });
-}
-sync(imbChart, lrgChart); sync(lrgChart, imbChart);
-
-// Observe each deliberate chart box — lightweight-charts needs explicit pixels.
-for (const [chart, id] of [[imbChart, 'chart-imb'], [lrgChart, 'chart-lrg']]) {
-  const el = document.getElementById(id);
-  new ResizeObserver(() => chart.applyOptions({ width: el.clientWidth, height: el.clientHeight }))
-    .observe(el);
-}
-
-for (const id of ['asset', 'hours', 'f-imb', 'f-lrg']) {
-  flowFilters.restoreSelect(document.getElementById(id));
-}
-document.getElementById('asset').onchange = event => {
-  flowFilters.set('asset', event.target.value);
-  load();
-};
-document.getElementById('hours').onchange = event => {
-  flowFilters.set('hours', event.target.value);
-  load();
-};
-document.getElementById('f-imb').onchange = event => {
-  flowFilters.set('f-imb', event.target.value);
-  renderTable(activeVenues());
-};
-document.getElementById('f-lrg').onchange = event => {
-  flowFilters.set('f-lrg', event.target.value);
-  renderTable(activeVenues());
-};
-document.getElementById('table-toggle').onclick = (e) => {
-  const wrap = document.getElementById('table-wrap');
-  wrap.classList.toggle('hidden');
-  e.currentTarget.classList.toggle('text-body', !wrap.classList.contains('hidden'));
-  e.currentTarget.setAttribute('aria-expanded', String(!wrap.classList.contains('hidden')));
-};
-Overseer.poll(load, 60);
-</script>
+<script src="{{ url_for('static', filename='js/venues.js', v='ui-consistency') }}"></script>
+<script src="{{ url_for('static', filename='js/flow.js', v='ui-consistency') }}"></script>
 {% endblock %}

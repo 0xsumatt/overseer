@@ -1,0 +1,5 @@
+/* Tracked wallets page layout. */
+@layer components {
+  /* Definite height for the autoSize chart; the canvas fills it absolutely. */
+  .wallets-chart-box { @apply relative mx-1 mb-2 mt-2; }
+}

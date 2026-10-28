@@ -42,11 +42,10 @@
     }
   }
 
-  const PAGE_STATE_CLASS = {
-    loading: 'mb-4 flex min-h-11 items-center gap-3 rounded border border-line bg-panel/60 px-3 py-2 font-mono text-data text-dim',
-    empty: 'mb-4 flex min-h-11 items-center gap-3 rounded border border-line bg-panel/60 px-3 py-2 font-mono text-data text-dim',
-    error: 'mb-4 flex min-h-11 items-center gap-3 rounded border border-loss/40 bg-loss/10 px-3 py-2 font-mono text-data text-loss',
-  };
+  // One slot per page (rendered by the page_status() macro under the header).
+  // Loading and empty are neutral; only failures are tinted, and only
+  // failures offer a retry: retrying cannot conjure data that does not exist.
+  const PAGE_STATE_TONE = { loading: 'info', empty: 'info', error: 'error' };
 
   function pageState(root = document.getElementById('page-status')) {
     const successes = new Map();
@@ -54,6 +53,9 @@
     const empties = new Map();
     const message = root?.querySelector('[data-status-message]');
     const retry = root?.querySelector('[data-status-retry]');
+    const cursor = document.createElement('span');
+    cursor.className = 'cursor';
+    cursor.setAttribute('aria-hidden', 'true');
 
     function hide() {
       if (!root) return;
@@ -63,11 +65,15 @@
 
     function show(kind, text, retryAction = null) {
       if (!root || !message || !retry) return;
-      root.className = PAGE_STATE_CLASS[kind];
+      root.className = 'notice mb-4';
+      root.dataset.tone = PAGE_STATE_TONE[kind];
+      root.dataset.state = kind;
       root.setAttribute('role', kind === 'error' ? 'alert' : 'status');
       message.textContent = text;
-      retry.classList.toggle('hidden', !retryAction);
-      retry.onclick = retryAction ? () => {
+      if (kind === 'loading') message.append(cursor);
+      const canRetry = kind === 'error' && Boolean(retryAction);
+      retry.classList.toggle('hidden', !canRetry);
+      retry.onclick = canRetry ? () => {
         retry.disabled = true;
         retryAction();
       } : null;
@@ -81,13 +87,13 @@
         return;
       }
       const empty = [...empties.values()].at(-1);
-      if (empty) show('empty', empty.text, empty.retryAction);
+      if (empty) show('empty', empty.text);
       else hide();
     }
 
     return {
       get hasLoaded() { return successes.has('page'); },
-      loading(text = 'Loading latest data…') {
+      loading(text = 'Loading latest data') {
         if (!successes.has('page') && !failures.size) show('loading', text);
       },
       ready(key = 'page') {
@@ -96,16 +102,18 @@
         empties.delete(key);
         renderState();
       },
-      empty(text, retryAction = null, key = 'page') {
+      // `text` should say what is missing and what to change, e.g.
+      // "No trades for AAPL in 6h. Choose another asset or a longer window."
+      empty(text, key = 'page') {
         successes.set(key, new Date());
         failures.delete(key);
-        empties.set(key, { text, retryAction });
+        empties.set(key, { text });
         renderState();
       },
       error(resource, retryAction, key = 'page') {
         const lastSuccess = successes.get(key);
         const prior = lastSuccess
-          ? ` Showing the last update from ${lastSuccess.toISOString().slice(11, 19)} UTC.`
+          ? ` Showing the last update from ${Fmt.time(lastSuccess)}.`
           : '';
         failures.set(key, {
           text: `${resource} could not be loaded.${prior}`,
@@ -116,30 +124,10 @@
     };
   }
 
-  function formatAge(totalSeconds) {
-    const seconds = Math.max(0, Math.floor(totalSeconds));
-    if (seconds < 60) return `${seconds}s`;
-    if (seconds < 300) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-    if (seconds < 86_400) return `${Math.floor(seconds / 3600)}h`;
-    return `${Math.floor(seconds / 86_400)}d`;
-  }
-
-  function formatUtcTimestamp(value, includeDate = false) {
-    const date = value instanceof Date ? value : new Date(value);
-    if (!Number.isFinite(date.getTime())) return null;
-    const iso = date.toISOString();
-    return includeDate
-      ? `${iso.slice(0, 10)} ${iso.slice(11, 19)} UTC`
-      : `${iso.slice(11, 19)} UTC`;
-  }
   const screenPollers = new Set();
 
-  function formatCheckDelay(milliseconds) {
-    const seconds = Math.max(0, Math.ceil(milliseconds / 1000));
-    if (seconds < 60) return `${seconds}s`;
-    return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, '0')}s`;
-  }
+  // A countdown reads like an age: "48s", "4m 05s".
+  const formatCheckDelay = milliseconds => Fmt.age(Math.ceil(Math.max(0, milliseconds) / 1000));
 
   function renderScreenCheck() {
     const indicators = [...document.querySelectorAll('[data-freshness]')];
@@ -296,9 +284,65 @@
     return Object.freeze({ get, set, getList, setList, restoreSelect });
   }
 
+  // Marks a scroll box (.scroll-fade) whose content continues past its
+  // bottom edge, so CSS fades the last visible line instead of cutting a row
+  // in half with no sign there is more. Follows scrolling, resizing and
+  // re-rendered content.
+  function scrollFade(box) {
+    if (!box) return () => {};
+    const update = () => {
+      const more = box.scrollTop + box.clientHeight < box.scrollHeight - 2;
+      box.dataset.more = String(more);
+    };
+    box.addEventListener('scroll', update, { passive: true });
+    new ResizeObserver(update).observe(box);
+    new MutationObserver(update).observe(box, { childList: true, subtree: true });
+    update();
+    return update;
+  }
+
+  // Drives a ui.filters() fold. On phones it is a disclosure (closed at
+  // first, remembering what you chose); from 640px it is always open and CSS
+  // dissolves it, so the filters sit on the page. describe() returns the
+  // summary line ("BTC · buy · 24h"); call the returned function whenever a
+  // filter changes.
+  function filtersFold(details, describe) {
+    if (!details) return () => {};
+    const summary = details.querySelector(':scope > summary');
+    const body = details.querySelector(':scope > .filters-body');
+    const selection = details.querySelector('[data-filters-selection]');
+    const desktop = window.matchMedia('(min-width: 640px)');
+    let openOnPhone = false;
+    function sync() {
+      if (desktop.matches) {
+        details.open = true;
+        // The summary vanishes on desktop; keep keyboard focus somewhere real.
+        if (document.activeElement === summary) {
+          body.querySelector('input, select, button, [tabindex]')?.focus();
+        }
+      } else {
+        // Never hide a control someone is using when the viewport narrows.
+        if (body.contains(document.activeElement)) openOnPhone = true;
+        details.open = openOnPhone;
+      }
+    }
+    details.addEventListener('toggle', () => {
+      if (!desktop.matches) openOnPhone = details.open;
+    });
+    desktop.addEventListener('change', sync);
+    const update = () => {
+      if (selection) selection.textContent = describe();
+    };
+    sync();
+    update();
+    return update;
+  }
+
+  // [dot, text, status-bar border]. A healthy feed keeps the neutral edge
+  // every page's status bar has; only a problem colours the frame.
   const FRESHNESS_TONE = {
-    checking: ['bg-faint', 'text-dim', 'border-line'],
-    fresh: ['bg-gain', 'text-gain', 'border-gain/40'],
+    checking: ['bg-faint', 'text-dim', 'border-line-soft'],
+    fresh: ['bg-gain', 'text-gain', 'border-line-soft'],
     delayed: ['bg-phosphor', 'text-phosphor', 'border-phosphor/40'],
     stale: ['bg-loss', 'text-loss', 'border-loss/40'],
     error: ['bg-loss', 'text-loss', 'border-loss/40'],
@@ -325,20 +369,19 @@
       return sample == null ? null : sample.age + (performance.now() - sampleClock) / 1000;
     }
 
+    // A problem tints the status bar itself, so the frame never grows a
+    // second strip; #stale-banner is a visually hidden live region that
+    // announces the same message to screen readers.
     function setBanner(kind, text) {
-      if (!banner) return;
-      if (!text) {
-        banner.classList.add('hidden');
-        return;
+      const alert = !text ? null : kind === 'error' || kind === 'stale' ? 'error' : 'warning';
+      for (const indicator of indicators) {
+        if (alert) indicator.dataset.alert = alert;
+        else delete indicator.dataset.alert;
       }
-      const loss = kind === 'error' || kind === 'stale';
-      banner.className = `border-b px-4 py-1.5 text-center font-mono text-label sm:px-6 ${
-        loss
-          ? 'border-loss/40 bg-loss/10 text-loss'
-          : 'border-phosphor/40 bg-phosphor/10 text-phosphor'
-      }`;
-      banner.setAttribute('role', loss ? 'alert' : 'status');
-      if (banner.textContent !== text) banner.textContent = text;
+      if (!banner) return;
+      banner.setAttribute('role', alert === 'error' ? 'alert' : 'status');
+      const message = text || '';
+      if (banner.textContent !== message) banner.textContent = message;
     }
 
     function render() {
@@ -352,7 +395,7 @@
         setBanner('error', 'Freshness unavailable — this device is offline.');
       } else if (sample) {
         state = checkFailed ? 'error' : age <= 120 ? 'fresh' : age <= 300 ? 'delayed' : 'stale';
-        const timestamp = formatUtcTimestamp(sample.lastTs, true) || 'timestamp unavailable';
+        const timestamp = Fmt.dateTime(sample.lastTs);
         const description = checkFailed ? 'Freshness check failed; last confirmed'
           : state === 'fresh' ? 'Fresh data; newest'
           : state === 'delayed' ? 'Data delayed; newest'
@@ -361,7 +404,7 @@
         if (checkFailed) {
           setBanner('error', `Freshness check failed — newest confirmed bar: ${timestamp}.`);
         } else if (age > 300) {
-          setBanner('stale', `Data stale — newest bar: ${timestamp} (${formatAge(age)} old).`);
+          setBanner('stale', `Data stale — newest bar: ${timestamp} (${Fmt.age(age)} old).`);
         } else {
           setBanner(null, null);
         }
@@ -376,12 +419,13 @@
       }
       const ageLabel = age === null
         ? emptyData && state !== 'error' ? 'No data yet' : 'Age unknown'
-        : `${formatAge(age)} old`;
+        : `${Fmt.age(age)} old`;
       const stateLabel = state === 'error'
         ? navigator.onLine ? 'Check failed' : 'Offline'
         : emptyData ? 'No bars'
         : { checking: 'Checking', fresh: 'Fresh', delayed: 'Delayed', stale: 'Stale' }[state];
-      const timestamp = sample && formatUtcTimestamp(sample.lastTs, age >= 86_400);
+      const stamp = sample && (age >= 86_400 ? Fmt.dateTime(sample.lastTs) : Fmt.time(sample.lastTs));
+      const timestamp = stamp && stamp !== Fmt.DASH ? stamp : null;
       const lastConfirmed = checkFailed || !navigator.onLine;
       for (const indicator of indicators) {
         const dot = indicator.querySelector('[data-freshness-dot]');
@@ -396,7 +440,7 @@
         indicator.querySelector('[data-freshness-state]').textContent = stateLabel;
         time.textContent = timestamp
           ? `${lastConfirmed ? 'Last confirmed bar' : 'Latest bar'} · ${timestamp}`
-          : 'Latest bar · timestamp unavailable';
+          : 'Latest bar · time unknown';
         if (timestamp) time.dateTime = sample.lastTs;
         else time.removeAttribute('datetime');
         dot.classList.remove(...ALL_DOT_TONES);
@@ -478,10 +522,10 @@
   window.Overseer = Object.freeze({
     requestJSON,
     pageState,
-    formatAge,
-    formatUtcTimestamp,
     poll,
     filterState,
+    scrollFade,
+    filtersFold,
     startFreshness,
   });
 })();

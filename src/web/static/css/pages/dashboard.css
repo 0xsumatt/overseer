@@ -1,0 +1,60 @@
+/* Dashboard (charts) layout. Chart heights shrink as the grid gains charts. */
+@layer components {
+  .dashboard-market-chart {
+    min-width: 0;
+    height: var(--market-chart-height, clamp(26rem, 58vh, 36rem));
+  }
+  .market-chart-grid[data-chart-count="1"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .market-chart-grid[data-chart-count="2"] {
+    --market-chart-height: clamp(24rem, 52vh, 30rem);
+  }
+  .market-chart-grid[data-chart-count="3"] {
+    --market-chart-height: clamp(23rem, 46vh, 26rem);
+  }
+  .market-chart-grid[data-chart-count="4"] {
+    --market-chart-height: 22rem;
+  }
+  @media (min-width: 640px) {
+    .dashboard-market-chart {
+      height: var(--market-chart-height, clamp(32rem, 62vh, 44rem));
+    }
+    .market-chart-grid[data-chart-count="2"] {
+      --market-chart-height: clamp(28rem, 52vh, 36rem);
+    }
+    .market-chart-grid[data-chart-count="3"] {
+      --market-chart-height: clamp(26rem, 44vh, 30rem);
+    }
+    .market-chart-grid[data-chart-count="4"] {
+      --market-chart-height: 25rem;
+    }
+  }
+  /* Filter toolbar: stacked full-width fields on phones; one wrapping row of
+     intrinsic-width switches and stretchy pickers from 640px. */
+  .dashboard-toolbar > .field { @apply w-full; }
+  .dashboard-toolbar .segmented { @apply w-full; }
+  @media (min-width: 640px) {
+    .dashboard-toolbar > .field { @apply w-auto; }
+    .dashboard-toolbar .segmented { @apply w-auto; }
+    .dashboard-toolbar > .dashboard-field-wide { flex: 1 1 9rem; }
+    .dashboard-toolbar > .dashboard-field-window { flex: 0 0 7rem; }
+  }
+  @media (max-width: 639px) {
+    .chart-metric-options > button { padding-inline: 0.375rem; }
+  }
+
+  /* Panel chrome states, toggled by JS. */
+  .panel-collapsed { height: auto !important; align-self: start; }
+  .panel-maxed {
+    position: fixed;
+    inset: 0.75rem;
+    z-index: 40;
+    height: auto !important;
+    background: theme('colors.panel');
+    box-shadow: 0 0 0 100vmax theme('colors.ink / 78%');
+  }
+  @media (min-width: 640px) {
+    .panel-maxed { inset: 1.25rem; }
+  }
+}

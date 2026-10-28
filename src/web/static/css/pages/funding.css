@@ -1,0 +1,103 @@
+/* Funding rates. The markets table (#ftable) is a .data-table whose header row
+ * and body are rebuilt by JS on every refresh, so its page-specific rules
+ * (rate tint, watch star, coin column) live here rather than in markup. */
+@layer components {
+  /* ---- toolbar: search + watchlist on one row, menus below on phones ---- */
+  .funding-toolbar {
+    @apply grid grid-cols-[minmax(0,1fr)_auto] sm:flex;
+  }
+  .funding-search { @apply col-start-1 row-start-1 sm:w-64 lg:w-72; }
+  .funding-menus {
+    @apply col-span-2 row-start-2 grid grid-cols-[minmax(0,1fr)_8.5rem] gap-3 sm:flex;
+  }
+  .funding-menus > :first-child { @apply sm:w-52; }
+  .funding-menus > :last-child { @apply sm:w-40; }
+  .watchlist-toggle { @apply col-start-2 row-start-1 self-end sm:ml-auto; }
+  .watchlist-toggle[aria-pressed="true"] { @apply border-line-strong bg-panel2; }
+  .watchlist-toggle .star-filled,
+  .watchlist-toggle[aria-pressed="true"] .star-outline { display: none; }
+  .watchlist-toggle[aria-pressed="true"] .star-filled { display: block; }
+
+  /* ---- market pulse: compact tiles on phones ---------------------------- */
+  .funding-pulse > .kpi { @apply px-3 py-2 sm:px-4 sm:py-3; }
+
+  /* ---- markets ---------------------------------------------------------- */
+  /* Never scrolls sideways: JS measures the table, compacts it when columns
+     are tight and switches to the stacked list when even that cannot fit.
+     Rows scroll vertically inside the card, whose height JS fits to the
+     screen through --markets-max. */
+  .funding-markets {
+    max-height: var(--markets-max, 32.5rem);
+    @apply relative flex flex-col overflow-hidden;
+  }
+  .funding-markets-scroll {
+    /* A reserved gutter keeps the width, and so the chosen layout, stable
+       when a classic scrollbar appears. */
+    scrollbar-gutter: stable;
+    @apply min-h-0 flex-1 overflow-y-auto overflow-x-hidden;
+  }
+  .watch-btn {
+    @apply inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-faint transition-colors hover:bg-panel2 hover:text-body;
+  }
+  .watch-btn[aria-pressed="true"] { @apply text-body; }
+
+  /* Rate cells, in both layouts: a tint whose strength follows |APR| (--heat,
+     0–1, set per cell by JS). It is a translucent background-image layer, so
+     the row's hover colour still shows through. */
+  .funding-markets .rate-cell {
+    --rate-tint: transparent;
+    background-image: linear-gradient(var(--rate-tint), var(--rate-tint));
+  }
+  .funding-markets .rate-cell[data-sign="pos"] {
+    --rate-tint: color-mix(in srgb, theme('colors.gain') calc(var(--heat, 0) * 20%), transparent);
+  }
+  .funding-markets .rate-cell[data-sign="neg"] {
+    --rate-tint: color-mix(in srgb, theme('colors.loss') calc(var(--heat, 0) * 20%), transparent);
+  }
+  .funding-markets .rate-link { @apply block transition-colors hover:bg-panel2/40; }
+  .funding-markets .rate-value { @apply block whitespace-nowrap tabular-nums; }
+  .funding-markets .rate-meta { @apply block whitespace-normal text-label; }
+  /* Best and worst venue for each asset. */
+  .funding-markets .rate-cell[data-rank] .rate-value { @apply font-semibold; }
+
+  /* Table layout. Columns size to their content, so an overflow is
+     measurable: that is what triggers the compact density or the stack. */
+  #ftable .coin-col { @apply w-40; }
+  #ftable td.coin-col { @apply py-1.5; }
+  #ftable .coin-cell { @apply flex w-[8.5rem] items-center gap-2 font-mono; }
+  /* Venue names are proper nouns, not labels: never upper-cased. Names may
+     break after "hip3:", never inside a word. */
+  #ftable thead .venue-col { @apply whitespace-normal normal-case tracking-normal; }
+  #ftable td.rate-cell { @apply p-0; }
+  #ftable .rate-link { @apply px-3 py-2; }
+  #ftable[data-density="compact"] thead th { @apply px-1.5 tracking-normal; }
+  #ftable[data-density="compact"] td.coin-col { @apply px-2; }
+  #ftable[data-density="compact"] .rate-link { @apply px-1.5; }
+  /* Tinted cells sit over the row, so the hover needs more weight here than
+     the shared table default to stay visible through them. */
+  #ftable tbody tr:hover { background-color: theme('colors.panel2 / 75%'); }
+
+  /* Stacked layout: one block per asset, its venues in a wrapping grid. */
+  .funding-stack { @apply divide-y divide-line-soft; }
+  .funding-stack-coin { @apply px-3 py-2.5; }
+  .funding-stack-head { @apply mb-2 flex items-center gap-2 font-mono text-data; }
+  .funding-stack-spread { @apply shrink-0 text-label tabular-nums text-faint; }
+  .funding-stack-rates {
+    grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr));
+    @apply grid gap-1;
+  }
+  .funding-stack .rate-cell { @apply min-w-0 rounded; }
+  .funding-stack .rate-link { @apply rounded px-2 py-1.5 font-mono text-data; }
+  .funding-stack .rate-venue { @apply block truncate text-label text-faint; }
+
+  /* ---- history ---------------------------------------------------------- */
+  .history-controls {
+    @apply grid w-full grid-cols-[minmax(0,1fr)_6.5rem] gap-2 font-mono text-data sm:ml-auto sm:flex sm:w-auto;
+  }
+  .history-asset { @apply sm:w-56; }
+  .history-window { @apply sm:w-28; }
+  .history-settings { @apply col-span-2 sm:w-44; }
+  /* History legend: venue entries toggle their line. */
+  .funding-legend-toggle { @apply cursor-pointer rounded hover:text-body; }
+  .funding-legend-toggle[aria-pressed="false"] { @apply opacity-50; }
+}

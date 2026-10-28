@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui %}
+{% block title %}depth · overseer{% endblock %}
+{% block content %}
+{{ ui.page_header('Depth heatmap', 'Watch resting order-book liquidity near the price over time.') }}
+
+{% if depth_config.assets %}
+<div class="toolbar">
+  <label class="field" for="depth-asset">
+    <span class="field-label">Asset</span>
+    <span class="select-shell"><select id="depth-asset" class="select select-polished">
+      {% for asset in depth_config.assets %}
+      <option value="{{ asset.id }}">{{ asset.id }}</option>
+      {% endfor %}
+    </select></span>
+  </label>
+  <label class="field" for="depth-venue">
+    <span class="field-label">Venue</span>
+    <span class="select-shell"><select id="depth-venue" class="select select-polished"></select></span>
+  </label>
+  <label class="field" for="depth-window">
+    <span class="field-label">Window</span>
+    <span class="select-shell"><select id="depth-window" class="select select-polished">
+      {% for hours, text in depth_config.windows %}
+      <option value="{{ hours }}"{% if hours == 24 %} selected{% endif %}>{{ text }}</option>
+      {% endfor %}
+    </select></span>
+  </label>
+</div>
+{% endif %}
+
+{{ ui.page_status() }}
+
+<div class="space-y-6">
+{% if not depth_config.assets %}
+  <div class="summary-card empty-state">
+    <p class="empty-state-title">No assets are configured for depth capture.</p>
+    <p class="empty-state-hint">Depth is stored for BTC, ETH and SOL when the symbol list includes their perpetual venues.</p>
+  </div>
+{% else %}
+  <section class="chart-card" aria-labelledby="depth-title">
+    <div class="panel-header">
+      <h2 id="depth-title" class="panel-title">Order-book depth<span id="depth-scope" class="panel-subtitle"></span></h2>
+      <div class="segmented panel-actions" role="group" aria-label="Vertical axis">
+        <button type="button" data-depth-view="mid" aria-pressed="true">Around mid</button>
+        <button type="button" data-depth-view="price" aria-pressed="false">Price</button>
+      </div>
+    </div>
+    <div class="legend px-3 pt-2 sm:px-4">
+      <span class="legend-item"><span class="legend-swatch" data-shape="bar" style="--swatch: var(--color-long)"></span>Bids</span>
+      <span class="legend-item"><span class="legend-swatch" data-shape="bar" style="--swatch: var(--color-short)"></span>Asks</span>
+      <span class="legend-item"><span class="legend-swatch depth-band-swatch" data-shape="bar"></span>Book shown, nothing resting</span>
+      <span class="legend-item"><span class="legend-swatch" data-shape="line" style="--swatch: var(--color-dim)"></span>Mid price</span>
+      <span id="depth-scale" class="legend-value"></span>
+    </div>
+    <div class="depth-chart-box h-[22rem] sm:h-[30rem]">
+      <div id="depth-chart" class="absolute inset-0" role="img" aria-label="Order-book depth heatmap"></div>
+    </div>
+    <p id="depth-readout" class="meta-line mx-3 mb-3 sm:mx-4" aria-live="off"></p>
+  </section>
+
+  <details class="disclosure">
+    <summary>How this works</summary>
+    <div class="disclosure-body">
+      <p>Every five minutes the scheduler downloads each venue's public order book for {{ depth_config.assets | map(attribute='id') | join(', ') }}, in the same capture as the cheapest-venue history, and stores the resting size in 1 bps buckets out to ±{{ depth_config.window_bps }} bps from that book's mid, along with how far the book itself reached.</p>
+      <p>Blue cells are bids below the mid and purple cells asks above it; brighter means more size resting in that 1 bps band, on a square-root scale that reaches full colour at the 95th percentile of the cells in this window. The faint band is the part of the book each snapshot showed. Outside it the venue sent nothing, which is not the same as nothing resting: REST snapshots of Binance and Bybit BTC reach only about ±16 to 28 bps, and Hyperliquid's 20 levels about ±2.4 bps.</p>
+      <p><strong>Around mid</strong> plots distance from each snapshot's mid in bps, so even a narrow book fills the chart and you can see how depth near the price changes. <strong>Price</strong> plots price levels instead, so orders resting at a fixed price line up across time; zoom in on the chart for a narrow book.</p>
+      <p>Longer windows show one stored snapshot per 30 minutes (7d) or per 2 hours (30d), never an average: buckets move with the mid, so averaging would smear price levels. A gap means no snapshot was stored. Prices are in the venue's own quote currency; USD amounts use the reference FX at capture.</p>
+      <p>Hover or touch the chart for the size in one bucket at that time; otherwise the line beneath summarises the latest snapshot.</p>
+    </div>
+  </details>
+{% endif %}
+</div>
+<script id="depth-config" type="application/json">{{ depth_config | tojson }}</script>
+{% endblock %}
+
+{% block scripts %}
+{% if depth_config.assets %}
+<script src="{{ url_for('static', filename='js/lightweight-charts.standalone.js') }}"></script>
+<script src="{{ url_for('static', filename='js/venues.js', v='ui-consistency') }}"></script>
+<script src="{{ url_for('static', filename='js/depth.js', v='ui-consistency') }}" defer></script>
+{% endif %}
+{% endblock %}

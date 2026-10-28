@@ -2,6 +2,8 @@
 
 Static estimates exclude funding, liquidation, builder/integrator charges and
 account discounts. Rates are strings to preserve decimal arithmetic in callers.
+`label` names the product, shown as a tooltip; venue names come from
+`core.symbols.VENUE_NAMES`.
 """
 
 FEE_SCHEDULES = {
@@ -17,15 +19,15 @@ FEE_SCHEDULES = {
         ],
         "tiers": [
             {"id": "vip_0", "label": "Regular user (VIP 0)", "taker_bps": "5.0"},
-            {"id": "vip_1", "label": "VIP 1 (30d >= $5m and >= 5 BNB)", "taker_bps": "5.0"},
-            {"id": "vip_2", "label": "VIP 2 (30d >= $10m and >= 25 BNB)", "taker_bps": "4.0"},
-            {"id": "vip_3", "label": "VIP 3 (30d >= $50m and >= 100 BNB)", "taker_bps": "3.2"},
-            {"id": "vip_4", "label": "VIP 4 (30d >= $600m and >= 500 BNB)", "taker_bps": "3.0"},
-            {"id": "vip_5", "label": "VIP 5 (30d >= $1bn and >= 1,000 BNB)", "taker_bps": "2.7"},
-            {"id": "vip_6", "label": "VIP 6 (30d >= $2.5bn and >= 1,750 BNB)", "taker_bps": "2.5"},
-            {"id": "vip_7", "label": "VIP 7 (30d >= $5bn and >= 3,000 BNB)", "taker_bps": "2.2"},
-            {"id": "vip_8", "label": "VIP 8 (30d >= $12.5bn and >= 4,500 BNB)", "taker_bps": "2.0"},
-            {"id": "vip_9", "label": "VIP 9 (30d >= $25bn and >= 5,500 BNB)", "taker_bps": "1.7"},
+            {"id": "vip_1", "label": "VIP 1 (30d $5M+ and 5+ BNB)", "taker_bps": "5.0"},
+            {"id": "vip_2", "label": "VIP 2 (30d $10M+ and 25+ BNB)", "taker_bps": "4.0"},
+            {"id": "vip_3", "label": "VIP 3 (30d $50M+ and 100+ BNB)", "taker_bps": "3.2"},
+            {"id": "vip_4", "label": "VIP 4 (30d $600M+ and 500+ BNB)", "taker_bps": "3.0"},
+            {"id": "vip_5", "label": "VIP 5 (30d $1B+ and 1,000+ BNB)", "taker_bps": "2.7"},
+            {"id": "vip_6", "label": "VIP 6 (30d $2.5B+ and 1,750+ BNB)", "taker_bps": "2.5"},
+            {"id": "vip_7", "label": "VIP 7 (30d $5B+ and 3,000+ BNB)", "taker_bps": "2.2"},
+            {"id": "vip_8", "label": "VIP 8 (30d $12.5B+ and 4,500+ BNB)", "taker_bps": "2.0"},
+            {"id": "vip_9", "label": "VIP 9 (30d $25B+ and 5,500+ BNB)", "taker_bps": "1.7"},
         ],
     },
     "bybit_perp": {
@@ -36,16 +38,16 @@ FEE_SCHEDULES = {
         "notes": [
             "Published base perpetual/futures rates, not spot, Pre-Market or Innovation Zone rates. Regional and account-specific rates may differ; Bybit directs users to My Fee Rate after identity verification.",
             "No MNT, referral, promotional or negotiated Pro/market-maker discount assumed.",
-            "Labels show the 30-day derivatives-volume qualification route; balance, borrowing and other product-volume routes also exist. VIP 4, VIP 5 and Supreme volume qualification requires API trading volume <= 20%. VIP refreshes daily at 07:00 UTC; subaccounts inherit their main account's tier.",
+            "Labels show the 30-day derivatives-volume qualification route; balance, borrowing and other product-volume routes also exist. VIP 4, VIP 5 and Supreme volume qualification requires API trading volume of at most 20%. VIP refreshes daily at 07:00 UTC; subaccounts inherit their main account's tier.",
         ],
         "tiers": [
             {"id": "vip_0", "label": "VIP 0 (non-VIP)", "taker_bps": "5.5"},
-            {"id": "vip_1", "label": "VIP 1 (30d derivatives >= $10m)", "taker_bps": "4.0"},
-            {"id": "vip_2", "label": "VIP 2 (30d derivatives >= $25m)", "taker_bps": "3.75"},
-            {"id": "vip_3", "label": "VIP 3 (30d derivatives >= $50m)", "taker_bps": "3.5"},
-            {"id": "vip_4", "label": "VIP 4 (30d derivatives >= $100m; API <= 20%)", "taker_bps": "3.2"},
-            {"id": "vip_5", "label": "VIP 5 (30d derivatives >= $250m; API <= 20%)", "taker_bps": "3.2"},
-            {"id": "supreme_vip", "label": "Supreme VIP (30d derivatives >= $500m; API <= 20%)", "taker_bps": "3.0"},
+            {"id": "vip_1", "label": "VIP 1 (30d derivatives $10M+)", "taker_bps": "4.0"},
+            {"id": "vip_2", "label": "VIP 2 (30d derivatives $25M+)", "taker_bps": "3.75"},
+            {"id": "vip_3", "label": "VIP 3 (30d derivatives $50M+)", "taker_bps": "3.5"},
+            {"id": "vip_4", "label": "VIP 4 (30d derivatives $100M+, API at most 20%)", "taker_bps": "3.2"},
+            {"id": "vip_5", "label": "VIP 5 (30d derivatives $250M+, API at most 20%)", "taker_bps": "3.2"},
+            {"id": "supreme_vip", "label": "Supreme VIP (30d derivatives $500M+, API at most 20%)", "taker_bps": "3.0"},
         ],
     },
     "hyperliquid": {
@@ -60,12 +62,12 @@ FEE_SCHEDULES = {
         ],
         "tiers": [
             {"id": "0", "label": "Tier 0 (base)", "taker_bps": "4.5"},
-            {"id": "1", "label": "Tier 1 (14d weighted volume > $5m)", "taker_bps": "4.0"},
-            {"id": "2", "label": "Tier 2 (14d weighted volume > $25m)", "taker_bps": "3.5"},
-            {"id": "3", "label": "Tier 3 (14d weighted volume > $100m)", "taker_bps": "3.0"},
-            {"id": "4", "label": "Tier 4 (14d weighted volume > $500m)", "taker_bps": "2.8"},
-            {"id": "5", "label": "Tier 5 (14d weighted volume > $2bn)", "taker_bps": "2.6"},
-            {"id": "6", "label": "Tier 6 (14d weighted volume > $7bn)", "taker_bps": "2.4"},
+            {"id": "1", "label": "Tier 1 (14d weighted volume over $5M)", "taker_bps": "4.0"},
+            {"id": "2", "label": "Tier 2 (14d weighted volume over $25M)", "taker_bps": "3.5"},
+            {"id": "3", "label": "Tier 3 (14d weighted volume over $100M)", "taker_bps": "3.0"},
+            {"id": "4", "label": "Tier 4 (14d weighted volume over $500M)", "taker_bps": "2.8"},
+            {"id": "5", "label": "Tier 5 (14d weighted volume over $2B)", "taker_bps": "2.6"},
+            {"id": "6", "label": "Tier 6 (14d weighted volume over $7B)", "taker_bps": "2.4"},
         ],
     },
     "hyperliquid_xyz": {
@@ -114,16 +116,20 @@ FEE_SCHEDULES = {
     },
     "rise": {
         "label": "RISEx",
-        "default_tier": "unpublished",
-        "source_url": "https://developer.rise.trade/reference/feetierservice_getuserfees",
-        "checked_at": "2026-10-12",
+        "default_tier": "1",
+        "source_url": "https://docs.risechain.com/docs/risex/trading/fees",
+        "checked_at": "2026-10-27",
         "notes": [
-            "An anonymous numeric base/VIP schedule could not be verified from official public documentation or the unsigned trading page. Fee rates are unknown, not zero; third-party fee tables and example order fee_bps values are not used as schedule evidence.",
-            "The official GET /v1/user/fees documentation describes current tier, taker_bps, weighted 14d volume, next-tier progress and full schedule, but requires JWT and is scoped to the caller. Its schema alone publishes no numeric tier rates or thresholds.",
-            "Account trial tiers and builder fees may affect actual charges; no authenticated fee lookup is part of this estimator.",
+            "Published rolling 14-day volume tiers; the taker rate is used. RISEx has no maker rebate program.",
+            "Market makers can be offered trial tiers, and builder fees may add to actual charges. The authenticated GET /v1/user/fees lookup (JWT, caller-scoped) is not used, so your own tier is chosen here, not read.",
         ],
         "tiers": [
-            {"id": "unpublished", "label": "Public base fee unavailable", "taker_bps": None},
+            {"id": "1", "label": "Tier 1 (14d volume under $5M)", "taker_bps": "3.0"},
+            {"id": "2", "label": "Tier 2 (14d volume $5M+)", "taker_bps": "2.5"},
+            {"id": "3", "label": "Tier 3 (14d volume $25M+)", "taker_bps": "2.1"},
+            {"id": "4", "label": "Tier 4 (14d volume $100M+)", "taker_bps": "1.7"},
+            {"id": "5", "label": "Tier 5 (14d volume $500M+)", "taker_bps": "1.55"},
+            {"id": "6", "label": "Tier 6 (14d volume $1B+)", "taker_bps": "1.5"},
         ],
     },
     "bullet": {
@@ -135,16 +141,16 @@ FEE_SCHEDULES = {
             "Published 14-day trading-volume tiers. No maker rebate, referral, promotional or negotiated discount assumed.",
         ],
         "tiers": [
-            {"id": "base", "label": "Base (14d volume < $1m)", "taker_bps": "4.0"},
-            {"id": "vip_1", "label": "VIP 1 (14d volume >= $1m)", "taker_bps": "3.5"},
-            {"id": "vip_2", "label": "VIP 2 (14d volume >= $5m)", "taker_bps": "3.5"},
-            {"id": "vip_3", "label": "VIP 3 (14d volume >= $10m)", "taker_bps": "3.2"},
-            {"id": "vip_4", "label": "VIP 4 (14d volume >= $25m)", "taker_bps": "3.0"},
-            {"id": "vip_5", "label": "VIP 5 (14d volume >= $50m)", "taker_bps": "2.7"},
-            {"id": "vip_6", "label": "VIP 6 (14d volume >= $100m)", "taker_bps": "2.5"},
-            {"id": "vip_7", "label": "VIP 7 (14d volume >= $250m)", "taker_bps": "2.0"},
-            {"id": "vip_8", "label": "VIP 8 (14d volume >= $500m)", "taker_bps": "1.2"},
-            {"id": "vip_9", "label": "VIP 9 (14d volume >= $1bn)", "taker_bps": "0.5"},
+            {"id": "base", "label": "Base (14d volume under $1M)", "taker_bps": "4.0"},
+            {"id": "vip_1", "label": "VIP 1 (14d volume $1M+)", "taker_bps": "3.5"},
+            {"id": "vip_2", "label": "VIP 2 (14d volume $5M+)", "taker_bps": "3.5"},
+            {"id": "vip_3", "label": "VIP 3 (14d volume $10M+)", "taker_bps": "3.2"},
+            {"id": "vip_4", "label": "VIP 4 (14d volume $25M+)", "taker_bps": "3.0"},
+            {"id": "vip_5", "label": "VIP 5 (14d volume $50M+)", "taker_bps": "2.7"},
+            {"id": "vip_6", "label": "VIP 6 (14d volume $100M+)", "taker_bps": "2.5"},
+            {"id": "vip_7", "label": "VIP 7 (14d volume $250M+)", "taker_bps": "2.0"},
+            {"id": "vip_8", "label": "VIP 8 (14d volume $500M+)", "taker_bps": "1.2"},
+            {"id": "vip_9", "label": "VIP 9 (14d volume $1B+)", "taker_bps": "0.5"},
         ],
     },
     "bulk": {
@@ -158,14 +164,40 @@ FEE_SCHEDULES = {
             "Qualification uses trailing 14 completed UTC days of executed USD notional, aggregated across the main account and subaccounts; thresholds are inclusive. Current-day volume affects tiers only after the next 00:00 UTC cutoff.",
         ],
         "tiers": [
-            {"id": "1", "label": "Tier 1 (14d volume < $1m)", "taker_bps": "3.5"},
-            {"id": "2", "label": "Tier 2 (14d volume >= $1m)", "taker_bps": "3.3"},
-            {"id": "3", "label": "Tier 3 (14d volume >= $10m)", "taker_bps": "3.0"},
-            {"id": "4", "label": "Tier 4 (14d volume >= $50m)", "taker_bps": "2.8"},
-            {"id": "5", "label": "Tier 5 (14d volume >= $150m)", "taker_bps": "2.6"},
-            {"id": "6", "label": "Tier 6 (14d volume >= $500m)", "taker_bps": "2.4"},
-            {"id": "7", "label": "Tier 7 (14d volume >= $1.5bn)", "taker_bps": "2.3"},
-            {"id": "8", "label": "Tier 8 (14d volume >= $4bn)", "taker_bps": "2.2"},
+            {"id": "1", "label": "Tier 1 (14d volume under $1M)", "taker_bps": "3.5"},
+            {"id": "2", "label": "Tier 2 (14d volume $1M+)", "taker_bps": "3.3"},
+            {"id": "3", "label": "Tier 3 (14d volume $10M+)", "taker_bps": "3.0"},
+            {"id": "4", "label": "Tier 4 (14d volume $50M+)", "taker_bps": "2.8"},
+            {"id": "5", "label": "Tier 5 (14d volume $150M+)", "taker_bps": "2.6"},
+            {"id": "6", "label": "Tier 6 (14d volume $500M+)", "taker_bps": "2.4"},
+            {"id": "7", "label": "Tier 7 (14d volume $1.5B+)", "taker_bps": "2.3"},
+            {"id": "8", "label": "Tier 8 (14d volume $4B+)", "taker_bps": "2.2"},
         ],
     },
 }
+
+
+def execution_listings(registry, asset: str) -> dict[str, str]:
+    """Venue -> native symbol for every compared venue listing the asset.
+
+    A venue is compared when it has a fee schedule; order follows the schedules.
+    """
+    available = registry.listings(asset)
+    return {venue: available[venue] for venue in FEE_SCHEDULES if venue in available}
+
+
+def selected_tiers(requested: dict[str, str]) -> dict[str, dict]:
+    """Each venue's chosen tier, defaulting to its base tier.
+
+    Raises ValueError for unknown venues or tiers.
+    """
+    if requested.keys() - FEE_SCHEDULES.keys():
+        raise ValueError("Fee selections must use supported venue IDs.")
+    selected = {}
+    for venue, schedule in FEE_SCHEDULES.items():
+        tier_id = requested.get(venue, schedule["default_tier"])
+        tier = next((tier for tier in schedule["tiers"] if tier["id"] == tier_id), None)
+        if tier is None:
+            raise ValueError(f"Unknown fee tier for {schedule['label']}.")
+        selected[venue] = tier
+    return selected

@@ -1,1540 +1,241 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui %}
 {% block title %}charts · overseer{% endblock %}
 {% block content %}
-<style>
-  /* panel chrome states (toggled by JS; compound styles live here, not utilities) */
-  .panel-collapsed { height: auto !important; }
-  .panel-maxed {
-    position: fixed; inset: .75rem; z-index: 40;
-    height: auto !important; background: #111721;
-    box-shadow: 0 0 0 100vmax rgba(8,11,18,.78);   /* dims everything behind */
-  }
-  @media (min-width: 640px) {
-    .panel-maxed { inset: 1.25rem; }
-    #chart-filters,
-    #chart-filters-body { display: contents; }
-    #chart-filters > summary { display: none; }
-  }
-</style>
-<div class="mb-5 flex flex-col gap-4">
-  <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-    <div>
-      <h1 id="dashboard-title" class="text-title font-semibold text-body">Cross-venue prices</h1>
-      <p class="mt-1 text-data text-dim">Compare one market or view up to four charts.</p>
-    </div>
-    <div class="flex w-fit shrink-0 rounded-md border border-line bg-panel p-1 font-mono text-data"
-         role="group" aria-label="Dashboard view">
-      <button id="view-overview" type="button" aria-pressed="true"
-              class="compact-button px-3 text-data tracking-label uppercase">overview</button>
-      <button id="view-charts" type="button" aria-pressed="false"
-              class="compact-button px-3 text-data tracking-label uppercase">charts</button>
-    </div>
+{% call ui.page_header('Cross-venue prices',
+                       'Compare one market across venues, or chart up to four assets side by side.',
+                       title_id='dashboard-title') %}
+  <div class="segmented segmented-view" role="group" aria-label="Dashboard view">
+    <button id="view-overview" type="button" aria-pressed="true">Overview</button>
+    <button id="view-charts" type="button" aria-pressed="false">Charts</button>
   </div>
+{% endcall %}
 
-  <details id="chart-filters">
-    <summary id="chart-filters-summary"
-             class="select select-summary flex min-h-11 cursor-pointer flex-col items-start gap-1 py-2
-                    focus-visible:ring-1 focus-visible:ring-phosphor">
-      <span class="font-mono text-label tracking-label uppercase text-body">Filters</span>
-      <span id="chart-filter-selection" class="text-data text-dim"></span>
-    </summary>
-    <div id="chart-filters-body" class="mt-4 flex flex-col gap-4">
-  <div class="grid grid-cols-1 items-end gap-3 rounded-md border border-line bg-panel/50 p-3 sm:grid-cols-2
-              xl:grid-cols-[auto_auto_minmax(12rem,1fr)_minmax(12rem,1fr)_auto]"
-       role="group" aria-label="Chart filters">
-    <div class="min-w-0">
-      <span class="mb-1 block font-mono text-label tracking-label uppercase text-faint">market</span>
-      <div class="flex w-full rounded-md border border-line bg-panel p-1 font-mono text-data xl:w-fit"
-           role="group" aria-label="Market type">
-        <button id="mkt-perp" type="button" data-market="perp" aria-pressed="true"
-                class="compact-button min-w-0 flex-1 px-3 text-data tracking-label uppercase">perp</button>
-        <button id="mkt-spot" type="button" data-market="spot" aria-pressed="false"
-                class="compact-button min-w-0 flex-1 px-3 text-data tracking-label uppercase">spot</button>
-      </div>
-    </div>
-
-    <div class="min-w-0 sm:col-span-2 xl:col-span-1">
-      <span class="mb-1 block font-mono text-label tracking-label uppercase text-faint">metric</span>
-      <div class="chart-metric-options flex w-full rounded-md border border-line bg-panel p-1 font-mono text-data xl:w-fit"
-           role="group" aria-label="Chart metric">
-        <button id="metric-price" type="button" aria-pressed="true"
-                class="compact-button min-w-0 flex-1 px-3 text-data tracking-label uppercase">price</button>
-        <button id="metric-spread" type="button" aria-pressed="false"
-                class="compact-button min-w-0 flex-1 px-3 text-data tracking-label uppercase">spread</button>
-        <button id="metric-volatility" type="button" aria-pressed="false"
-                class="compact-button min-w-0 flex-1 px-3 text-data tracking-label uppercase">volatility</button>
-      </div>
-    </div>
-
-    <div class="min-w-0 sm:col-span-2 xl:col-span-1">
-      <span id="exchange-filter-label"
-            class="mb-1 block font-mono text-label tracking-label uppercase text-faint">exchanges</span>
-      <div id="exchange-picker-wrap" class="relative">
-        <button id="exchange-picker-trigger" type="button" aria-expanded="false"
-                aria-controls="exchange-picker"
-                aria-labelledby="exchange-filter-label exchange-picker-label"
-                class="select select-summary flex w-full cursor-pointer items-center pl-3 pr-9">
-          <span id="exchange-picker-label" class="w-full min-w-0 truncate">all</span>
-        </button>
-        <div id="exchange-picker" role="dialog" aria-label="Choose global exchanges"
-             class="absolute left-0 z-30 mt-2 hidden w-[min(20rem,calc(100vw-2rem))]
-                    rounded-md border border-line-strong bg-panel p-3 shadow-2xl shadow-black/60">
-          <div class="flex items-baseline justify-between gap-3">
-            <span class="font-mono text-label tracking-label uppercase text-dim">global exchanges</span>
-            <span class="font-mono text-label text-faint">charts inherit this</span>
-          </div>
-          <div id="exchange-options" class="mt-2 max-h-64 space-y-1 overflow-y-auto"
-               role="group" aria-label="Available exchanges"></div>
-          <div class="mt-3 flex items-center justify-between gap-3 border-t border-line/60 pt-3">
-            <button id="exchange-all" type="button"
-                    class="toolbar-button font-mono text-label tracking-label uppercase text-dim hover:text-body">
-              select all
-            </button>
-            <button id="exchange-apply" type="button"
-                    class="toolbar-button bg-phosphor/85 font-mono text-label
-                           tracking-label uppercase text-ink hover:brightness-110">
-              apply
-            </button>
+{% call ui.filters('chart-filters') %}
+<div class="mb-4 flex flex-col gap-3">
+      <div class="toolbar dashboard-toolbar mb-0" role="group" aria-label="Chart filters">
+        <div class="field">
+          <span class="field-label" id="market-filter-label">Market</span>
+          <div class="segmented" role="group" aria-labelledby="market-filter-label">
+            <button id="mkt-perp" type="button" data-market="perp" aria-pressed="true">Perp</button>
+            <button id="mkt-spot" type="button" data-market="spot" aria-pressed="false">Spot</button>
           </div>
         </div>
-      </div>
-    </div>
 
-    <div class="min-w-0">
-      <label id="asset-filter-label" for="token"
-             class="mb-1 block font-mono text-label tracking-label uppercase text-faint">asset</label>
-      <span id="token-select-wrap" class="select-shell w-full min-w-0">
-        <select id="token" class="select select-polished w-full" aria-label="Asset"></select>
-      </span>
+        <div class="field">
+          <span class="field-label" id="metric-filter-label">Metric</span>
+          <div class="segmented chart-metric-options" role="group" aria-labelledby="metric-filter-label">
+            <button id="metric-price" type="button" aria-pressed="true">Price</button>
+            <button id="metric-spread" type="button" aria-pressed="false">Spread</button>
+            <button id="metric-volatility" type="button" aria-pressed="false">Volatility</button>
+          </div>
+        </div>
 
-      <div id="asset-picker-wrap" class="relative hidden min-w-0">
-        <button id="asset-picker-trigger" type="button" aria-expanded="false"
-                aria-controls="asset-picker"
-                aria-labelledby="asset-filter-label asset-picker-label"
-                class="select select-summary flex w-full items-center justify-between gap-3 pl-3 pr-9">
-          <span id="asset-picker-label" class="min-w-0 truncate">Choose assets</span>
-          <span id="asset-picker-count" class="shrink-0 font-mono text-label text-faint">0 / 4</span>
-        </button>
-        <div id="asset-picker" role="dialog" aria-label="Choose charts"
-             class="absolute left-0 z-30 mt-2 hidden w-[min(22rem,calc(100vw-2rem))] xl:left-auto xl:right-0
-                    rounded-md border border-line-strong bg-panel p-3 shadow-2xl shadow-black/60">
-          <label for="asset-search" class="font-mono text-label tracking-label uppercase text-dim">assets</label>
-          <input id="asset-search" type="search" autocomplete="off" placeholder="Search assets"
-                 class="input mt-2 w-full" />
-          <div id="asset-options" class="scroll-thin mt-2 max-h-64 space-y-1 overflow-y-auto"
-               role="group" aria-label="Available assets"></div>
-          <div class="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-line/60 pt-3">
-            <span class="font-mono text-label text-faint">Choose up to four</span>
-            <div class="flex items-center gap-2">
-              <button id="asset-clear" type="button"
-                      class="toolbar-button font-mono text-label tracking-label uppercase text-dim hover:text-body">
-                clear
-              </button>
-              <button id="asset-apply" type="button"
-                      class="toolbar-button bg-phosphor/85 font-mono text-label
-                             tracking-label uppercase text-ink hover:brightness-110">
-                show charts
-              </button>
+        <div class="field dashboard-field-wide">
+          <label id="asset-filter-label" for="token" class="field-label">Asset</label>
+          <span id="token-select-wrap" class="select-shell w-full min-w-0">
+            <select id="token" class="select select-polished w-full" aria-label="Asset"></select>
+          </span>
+
+          <div id="asset-picker-wrap" class="relative hidden min-w-0">
+            <button id="asset-picker-trigger" type="button" aria-expanded="false"
+                    aria-controls="asset-picker"
+                    aria-labelledby="asset-filter-label asset-picker-label"
+                    class="select select-summary flex w-full items-center justify-between gap-3 pl-3 pr-9">
+              <span id="asset-picker-label" class="min-w-0 truncate">Choose assets</span>
+              <span id="asset-picker-count" class="shrink-0 font-mono text-label text-faint">0 / 4</span>
+            </button>
+            <div id="asset-picker" role="dialog" aria-label="Choose charts"
+                 class="popover absolute left-0 z-30 mt-2 hidden w-[min(22rem,calc(100vw-2rem))] p-3
+                        xl:left-auto xl:right-0">
+              <label for="asset-search" class="field-label">Assets</label>
+              <input id="asset-search" type="search" autocomplete="off" placeholder="Search assets"
+                     class="input mt-2 w-full" />
+              <div id="asset-options" class="scroll-thin mt-2 max-h-64 space-y-1 overflow-y-auto"
+                   role="group" aria-label="Available assets"></div>
+              <div class="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-line-soft pt-3">
+                <span class="font-mono text-label text-faint">Choose up to four</span>
+                <div class="flex items-center gap-2">
+                  <button id="asset-clear" type="button" class="btn btn-ghost btn-sm">Clear</button>
+                  <button id="asset-apply" type="button" class="btn btn-primary btn-sm">Show charts</button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    </div>
 
-    <div class="min-w-0">
-      <label for="hours"
-             class="mb-1 block font-mono text-label tracking-label uppercase text-faint">history</label>
-      <span class="select-shell w-full">
-        <select id="hours" class="select select-polished w-full" aria-label="History">
-          <option value="24">24h</option>
-          <option value="48" selected>48h</option>
-          <option value="168">7d</option>
-        </select>
-      </span>
-    </div>
-  </div>
-  <div id="volatility-controls" class="hidden flex-wrap items-center justify-between gap-3 rounded-md border border-line bg-panel/50 p-3"
-       role="group" aria-label="Rolling realised volatility window">
-    <span class="font-mono text-label tracking-label uppercase text-dim">rolling window</span>
-    <div class="flex rounded-md border border-line bg-panel p-1 font-mono text-data">
-      <button type="button" data-volatility-hours="1" aria-pressed="false"
-              class="compact-button px-3 text-data tracking-label uppercase">1h</button>
-      <button type="button" data-volatility-hours="6" aria-pressed="false"
-              class="compact-button px-3 text-data tracking-label uppercase">6h</button>
-      <button type="button" data-volatility-hours="24" aria-pressed="true"
-              class="compact-button px-3 text-data tracking-label uppercase">24h</button>
-    </div>
-    <div class="w-full">
-      <p class="chart-caption !mt-0">Rolling RV · not annualised.</p>
-      <details id="volatility-help" class="mt-2">
-        <summary class="select select-summary inline-flex w-full cursor-pointer items-center
-                        focus-visible:ring-1 focus-visible:ring-phosphor sm:w-fit">How it's calculated</summary>
-        <p class="chart-caption mt-2">Each point measures the preceding rolling window
-          using completed 1-minute closes: 100 × √Σ(log returns²).
-          Incomplete windows leave gaps; the crosshair shows values and coverage.</p>
-      </details>
-    </div>
-  </div>
-  <div id="exchange-legend" class="flex flex-wrap gap-2"
-       role="group" aria-label="Global exchange selection"></div>
-    </div>
-  </details>
-</div>
+        <div class="field dashboard-field-window">
+          <label for="hours" class="field-label">Window</label>
+          <span class="select-shell w-full">
+            <select id="hours" class="select select-polished w-full" aria-label="Window">
+              <option value="24">24h</option>
+              <option value="48" selected>48h</option>
+              <option value="168">7d</option>
+            </select>
+          </span>
+        </div>
 
-<div id="overview-view">
-  <div id="overview-stats" class="mb-4 grid grid-cols-2 gap-px overflow-hidden rounded-md border border-line bg-line sm:grid-cols-4"></div>
-
-  <section data-panel="overview-chart" data-panel-label="price chart" data-chart-card
-           class="chart-card dashboard-market-chart flex flex-col overflow-hidden">
-    <div class="flex min-h-11 items-center justify-between gap-3 border-b border-line/60 px-3 py-1.5 sm:min-h-14">
-      <span data-chart-kind class="font-mono text-label tracking-label uppercase text-dim">price chart</span>
-      <div class="flex min-w-0 items-center gap-2">
-        <span data-chart-status class="truncate font-mono text-label text-faint" role="status"></span>
-        <div class="hidden items-center gap-1 sm:flex">
-          <button type="button" data-max class="compact-button font-mono text-data text-dim hover:text-body"></button>
-          <button type="button" data-collapse class="compact-button font-mono text-data text-dim hover:text-body"></button>
+        <div class="field w-full">
+          <div class="flex items-center gap-1">
+            <span id="venue-toggle-label" class="field-label mr-1">Venues</span>
+            <button id="venue-all" type="button" class="bracket-btn" aria-label="Show all venues">all</button>
+            <button id="venue-none" type="button" class="bracket-btn" aria-label="Hide all venues">none</button>
+          </div>
+          <div id="exchange-legend" class="flex flex-wrap gap-2"
+               role="group" aria-labelledby="venue-toggle-label"></div>
         </div>
       </div>
-    </div>
-    <div data-panel-body class="flex min-h-0 flex-1 flex-col">
-      <div id="overview-chart-canvas" data-chart-canvas aria-hidden="true" class="relative min-h-0 flex-1"></div>
-      <p data-chart-availability class="shrink-0 border-t border-line/40 px-3 py-2 font-mono text-label text-dim"></p>
-    </div>
-  </section>
-  <p id="chart-help" class="chart-caption">Exchange selection applies to every chart. Use the crosshair for values; line gaps show basis.</p>
 
-
-  <div class="mt-4 grid gap-4 lg:grid-cols-3">
-    <section data-panel="volume" class="chart-card flex h-[18rem] flex-col p-4 sm:h-[21rem]">
-      <div class="mb-1 flex items-baseline justify-between sm:min-h-11">
-        <h2 class="font-mono text-label tracking-label uppercase text-dim">24h volume by venue</h2>
-        <div class="flex items-center gap-3">
-          <span id="cex-share" class="font-mono text-data tabular-nums text-phosphor">—</span>
-          <div class="hidden items-center gap-1 sm:flex">
-            <button type="button" data-max class="compact-button font-mono text-data text-dim hover:text-body"></button>
-            <button type="button" data-collapse class="compact-button font-mono text-data text-dim hover:text-body"></button>
+      <div id="volatility-controls" class="toolbar dashboard-toolbar mb-0 hidden" role="group"
+           aria-label="Rolling realised volatility window">
+        <div class="field">
+          <span id="volatility-window-label" class="field-label">Rolling window</span>
+          <div class="segmented" role="group" aria-labelledby="volatility-window-label">
+            <button type="button" data-volatility-hours="1" aria-pressed="false"><span class="unit">1h</span></button>
+            <button type="button" data-volatility-hours="6" aria-pressed="false"><span class="unit">6h</span></button>
+            <button type="button" data-volatility-hours="24" aria-pressed="true"><span class="unit">24h</span></button>
           </div>
         </div>
       </div>
-      <div data-panel-body class="flex min-h-0 flex-1 flex-col">
-        <div class="chart-caption !mt-0 mb-3">cex share of tracked venues</div>
-        <div id="vol-bars" class="scroll-thin min-h-0 flex-1 space-y-2 overflow-y-auto pr-3"></div>
+</div>
+{% endcall %}
+
+{{ ui.page_status() }}
+
+<div id="overview-view">
+  <div id="overview-stats" class="kpi-grid mb-6"></div>
+
+  <section data-panel="overview-chart" data-panel-label="BTC price chart" data-chart-card
+           class="chart-card dashboard-market-chart flex flex-col overflow-hidden">
+    <div class="panel-header">
+      <h2 class="panel-title"><span data-chart-asset>BTC</span><span data-chart-subtitle
+          class="panel-subtitle"></span></h2>
+      <div class="panel-actions">
+        <span data-chart-status class="mr-2 truncate font-mono text-label text-faint" role="status"></span>
+        <button type="button" data-max class="bracket-btn"></button>
+        <button type="button" data-collapse class="bracket-btn"></button>
+      </div>
+    </div>
+    <div data-panel-body class="flex min-h-0 flex-1 flex-col">
+      <div data-chart-legend class="legend px-3 pt-2 sm:px-4"></div>
+      <div id="overview-chart-canvas" data-chart-canvas aria-hidden="true" class="relative min-h-0 flex-1"></div>
+      <div class="shrink-0 border-t border-line-soft">
+        <p data-chart-availability class="meta-line mx-3 py-2 sm:mx-4"></p>
+      </div>
+    </div>
+  </section>
+
+  <div class="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+    <section data-panel="volume" data-panel-label="24h volume by venue"
+             class="chart-card flex h-[18rem] flex-col sm:h-[21rem]">
+      <div class="panel-header">
+        <h2 class="panel-title">24h volume by venue</h2>
+        <div class="panel-actions">
+          <button type="button" data-max class="bracket-btn"></button>
+          <button type="button" data-collapse class="bracket-btn"></button>
+        </div>
+      </div>
+      <div data-panel-body class="panel-body flex min-h-0 flex-1 flex-col gap-3">
+        <p class="meta-line"><span>CEX share <span id="cex-share" class="tabular-nums text-body">—</span></span><span>Binance and Bybit</span></p>
+        <div id="vol-bars" class="scroll-thin scroll-fade min-h-0 flex-1 space-y-2 overflow-y-auto pr-3"></div>
       </div>
     </section>
 
-    <section data-panel="oi" class="chart-card flex h-[18rem] flex-col p-4 sm:h-[21rem]">
-      <div class="mb-1 flex items-baseline justify-between sm:min-h-11">
-        <h2 class="font-mono text-label tracking-label uppercase text-dim">open interest by asset</h2>
-        <div class="hidden items-center gap-1 sm:flex">
-          <button type="button" data-max class="compact-button font-mono text-data text-dim hover:text-body"></button>
-          <button type="button" data-collapse class="compact-button font-mono text-data text-dim hover:text-body"></button>
+    <section data-panel="oi" data-panel-label="open interest by asset"
+             class="chart-card flex h-[18rem] flex-col sm:h-[21rem]">
+      <div class="panel-header">
+        <h2 class="panel-title">Open interest by asset</h2>
+        <div class="panel-actions">
+          <button type="button" data-max class="bracket-btn"></button>
+          <button type="button" data-collapse class="bracket-btn"></button>
         </div>
       </div>
-      <div data-panel-body class="flex min-h-0 flex-1 flex-col">
-        <div class="chart-caption !mt-0 mb-3">summed across perp venues, notional</div>
-        <div id="oi-bars" class="scroll-thin min-h-0 flex-1 space-y-2 overflow-y-auto pr-3"></div>
+      <div data-panel-body class="panel-body flex min-h-0 flex-1 flex-col gap-3">
+        <p class="meta-line"><span>Notional</span><span>summed across perp venues</span></p>
+        <div id="oi-bars" class="scroll-thin scroll-fade min-h-0 flex-1 space-y-2 overflow-y-auto pr-3"></div>
       </div>
     </section>
 
-    <section data-panel="basis" class="summary-card flex h-[18rem] flex-col sm:h-[21rem]">
-      <div class="mb-1 flex items-baseline justify-between sm:min-h-11">
-        <h2 class="font-mono text-label tracking-label uppercase text-dim">basis snapshot</h2>
-        <div class="hidden items-center gap-1 sm:flex">
-          <button type="button" data-max class="compact-button font-mono text-data text-dim hover:text-body"></button>
-          <button type="button" data-collapse class="compact-button font-mono text-data text-dim hover:text-body"></button>
+    <section data-panel="basis" data-panel-label="basis snapshot"
+             class="chart-card flex h-[18rem] flex-col overflow-hidden sm:h-[21rem] md:col-span-2 xl:col-span-1">
+      <div class="panel-header">
+        <h2 class="panel-title">Basis snapshot</h2>
+        <div class="panel-actions">
+          <button type="button" data-max class="bracket-btn"></button>
+          <button type="button" data-collapse class="bracket-btn"></button>
         </div>
       </div>
       <div data-panel-body class="flex min-h-0 flex-1 flex-col">
-        <div class="chart-caption !mt-0 mb-3">same-venue spot vs perp, latest bar, bps</div>
-        <div id="basis-rows" class="scroll-thin min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-3"></div>
+        <p class="meta-line mx-3 pb-1 pt-3 sm:mx-4"><span>Binance spot vs perp</span><span>latest 1m bar</span></p>
+        <div id="basis-scroll" class="scroll-thin scroll-fade min-h-0 flex-1 overflow-y-auto">
+          <table class="data-table">
+            <thead><tr><th scope="col">Symbol</th><th scope="col" class="num">Basis, <span class="unit">bps</span></th></tr></thead>
+            <tbody id="basis-rows"></tbody>
+          </table>
+        </div>
       </div>
     </section>
   </div>
 
   <section data-panel="volume-oi" data-panel-label="volume to open interest chart"
-           class="chart-card mt-4 flex h-[24rem] flex-col overflow-hidden sm:h-[27rem]">
-    <div class="flex min-h-11 flex-wrap items-center justify-between gap-x-3 border-b border-line/60 px-3 py-1.5 sm:min-h-14">
-      <div>
-        <h2 class="font-mono text-label tracking-label uppercase text-dim">reported volume / open interest</h2>
-        <p class="chart-caption !mt-0">tracked perpetual markets · 24h · × per day</p>
-      </div>
-      <div class="flex items-center gap-2">
-        <span id="volume-oi-status" class="font-mono text-label text-faint" role="status"></span>
-        <div class="hidden items-center gap-1 sm:flex">
-          <button type="button" data-max class="compact-button font-mono text-data text-dim hover:text-body"></button>
-          <button type="button" data-collapse class="compact-button font-mono text-data text-dim hover:text-body"></button>
-        </div>
+           class="chart-card mt-6 flex h-[24rem] flex-col overflow-hidden sm:h-[27rem]">
+    <div class="panel-header">
+      <h2 class="panel-title">Reported volume / open interest<span
+          class="panel-subtitle">tracked perps · × per day</span></h2>
+      <div class="panel-actions">
+        <span id="volume-oi-status" class="mr-2 font-mono text-label text-faint" role="status"></span>
+        <button type="button" data-max class="bracket-btn"></button>
+        <button type="button" data-collapse class="bracket-btn"></button>
       </div>
     </div>
     <div data-panel-body class="flex min-h-0 flex-1 flex-col">
-      <div id="volume-oi-legend"
-           class="scroll-thin flex flex-nowrap gap-2 overflow-x-auto border-b border-line/60 px-3 py-2 sm:flex-wrap sm:overflow-visible"></div>
+      <div id="volume-oi-legend" class="legend px-3 pt-2 sm:px-4"></div>
       <div class="relative min-h-0 flex-1">
-        <div id="volume-oi-chart" aria-hidden="true" class="h-full w-full"></div>
-        <div id="volume-oi-empty"
-             class="pointer-events-none absolute inset-0 hidden place-items-center px-5 text-center font-mono text-data text-dim">
-          No ratio history exists for this window.
+        <div id="volume-oi-chart" aria-hidden="true" class="absolute inset-0"></div>
+        <div id="volume-oi-empty" class="empty-overlay pointer-events-none hidden">
+          <p class="empty-state-title">No ratio history for this window</p>
+          <p class="empty-state-hint">Choose a longer window.</p>
         </div>
       </div>
       <p id="volume-oi-summary" class="sr-only"></p>
     </div>
   </section>
-
 </div>
 
 <div id="charts-view" class="hidden">
-  <div id="multi-chart-empty"
-       class="summary-card hidden px-5 py-10 text-center">
-    <div class="font-mono text-data text-body">No charts selected</div>
-    <div class="mt-1 text-data text-dim">Choose up to four assets from the selector above.</div>
+  <div id="multi-chart-empty" class="chart-card hidden">
+    <div class="empty-state">
+      <p class="empty-state-title">No charts selected</p>
+      <p class="empty-state-hint">Choose up to four assets in the Asset filter.</p>
+    </div>
   </div>
   <div id="chart-grid" class="market-chart-grid grid gap-4 xl:grid-cols-2" data-chart-count="1"></div>
 </div>
 
-<script id="series-data" type="application/json">[
-  {%- for s in series -%}
-    {"exchange":"{{ s.exchange }}","market_type":"{{ s.market_type }}","symbol":"{{ s.symbol }}",
-     "interval":"{{ s.interval }}","asset":"{{ s.asset }}"}
-    {{- "," if not loop.last -}}
-  {%- endfor -%}
-]</script>
+<details class="disclosure mt-6">
+  <summary>How this works</summary>
+  <div class="disclosure-body">
+    <p>Price: one venue draws candles. Several venues draw close-price lines; the space between lines is
+      the price difference between venues.</p>
+    <p>Spread is the ask minus the bid, in basis points of the midpoint.</p>
+    <p>Realised volatility covers the rolling window and is not annualised. Each point measures the
+      preceding rolling window from completed 1-minute closes: 100 × the square root of the summed
+      squared log returns.</p>
+    <p>A window with missing candles is incomplete and leaves a gap in the line. The legend shows each
+      venue's value and its coverage, the share of the window's minutes with a close.</p>
+  </div>
+</details>
+
+{%- set dashboard_config = {'series': []} %}
+{%- for s in series %}
+  {%- set _ = dashboard_config.series.append({'exchange': s.exchange, 'market_type': s.market_type,
+      'symbol': s.symbol, 'interval': s.interval, 'asset': s.asset}) %}
+{%- endfor %}
+<script id="dashboard-config" type="application/json">{{ dashboard_config | tojson }}</script>
 {% endblock %}
 
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/lightweight-charts.standalone.js') }}"></script>
-<script src="{{ url_for('static', filename='js/venues.js') }}"></script>
-<script>
-// VENUE_COLORS / VENUE_ORDER / colorFor come from venues.js — one definition
-// for every page, rather than three hand-synced copies that drifted.
-
-const SERIES = JSON.parse(document.getElementById('series-data').textContent);
-
-const MAX_CHARTS = 4;
-const dashboardFilters = Overseer.filterState('charts');
-const dashboardState = Overseer.pageState();
-let market = dashboardFilters.get('market') === 'spot' ? 'spot' : 'perp';
-let dashboardView = dashboardFilters.get('view') === 'charts' ? 'charts' : 'overview';
-let chartMetric = ['spread', 'volatility'].includes(dashboardFilters.get('metric'))
-  ? dashboardFilters.get('metric') : 'price';
-const SHARED_ASSETS_KEY = 'assets';
-const SHARED_EXCHANGES_KEY = 'exchanges';
-const EXCHANGE_STATE_VERSION_KEY = 'exchange-state-version';
-const EXCHANGE_STATE_VERSION = '2';
-if (dashboardFilters.get(EXCHANGE_STATE_VERSION_KEY) !== EXCHANGE_STATE_VERSION) {
-  // v1 saved only the exchanges visible in the active market. Applying "all"
-  // on Spot therefore hid every perp-only venue after switching back.
-  dashboardFilters.set(SHARED_EXCHANGES_KEY, null);
-  dashboardFilters.set(EXCHANGE_STATE_VERSION_KEY, EXCHANGE_STATE_VERSION);
-}
-// Discard the removed per-chart controls without resetting the global choice.
-const obsoleteExchangeKeys = new Set([
-  'exchange-override-overview',
-  ...SERIES.map(series => `exchange-override-${series.market_type}-${series.asset}`),
-]);
-obsoleteExchangeKeys.forEach(key => {
-  if (dashboardFilters.get(key) !== null) dashboardFilters.set(key, null);
-});
-if (dashboardFilters.get(SHARED_ASSETS_KEY) === null) {
-  const legacyAssets = dashboardFilters.get(`assets-${market}`) ??
-    dashboardFilters.get(`assets-${market === 'perp' ? 'spot' : 'perp'}`);
-  if (legacyAssets !== null) dashboardFilters.set(SHARED_ASSETS_KEY, legacyAssets);
-}
-dashboardFilters.set('assets-perp', null);
-dashboardFilters.set('assets-spot', null);
-let stagedAssets = new Set();
-let stagedExchanges = new Set();
-const multiCards = new Map();
-const discoveredExchanges = { spot: new Set(), perp: new Set() };
-let volumeOiChart = null;
-let volumeOiRequest = 0;
-const volumeOiSeries = new Map();
-let volatilityHours = Number(dashboardFilters.get('volatility-hours'));
-if (![1, 6, 24].includes(volatilityHours)) volatilityHours = 24;
-const chartFilters = document.getElementById('chart-filters');
-const chartFiltersSummary = document.getElementById('chart-filters-summary');
-const chartFiltersBody = document.getElementById('chart-filters-body');
-const desktopFilters = window.matchMedia('(min-width: 640px)');
-let mobileFiltersOpen = false;
-
-
-
-const chartOptions = {
-  layout: { background: { color: 'transparent' }, textColor: CHART_THEME.text,
-            fontFamily: CHART_THEME.font, fontSize: 12 },
-  grid: { vertLines: { color: CHART_THEME.grid }, horzLines: { color: CHART_THEME.grid } },
-  crosshair: { vertLine: { color: CHART_THEME.crosshair },
-               horzLine: { color: CHART_THEME.crosshair } },
-  timeScale: { timeVisible: true, secondsVisible: false, borderColor: CHART_THEME.border },
-  rightPriceScale: { borderColor: CHART_THEME.border },
-  autoSize: true,
-};
-
-const fmt = n => n >= 1000 ? n.toLocaleString(undefined, {maximumFractionDigits: 1})
-                           : n.toPrecision(5).replace(/\.?0+$/, '');
-const stat = (l, v, cls) => `<div class="bg-panel px-4 py-3">
-    <div class="font-mono text-label tracking-label uppercase text-dim">${l}</div>
-    <div class="mt-0.5 font-mono text-hero tabular-nums ${cls || 'text-body'}">${v}</div></div>`;
-
-function availableAssets(forMarket = market) {
-  return [...new Set(
-    SERIES.filter(series => series.market_type === forMarket).map(series => series.asset)
-  )].sort();
-}
-
-function chartAssets() {
-  return [...new Set(SERIES.map(series => series.asset))].sort();
-}
-
-function selectedAssets() {
-  const available = chartAssets();
-  const saved = dashboardFilters.get(SHARED_ASSETS_KEY);
-  if (saved === null) return available.includes('BTC') ? ['BTC'] : available.slice(0, 1);
-  return dashboardFilters.getList(SHARED_ASSETS_KEY)
-    .filter(asset => available.includes(asset))
-    .slice(0, MAX_CHARTS);
-}
-
-function saveSelectedAssets(assets) {
-  dashboardFilters.setList(SHARED_ASSETS_KEY, assets);
-}
-
-function availableExchanges() {
-  const exchanges = new Set([...VENUE_ORDER, ...SERIES.map(series => series.exchange)]);
-  Object.values(discoveredExchanges)
-    .forEach(discovered => discovered.forEach(exchange => exchanges.add(exchange)));
-  return [...exchanges].sort((a, b) => {
-    const ai = VENUE_ORDER.indexOf(a);
-    const bi = VENUE_ORDER.indexOf(b);
-    return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi) || a.localeCompare(b);
-  });
-}
-
-function currentMarketExchanges() {
-  const exchanges = new Set(discoveredExchanges[market]);
-  SERIES.filter(series => series.market_type === market)
-    .forEach(series => exchanges.add(series.exchange));
-  return exchanges;
-}
-
-function selectedExchanges() {
-  const available = availableExchanges();
-  if (dashboardFilters.get(SHARED_EXCHANGES_KEY) === null) return available;
-  return dashboardFilters.getList(SHARED_EXCHANGES_KEY)
-    .filter(exchange => available.includes(exchange));
-}
-
-function saveSelectedExchanges(exchanges) {
-  dashboardFilters.setList(SHARED_EXCHANGES_KEY, exchanges);
-}
-
-async function fetchCandles(series, hours, { forceRefresh = false } = {}) {
-  const qs = new URLSearchParams({
-    exchange: series.exchange,
-    market_type: series.market_type,
-    symbol: series.symbol,
-    interval: series.interval,
-    hours,
-    limit: 5000,
-  });
-  return Overseer.requestJSON(`/api/candles?${qs}`, { forceRefresh });
-}
-
-async function fetchVolatility(series, hours, windowHours, { forceRefresh = false } = {}) {
-  const qs = new URLSearchParams({
-    exchange: series.exchange,
-    market_type: series.market_type,
-    symbol: series.symbol,
-    hours,
-    window_hours: windowHours,
-  });
-  return Overseer.requestJSON(`/api/realised-volatility?${qs}`, { forceRefresh });
-}
-
-async function fetchSpreads(asset, hours, { forceRefresh = false } = {}) {
-  const qs = new URLSearchParams({ asset, market, hours });
-  return Overseer.requestJSON(`/api/orderbook-spreads?${qs}`, { forceRefresh });
-}
-
-class MarketChartCard {
-  constructor(root, asset, { stats = null } = {}) {
-    this.root = root;
-    this.asset = asset;
-    this.stats = stats;
-    this.status = root.querySelector('[data-chart-status]');
-    this.retry = root.querySelector('[data-chart-retry]');
-    this.volatilityCloses = {};
-    this.volatilityWindow = volatilityHours;
-    this.chart = LightweightCharts.createChart(
-      root.querySelector('[data-chart-canvas]'),
-      chartOptions,
-    );
-    this.handles = [];
-    this.data = {};
-    this.metric = chartMetric;
-    this.loadVersion = 0;
-    this.availability = root.querySelector('[data-chart-availability]');
-    this.availabilityText = document.createTextNode('');
-    this.availabilityDetail = document.createElement('span');
-    this.availabilityDetail.className = 'sr-only';
-    this.availability.replaceChildren(this.availabilityText, this.availabilityDetail);
-    this.tooltip = document.createElement('div');
-    this.tooltip.className = 'pointer-events-none absolute left-2 top-2 z-10 hidden w-72 max-w-[calc(100%_-_1rem)] rounded-md border border-line-strong bg-panel px-3 py-2 shadow-lg';
-    this.tooltip.dataset.chartTooltip = '';
-    this.tooltipTitle = document.createElement('div');
-    this.tooltipTitle.className = 'mb-2 font-mono text-label text-dim';
-    this.tooltipRows = document.createElement('div');
-    this.tooltipRows.className = 'space-y-1 font-mono text-label';
-    this.tooltipValues = new Map();
-    this.tooltip.append(this.tooltipTitle, this.tooltipRows);
-    root.querySelector('[data-chart-canvas]').append(this.tooltip);
-    this.chart.subscribeCrosshairMove(param => this.showCrosshair(param));
-    this.retry?.addEventListener('click', () => this.load());
-  }
-
-  setStatus(message, retry = false) {
-    this.status.textContent = message;
-    this.retry?.classList.toggle('hidden', !retry);
-  }
-
-  rowValue(row) {
-    if (!row) return '—';
-    if (this.metric === 'spread') return `${row.spread_bps.toFixed(2)} bp`;
-    if (this.metric === 'volatility') {
-      const value = row.rv_pct === null ? '—' : `${row.rv_pct.toFixed(2)}%`;
-      return `${value} · ${(100 * row.returns / (this.volatilityWindow * 60)).toFixed(1)}%`;
-    }
-    return fmt(row.close);
-  }
-
-  syncTooltip(venues) {
-    this.tooltip.classList.add('hidden');
-    this.tooltipValues.clear();
-    this.tooltipRows.replaceChildren();
-    for (const venue of venues) {
-      const row = document.createElement('div');
-      row.className = 'flex items-center justify-between gap-3';
-      const name = document.createElement('span');
-      name.className = 'flex min-w-0 items-center gap-2 text-body';
-      const swatch = document.createElement('span');
-      swatch.className = 'h-2 w-2 shrink-0 rounded-full';
-      swatch.style.background = colorFor(venue);
-      const label = document.createElement('span');
-      label.className = 'truncate';
-      label.textContent = labelFor(venue);
-      name.append(swatch, label);
-      const value = document.createElement('span');
-      value.className = 'shrink-0 tabular-nums text-body';
-      row.append(name, value);
-      this.tooltipRows.append(row);
-      this.tooltipValues.set(venue, value);
-    }
-  }
-
-  showCrosshair(param) {
-    const canvas = this.root.querySelector('[data-chart-canvas]');
-    if (!param.point || typeof param.time !== 'number' || !this.tooltipValues.size ||
-        param.point.x < 0 || param.point.y < 0 ||
-        param.point.x > canvas.clientWidth || param.point.y > canvas.clientHeight) {
-      this.tooltip.classList.add('hidden');
-      return;
-    }
-    const kind = this.metric === 'price' ? 'close'
-      : this.metric === 'spread' ? 'spread' : 'RV / coverage';
-    this.tooltipTitle.textContent =
-      `${new Date(param.time * 1000).toISOString().slice(0, 16).replace('T', ' ')} UTC · ${kind}`;
-    for (const [venue, label] of this.tooltipValues) {
-      const rows = this.data[venue];
-      let left = 0, right = rows.length - 1, row = null;
-      while (left <= right) {
-        const middle = Math.floor((left + right) / 2);
-        if (rows[middle].time === param.time) { row = rows[middle]; break; }
-        if (rows[middle].time < param.time) left = middle + 1;
-        else right = middle - 1;
-      }
-      label.textContent = this.rowValue(row);
-    }
-    this.tooltip.classList.remove('hidden');
-  }
-
-  updateAvailability(visible) {
-    const selected = selectedExchanges();
-    const available = visible.filter(venue => this.metric !== 'volatility' ||
-      this.data[venue].some(row => row.rv_pct !== null));
-    const missing = selected.filter(venue => !available.includes(venue));
-    const partial = this.metric === 'volatility' ? visible.filter(venue => {
-      const last = this.data[venue].at(-1);
-      return last.rv_pct === null && last.returns > 0;
-    }).length : 0;
-    this.availabilityText.textContent = selected.length
-      ? `${available.length}/${selected.length} selected venues available${
-        partial ? ` · ${partial} latest ${partial === 1 ? 'window' : 'windows'} incomplete` : ''}`
-      : 'No exchanges selected.';
-    const missingText = missing.length ? `Unavailable: ${missing.map(labelFor).join(', ')}.` : '';
-    this.availability.title = missingText;
-    const latest = visible.map(venue =>
-      `${labelFor(venue)}: ${this.rowValue(this.data[venue].at(-1))}`).join('; ');
-    this.availabilityDetail.textContent =
-      `${missingText ? ` ${missingText}` : ''}${latest ? ` Latest values: ${latest}.` : ''}`;
-  }
-
-  clearSeries() {
-    this.tooltip.classList.add('hidden');
-    this.tooltipValues.clear();
-    this.handles.forEach(handle => this.chart.removeSeries(handle));
-    this.handles = [];
-  }
-
-  async load({ forceRefresh = false } = {}) {
-    const version = ++this.loadVersion;
-    const requestedMetric = chartMetric;
-    const requestedWindow = volatilityHours;
-    const isVolatility = requestedMetric === 'volatility';
-    const hours = document.getElementById('hours').value;
-    this.setStatus(Object.keys(this.data).length ? 'refreshing…' : 'loading…');
-
-    if (requestedMetric === 'spread') {
-      try {
-        const payload = await fetchSpreads(this.asset, hours, { forceRefresh });
-        if (version !== this.loadVersion) return;
-        payload.series.forEach(series => {
-          discoveredExchanges[payload.market].add(series.exchange);
-        });
-        renderExchangeSummary();
-        this.metric = requestedMetric;
-        this.data = Object.fromEntries(
-          payload.series.map(series => [series.exchange, series.points])
-        );
-        this.render();
-        if (Object.values(this.data).some(rows => rows.length)) {
-          this.setStatus('');
-          dashboardState.ready();
-        } else {
-          this.setStatus('no spread samples');
-          if (dashboardView === 'overview') {
-            dashboardState.empty(
-              'No orderbook spread samples exist for this market and window.',
-              () => this.load(),
-            );
-          }
-        }
-      } catch (error) {
-        if (version !== this.loadVersion) return;
-        this.metric = requestedMetric;
-        this.data = {};
-        this.render();
-        this.setStatus('load failed', true);
-        if (dashboardView === 'overview') {
-          dashboardState.error('Spread series', () => this.load());
-        }
-      }
-      return;
-    }
-
-    const byVenue = {};
-    for (const series of SERIES.filter(
-      series => series.market_type === market && series.asset === this.asset
-    )) {
-      if (isVolatility && series.interval !== '1m') continue;
-      if (!byVenue[series.exchange] || series.interval === '1m') {
-        byVenue[series.exchange] = series;
-      }
-    }
-    const venues = Object.keys(byVenue);
-    if (!venues.length) {
-      this.metric = requestedMetric;
-      this.data = {};
-      this.render();
-      this.setStatus(`no ${market} series`);
-      return;
-    }
-    const results = await Promise.allSettled(
-      venues.map(venue => isVolatility
-        ? fetchVolatility(byVenue[venue], hours, requestedWindow, { forceRefresh })
-        : fetchCandles(byVenue[venue], hours, { forceRefresh }))
-    );
-    if (version !== this.loadVersion) return;
-    this.metric = requestedMetric;
-    this.volatilityWindow = requestedWindow;
-    this.volatilityCloses = {};
-    this.data = Object.fromEntries(
-      venues.flatMap((venue, index) => {
-        if (results[index].status !== 'fulfilled') return [];
-        const payload = results[index].value;
-        if (isVolatility) this.volatilityCloses[venue] = payload.last_close_time;
-        return [[venue, isVolatility ? payload.points : payload]];
-      })
-    );
-    this.render();
-    const failures = results.filter(result => result.status === 'rejected').length;
-    const hasBars = Object.values(this.data).some(rows =>
-      isVolatility ? rows.some(row => row.rv_pct !== null) : rows.length
-    );
-    if (hasBars) {
-      this.setStatus(
-        failures
-          ? `${failures} ${failures === 1 ? 'venue' : 'venues'} unavailable`
-          : '',
-        failures > 0,
-      );
-      dashboardState.ready();
-    } else if (failures === results.length) {
-      this.setStatus('load failed', true);
-      if (dashboardView === 'overview') {
-        dashboardState.error(isVolatility ? 'Realised volatility' : 'Price series', () => this.load());
-      }
-    } else {
-      this.setStatus(isVolatility ? 'no complete rolling windows' : 'no bars in window');
-      if (dashboardView === 'overview') {
-        dashboardState.empty(
-          isVolatility
-            ? 'No complete rolling volatility windows exist. Missing candles leave gaps.'
-            : 'No price bars exist for this market and window.',
-          () => this.load(),
-        );
-      }
-    }
-  }
-
-  render() {
-    this.clearSeries();
-    const hours = document.getElementById('hours').value;
-    const ordered = [...Object.keys(VENUE_COLORS), ...Object.keys(this.data)]
-      .filter((venue, index, all) => all.indexOf(venue) === index && this.data[venue]?.length);
-    const allowed = new Set(selectedExchanges());
-    const visible = ordered.filter(venue => allowed.has(venue));
-    const isSpread = this.metric === 'spread';
-    const isVolatility = this.metric === 'volatility';
-    const metricName = isSpread ? 'spread' : isVolatility ? 'realised volatility' : 'price';
-    const kind = this.root.querySelector('[data-chart-kind]');
-    if (kind) kind.textContent = `${metricName}${this.stats ? ' chart' : ''}`;
-    this.root.dataset.panelLabel = `${this.asset} ${metricName} chart`;
-
-    if (!isSpread && !isVolatility && visible.length === 1) {
-      const series = this.chart.addCandlestickSeries({
-        upColor: CHART_THEME.gain,
-        downColor: CHART_THEME.loss,
-        wickUpColor: CHART_THEME.gain,
-        wickDownColor: CHART_THEME.loss,
-        borderVisible: false,
-      });
-      series.setData(this.data[visible[0]]);
-      this.handles.push(series);
-    } else {
-      for (const venue of visible) {
-        const options = { color: colorFor(venue), lineWidth: 2 };
-        if (isSpread || isVolatility) {
-          options.priceFormat = {
-            type: 'custom',
-            formatter: value => `${value.toFixed(2)}${isSpread ? ' bp' : '%'}`,
-          };
-        }
-        if (isVolatility) {
-          // Separate segments prevent the library joining across missing windows.
-          const timeline = this.chart.addLineSeries({
-            ...options, lineVisible: false, lastValueVisible: false,
-            priceLineVisible: false, crosshairMarkerVisible: false,
-          });
-          timeline.setData(this.data[venue].map(row => ({ time: row.time })));
-          this.handles.push(timeline);
-          let segment = [];
-          const addSegment = () => {
-            if (!segment.length) return;
-            const line = this.chart.addLineSeries({
-              ...options, lastValueVisible: false, priceLineVisible: false,
-            });
-            line.setData(segment);
-            this.handles.push(line);
-            segment = [];
-          };
-          for (const row of this.data[venue]) {
-            if (row.rv_pct === null) addSegment();
-            else segment.push({ time: row.time, value: row.rv_pct });
-          }
-          addSegment();
-          continue;
-        }
-        const series = this.chart.addLineSeries(options);
-        series.setData(this.data[venue].map(row => ({
-          time: row.time,
-          value: isSpread ? row.spread_bps : row.close,
-        })));
-        this.handles.push(series);
-      }
-    }
-
-    this.syncTooltip(visible);
-    this.updateAvailability(visible);
-
-    if (this.stats) {
-      const reference = [...visible]
-        .sort((a, b) => this.data[b].length - this.data[a].length)[0];
-      if (reference) {
-        const rows = this.data[reference];
-        const last = rows[rows.length - 1];
-        if (isSpread) {
-          const values = rows.map(row => row.spread_bps);
-          const average = values.reduce((sum, value) => sum + value, 0) / values.length;
-          this.stats.innerHTML =
-            stat(`last · ${reference}`, `${last.spread_bps.toFixed(2)} bp`) +
-            stat(`avg ${hours}h`, `${average.toFixed(2)} bp`, 'text-phosphor') +
-            stat('wide', `${Math.max(...values).toFixed(2)} bp`) +
-            stat('tight', `${Math.min(...values).toFixed(2)} bp`);
-        } else if (isVolatility) {
-          const close = this.volatilityCloses[reference];
-          this.stats.innerHTML =
-            stat(`last · ${reference}`, last.rv_pct === null ? '—' : `${last.rv_pct.toFixed(2)}%`) +
-            stat('rolling window', `${this.volatilityWindow}h`) +
-            stat('coverage', `${(100 * last.returns / (this.volatilityWindow * 60)).toFixed(1)}%`) +
-            stat('last close · UTC', close ? new Date(close * 1000).toISOString().slice(11, 16) : '—');
-        } else {
-          const first = rows[0];
-          const delta = (last.close - first.close) / first.close * 100;
-          this.stats.innerHTML =
-            stat(`last · ${reference}`, fmt(last.close)) +
-            stat(`Δ ${hours}h`, `${delta >= 0 ? '+' : ''}${delta.toFixed(2)}%`,
-                 delta >= 0 ? 'text-gain' : 'text-loss') +
-            stat('high', fmt(Math.max(...rows.map(row => row.high)))) +
-            stat('low', fmt(Math.min(...rows.map(row => row.low))));
-        }
-      } else {
-        this.stats.innerHTML = stat(
-          'status',
-          `no visible ${isSpread ? 'spreads' : isVolatility ? 'volatility series' : 'bars'}`,
-          'text-dim',
-        );
-      }
-    }
-    if (visible.length) this.chart.timeScale().fitContent();
-  }
-
-  destroy() {
-    this.loadVersion += 1;
-    this.chart.remove();
-  }
-}
-
-const overviewCard = new MarketChartCard(
-  document.querySelector('[data-panel="overview-chart"]'),
-  'BTC',
-  {
-    stats: document.getElementById('overview-stats'),
-  },
-);
-
-function populateTokens() {
-  const select = document.getElementById('token');
-  const previous = select.value;
-  const saved = dashboardFilters.get('token');
-  const tokens = availableAssets();
-  select.innerHTML = tokens.map(token => `<option value="${token}">${token}</option>`).join('');
-  if (tokens.includes(previous)) select.value = previous;
-  else if (tokens.includes(saved)) select.value = saved;
-  else if (tokens.includes('BTC')) select.value = 'BTC';
-  dashboardFilters.set('token', select.value);
-  overviewCard.asset = select.value;
-}
-
-function createMultiCard(asset) {
-  const root = document.createElement('section');
-  root.dataset.panel = `chart-${market}-${asset}`;
-  root.dataset.panelLabel = `${asset} chart`;
-  root.dataset.chartCard = '';
-  root.className = 'chart-card dashboard-market-chart flex flex-col overflow-hidden';
-  root.innerHTML = `
-    <div class="flex min-h-11 items-center justify-between gap-3 border-b border-line/60 px-3 py-1.5">
-      <div class="flex min-w-0 items-baseline gap-2">
-        <h2 class="font-mono text-data font-semibold tracking-label text-body">${asset}</h2>
-        <span data-chart-kind class="font-mono text-label tracking-label uppercase text-faint">price</span>
-      </div>
-      <div class="flex min-w-0 items-center gap-1" role="group"
-           aria-label="${asset} chart controls">
-        <span data-chart-status class="mr-1 max-w-28 truncate font-mono text-label text-faint"
-              role="status"></span>
-        <button type="button" data-chart-retry
-                class="compact-button hidden font-mono text-label uppercase text-phosphor">retry</button>
-        <button type="button" data-remove-asset="${asset}" aria-label="Remove ${asset} chart"
-                title="Remove ${asset} chart"
-                class="toolbar-button inline-flex min-w-11 items-center justify-center
-                       focus-visible:ring-1 focus-visible:ring-loss">
-          <span aria-hidden="true"
-                class="flex h-3.5 w-3.5 items-center justify-center rounded-full border border-white/20
-                       bg-loss font-mono text-[10px] font-bold leading-none text-ink">×</span>
-        </button>
-        <button type="button" data-max
-                class="toolbar-button inline-flex min-w-11 items-center justify-center
-                       focus-visible:ring-1 focus-visible:ring-gain">
-          <span data-traffic-icon aria-hidden="true"
-                class="flex h-3.5 w-3.5 items-center justify-center rounded-full border border-white/20
-                       bg-gain font-mono text-[10px] font-bold leading-none text-ink">+</span>
-        </button>
-      </div>
-    </div>
-    <div data-panel-body class="flex min-h-0 flex-1 flex-col">
-      <div data-chart-canvas aria-hidden="true" class="relative min-h-0 flex-1"></div>
-      <p data-chart-availability class="shrink-0 border-t border-line/40 px-3 py-2 font-mono text-label text-dim"></p>
-    </div>`;
-  document.getElementById('chart-grid').append(root);
-  return new MarketChartCard(root, asset);
-}
-
-function renderAssetSummary() {
-  const assets = selectedAssets();
-  const summary = assets.length ? assets.join(', ') : 'Choose assets';
-  const trigger = document.getElementById('asset-picker-trigger');
-  document.getElementById('asset-picker-label').textContent = summary;
-  document.getElementById('asset-picker-count').textContent =
-    `${assets.length} / ${MAX_CHARTS}`;
-  trigger.title = assets.length ? `Selected charts: ${summary}` : 'Choose chart assets';
-  trigger.setAttribute('aria-label', `${trigger.title}. ${assets.length} of ${MAX_CHARTS} selected.`);
-  renderChartFilterSelection();
-}
-
-function renderAssetOptions() {
-  const options = document.getElementById('asset-options');
-  const query = document.getElementById('asset-search').value.trim().toLowerCase();
-  const atLimit = stagedAssets.size >= MAX_CHARTS;
-  const rows = new Map(
-    [...options.querySelectorAll('label[data-asset]')]
-      .map(row => [row.dataset.asset, row]),
-  );
-  let matchCount = 0;
-  for (const asset of chartAssets()) {
-    let row = rows.get(asset);
-    if (!row) {
-      row = document.createElement('label');
-      row.dataset.asset = asset;
-      const input = document.createElement('input');
-      input.type = 'checkbox';
-      input.value = asset;
-      input.className = 'h-4 w-4 accent-phosphor disabled:cursor-not-allowed';
-      const name = document.createElement('span');
-      name.textContent = asset;
-      row.append(input, name);
-      options.append(row);
-    }
-    const checked = stagedAssets.has(asset);
-    const disabled = atLimit && !checked;
-    const matches = !query || asset.toLowerCase().includes(query);
-    const input = row.querySelector('input');
-    input.checked = checked;
-    input.disabled = disabled;
-    row.className = `${matches ? 'flex' : 'hidden'} min-h-11 items-center gap-3 rounded px-2 font-mono text-data
-      ${disabled ? 'cursor-not-allowed bg-panel/30 text-faint'
-                 : 'cursor-pointer hover:bg-panel2'}`;
-    row.querySelector('span').className = disabled ? 'text-faint' : 'text-body';
-    if (matches) matchCount++;
-  }
-  let empty = options.querySelector('[data-asset-empty]');
-  if (!empty) {
-    empty = document.createElement('div');
-    empty.dataset.assetEmpty = '';
-    empty.className = 'px-2 py-6 text-center font-mono text-data text-dim';
-    empty.textContent = 'No assets match';
-    options.append(empty);
-  }
-  empty.hidden = matchCount > 0;
-}
-
-function setAssetPicker(open, restoreFocus = false) {
-  const picker = document.getElementById('asset-picker');
-  const trigger = document.getElementById('asset-picker-trigger');
-  picker.classList.toggle('hidden', !open);
-  trigger.setAttribute('aria-expanded', String(open));
-  if (open) {
-    setExchangePicker(false);
-    stagedAssets = new Set(selectedAssets());
-    document.getElementById('asset-search').value = '';
-    renderAssetOptions();
-    document.getElementById('asset-search').focus();
-  } else if (restoreFocus) {
-    trigger.focus();
-  }
-}
-
-function renderExchangeSummary() {
-  const available = availableExchanges();
-  const selected = selectedExchanges();
-  document.getElementById('exchange-picker-label').textContent =
-    selected.length === available.length
-      ? 'all'
-      : selected.length === 0
-        ? 'none'
-        : selected.length <= 2
-          ? selected.map(labelFor).join(', ')
-          : `${selected.length} selected`;
-  const legend = document.getElementById('exchange-legend');
-  const activeVenues = new Set(selected);
-  const buttons = new Map(
-    [...legend.querySelectorAll('[data-exchange]')]
-      .map(button => [button.dataset.exchange, button]),
-  );
-  available.forEach((venue, index) => {
-    let button = buttons.get(venue);
-    if (!button) {
-      button = document.createElement('button');
-      button.type = 'button';
-      button.dataset.exchange = venue;
-      const swatch = document.createElement('span');
-      swatch.className = 'h-2 w-2 shrink-0 rounded-full';
-      swatch.style.background = colorFor(venue);
-      const label = document.createElement('span');
-      label.textContent = labelFor(venue);
-      button.append(swatch, label);
-    }
-    buttons.delete(venue);
-    const active = activeVenues.has(venue);
-    button.setAttribute('aria-pressed', String(active));
-    button.title = `${labelFor(venue)}: ${active ? 'selected' : 'not selected'}. Toggle on every chart.`;
-    button.className = `toolbar-button inline-flex items-center gap-2 border font-mono
-      focus-visible:ring-1 focus-visible:ring-phosphor ${
-      active ? 'border-phosphor bg-phosphor/10 text-body ring-1 ring-inset ring-phosphor hover:bg-phosphor/20'
-             : 'border-line/50 bg-panel/30 text-dim hover:border-line hover:text-body'}`;
-    if (legend.children[index] !== button) {
-      legend.insertBefore(button, legend.children[index] ?? null);
-    }
-  });
-  buttons.forEach(button => button.remove());
-  renderChartFilterSelection();
-}
-
-function renderExchangeOptions() {
-  const available = availableExchanges();
-  const availableHere = currentMarketExchanges();
-  document.getElementById('exchange-options').innerHTML = available.length
-    ? available.map(exchange => `
-        <label class="flex min-h-11 cursor-pointer items-center gap-3 rounded px-2
-                      font-mono text-data hover:bg-panel2">
-          <input type="checkbox" value="${exchange}"
-                 ${stagedExchanges.has(exchange) ? 'checked' : ''}
-                 class="h-4 w-4 accent-phosphor">
-          <span class="h-2 w-2 rounded-full" style="background:${colorFor(exchange)}"></span>
-          <span class="text-body">${labelFor(exchange)}</span>
-          ${availableHere.has(exchange) ? '' : `<span class="ml-auto text-label text-faint">no ${market} series</span>`}
-        </label>`).join('')
-    : '<div class="px-2 py-6 text-center font-mono text-data text-dim">No exchanges available</div>';
-}
-
-function setExchangePicker(open, restoreFocus = false) {
-  const picker = document.getElementById('exchange-picker');
-  const trigger = document.getElementById('exchange-picker-trigger');
-  picker.classList.toggle('hidden', !open);
-  trigger.setAttribute('aria-expanded', String(open));
-  if (open) {
-    setAssetPicker(false);
-    stagedExchanges = new Set(selectedExchanges());
-    renderExchangeOptions();
-    picker.querySelector('input')?.focus();
-  } else if (restoreFocus) {
-    trigger.focus();
-  }
-}
-
-function renderChartFilterSelection() {
-  const assets = selectedAssets();
-  const assetSummary = dashboardView === 'overview'
-    ? document.getElementById('token').value || 'no asset'
-    : assets.length === 1 ? assets[0] : `${assets.length} assets`;
-  const history = document.getElementById('hours').selectedOptions[0]?.textContent || '';
-  const venues = selectedExchanges().length;
-  const metric = chartMetric === 'volatility' ? `volatility (${volatilityHours}h)` : chartMetric;
-  document.getElementById('chart-filter-selection').textContent =
-    `${market} · ${assetSummary} · ${metric} · ${history} · ${venues} ${venues === 1 ? 'venue' : 'venues'}`;
-}
-
-function syncChartFilterLayout() {
-  if (desktopFilters.matches) {
-    chartFilters.open = true;
-    // The mobile summary disappears on desktop; keep its keyboard focus usable.
-    if (document.activeElement === chartFiltersSummary) {
-      chartFilters.querySelector('[data-market][aria-pressed="true"]').focus();
-    }
-  } else {
-    // Do not hide a control someone is using when the viewport narrows.
-    if (chartFiltersBody.contains(document.activeElement)) mobileFiltersOpen = true;
-    chartFilters.open = mobileFiltersOpen;
-  }
-}
-
-function renderMarketCards() {
-  overviewCard.render();
-  for (const card of multiCards.values()) card.render();
-}
-
-function syncMultiCards() {
-  const grid = document.getElementById('chart-grid');
-  const assets = selectedAssets();
-  grid.dataset.chartCount = String(assets.length);
-  for (const [asset, card] of multiCards) {
-    if (!assets.includes(asset)) {
-      card.destroy();
-      card.root.remove();
-      multiCards.delete(asset);
-    }
-  }
-  for (const asset of assets) {
-    if (!multiCards.has(asset)) multiCards.set(asset, createMultiCard(asset));
-    grid.append(multiCards.get(asset).root);
-  }
-  document.getElementById('multi-chart-empty').classList.toggle('hidden', assets.length > 0);
-  refreshPanels();
-}
-
-async function loadActiveCharts({ forceRefresh = false } = {}) {
-  if (dashboardView === 'overview') {
-    overviewCard.asset = document.getElementById('token').value;
-    await overviewCard.load({ forceRefresh });
-    return;
-  }
-  syncMultiCards();
-  await Promise.all(
-    [...multiCards.values()].map(card => card.load({ forceRefresh })),
-  );
-}
-
-function setSegmentState(button, active) {
-  button.className =
-    `compact-button min-w-0 flex-1 px-3 text-data tracking-label uppercase ${
-      active ? 'bg-phosphor/85 text-ink' : 'text-dim hover:text-body'
-    }`;
-  button.setAttribute('aria-pressed', String(active));
-}
-
-function setDashboardView(nextView, reload = true) {
-  dashboardView = nextView;
-  dashboardFilters.set('view', nextView);
-  const isCharts = nextView === 'charts';
-  document.getElementById('overview-view').classList.toggle('hidden', isCharts);
-  document.getElementById('charts-view').classList.toggle('hidden', !isCharts);
-  document.getElementById('token-select-wrap').classList.toggle('hidden', isCharts);
-  document.getElementById('asset-picker-wrap').classList.toggle('hidden', !isCharts);
-  setSegmentState(document.getElementById('view-overview'), !isCharts);
-  setSegmentState(document.getElementById('view-charts'), isCharts);
-  setAssetPicker(false);
-  setExchangePicker(false);
-  if (isCharts) syncMultiCards();
-  renderChartFilterSelection();
-  refreshPanels();
-  if (reload) {
-    loadActiveCharts();
-    if (!isCharts) {
-      loadOverview();
-      loadBasis();
-    }
-  }
-}
-
-function setMetric(nextMetric, reload = true) {
-  chartMetric = nextMetric;
-  dashboardFilters.set('metric', nextMetric);
-  setSegmentState(document.getElementById('metric-price'), nextMetric === 'price');
-  const isSpread = nextMetric === 'spread';
-  const isVolatility = nextMetric === 'volatility';
-  const controls = document.getElementById('volatility-controls');
-  controls.classList.toggle('hidden', !isVolatility);
-  controls.classList.toggle('flex', isVolatility);
-  document.getElementById('dashboard-title').textContent =
-    isSpread ? 'Bid–ask spreads' : isVolatility ? 'Realised volatility' : 'Cross-venue prices';
-  document.getElementById('chart-help').classList.toggle('hidden', isVolatility);
-  document.getElementById('chart-help').textContent = isSpread
-    ? 'Spread is ask minus bid as basis points of midpoint.'
-    : 'Exchange selection applies to every market chart. Use the crosshair for values; line gaps show basis.';
-  setSegmentState(document.getElementById('metric-spread'), isSpread);
-  setSegmentState(document.getElementById('metric-volatility'), isVolatility);
-  document.querySelectorAll('[data-volatility-hours]').forEach(button => {
-    setSegmentState(button, Number(button.dataset.volatilityHours) === volatilityHours);
-  });
-  renderChartFilterSelection();
-  if (reload) loadActiveCharts();
-}
-
-
-function setMarket(nextMarket, reload = true) {
-  market = nextMarket;
-  dashboardFilters.set('market', nextMarket);
-  setSegmentState(document.getElementById('mkt-perp'), nextMarket === 'perp');
-  setSegmentState(document.getElementById('mkt-spot'), nextMarket === 'spot');
-  setAssetPicker(false);
-  setExchangePicker(false);
-  for (const card of multiCards.values()) {
-    card.destroy();
-    card.root.remove();
-  }
-  multiCards.clear();
-  populateTokens();
-  renderAssetSummary();
-  renderExchangeSummary();
-  if (dashboardView === 'charts') syncMultiCards();
-  if (reload) loadActiveCharts();
-}
-
-chartFilters.addEventListener('toggle', () => {
-  if (desktopFilters.matches) return;
-  mobileFiltersOpen = chartFilters.open;
-  if (!chartFilters.open) {
-    setAssetPicker(false);
-    setExchangePicker(false);
-    if (chartFiltersBody.contains(document.activeElement)) chartFiltersSummary.focus();
-  }
-});
-desktopFilters.addEventListener('change', syncChartFilterLayout);
-
-document.getElementById('view-overview').addEventListener('click', () => setDashboardView('overview'));
-document.getElementById('view-charts').addEventListener('click', () => setDashboardView('charts'));
-document.getElementById('mkt-perp').addEventListener('click', () => setMarket('perp'));
-document.getElementById('mkt-spot').addEventListener('click', () => setMarket('spot'));
-document.getElementById('metric-price').addEventListener('click', () => setMetric('price'));
-document.getElementById('metric-spread').addEventListener('click', () => setMetric('spread'));
-document.getElementById('metric-volatility').addEventListener('click', () => setMetric('volatility'));
-document.getElementById('token').addEventListener('change', event => {
-  dashboardFilters.set('token', event.target.value);
-  renderChartFilterSelection();
-  loadActiveCharts();
-});
-document.getElementById('hours').addEventListener('change', event => {
-  dashboardFilters.set('hours', event.target.value);
-  renderChartFilterSelection();
-  loadActiveCharts();
-  if (dashboardView === 'overview') loadVolumeOiRatio();
-});
-document.getElementById('volatility-controls').addEventListener('click', event => {
-  const button = event.target.closest('[data-volatility-hours]');
-  if (!button) return;
-  volatilityHours = Number(button.dataset.volatilityHours);
-  dashboardFilters.set('volatility-hours', volatilityHours);
-  setMetric('volatility');
-});
-document.getElementById('asset-picker-trigger').addEventListener('click', () => {
-  const open = document.getElementById('asset-picker-trigger').getAttribute('aria-expanded') === 'true';
-  setAssetPicker(!open, open);
-});
-document.getElementById('exchange-picker-trigger').addEventListener('click', () => {
-  const trigger = document.getElementById('exchange-picker-trigger');
-  const open = trigger.getAttribute('aria-expanded') === 'true';
-  setExchangePicker(!open, open);
-});
-document.getElementById('exchange-legend').addEventListener('click', event => {
-  const button = event.target.closest('[data-exchange]');
-  if (!button) return;
-  const selected = new Set(selectedExchanges());
-  const venue = button.dataset.exchange;
-  selected.has(venue) ? selected.delete(venue) : selected.add(venue);
-  saveSelectedExchanges([...selected]);
-  renderExchangeSummary();
-  renderMarketCards();
-});
-document.getElementById('exchange-options').addEventListener('change', event => {
-  if (event.target.type !== 'checkbox') return;
-  event.target.checked
-    ? stagedExchanges.add(event.target.value)
-    : stagedExchanges.delete(event.target.value);
-});
-document.getElementById('exchange-all').addEventListener('click', () => {
-  stagedExchanges = new Set(availableExchanges());
-  renderExchangeOptions();
-});
-document.getElementById('exchange-apply').addEventListener('click', () => {
-  saveSelectedExchanges([...stagedExchanges]);
-  renderExchangeSummary();
-  setExchangePicker(false, true);
-  renderMarketCards();
-});
-document.getElementById('asset-search').addEventListener('input', renderAssetOptions);
-document.getElementById('asset-options').addEventListener('change', event => {
-  if (event.target.type !== 'checkbox') return;
-  event.target.checked
-    ? stagedAssets.add(event.target.value)
-    : stagedAssets.delete(event.target.value);
-  renderAssetOptions();
-});
-document.getElementById('asset-clear').addEventListener('click', () => {
-  stagedAssets.clear();
-  renderAssetOptions();
-});
-document.getElementById('asset-apply').addEventListener('click', () => {
-  saveSelectedAssets([...stagedAssets].slice(0, MAX_CHARTS));
-  renderAssetSummary();
-  setAssetPicker(false, true);
-  syncMultiCards();
-  loadActiveCharts();
-});
-document.addEventListener('click', event => {
-  const remove = event.target.closest('[data-remove-asset]');
-  if (remove) {
-    saveSelectedAssets(selectedAssets().filter(asset => asset !== remove.dataset.removeAsset));
-    renderAssetSummary();
-    syncMultiCards();
-    (chartFilters.open
-      ? document.getElementById('asset-picker-trigger')
-      : chartFiltersSummary).focus();
-    return;
-  }
-  const assetWrapper = document.getElementById('asset-picker-wrap');
-  if (!assetWrapper.contains(event.target) &&
-      document.getElementById('asset-picker-trigger').getAttribute('aria-expanded') === 'true') {
-    setAssetPicker(false);
-  }
-  const exchangeWrapper = document.getElementById('exchange-picker-wrap');
-  if (!exchangeWrapper.contains(event.target) &&
-      document.getElementById('exchange-picker-trigger').getAttribute('aria-expanded') === 'true') {
-    setExchangePicker(false);
-  }
-});
-document.addEventListener('keydown', event => {
-  if (event.key !== 'Escape') return;
-  if (document.getElementById('asset-picker-trigger').getAttribute('aria-expanded') === 'true') {
-    setAssetPicker(false, true);
-  } else if (document.getElementById('exchange-picker-trigger').getAttribute('aria-expanded') === 'true') {
-    setExchangePicker(false, true);
-  }
-});
-
-
-// ---- panel chrome: collapse (persisted) + maximize (transient) --------------
-// Collapse folds a panel to its title row and survives reloads via localStorage.
-// Maximize floats the panel over the page (Esc restores). The chart keeps
-// working in both: autoSize re-measures whenever its container changes.
-const PANELS_KEY = 'overseer.collapsed';
-const collapsedPanels = new Set(JSON.parse(localStorage.getItem(PANELS_KEY) || '[]'));
-let maxedPanel = null;
-
-function refreshPanels() {
-  document.querySelectorAll('[data-panel]').forEach(sec => {
-    const id = sec.dataset.panel;
-    const label = sec.dataset.panelLabel || `${id} panel`;
-    const isMax = maxedPanel === id;
-    const isCol = collapsedPanels.has(id) && !isMax;
-    sec.querySelector('[data-panel-body]').classList.toggle('hidden', isCol);
-    sec.classList.toggle('panel-collapsed', isCol);
-    sec.classList.toggle('panel-maxed', isMax);
-    const colBtn = sec.querySelector('[data-collapse]');
-    if (colBtn) {
-      colBtn.textContent = isCol ? '+' : '−';
-      colBtn.title = isCol ? 'expand' : 'collapse';
-      colBtn.setAttribute('aria-label', (isCol ? 'Expand ' : 'Collapse ') + label);
-    }
-    const maxBtn = sec.querySelector('[data-max]');
-    if (maxBtn) {
-      const action = isMax ? 'Restore ' : 'Expand ';
-      const trafficIcon = maxBtn.querySelector('[data-traffic-icon]');
-      if (trafficIcon) trafficIcon.textContent = isMax ? '−' : '+';
-      else maxBtn.textContent = isMax ? 'restore' : 'expand';
-      maxBtn.title = action + label;
-      maxBtn.setAttribute('aria-label', action + label);
-    }
-  });
-}
-
-document.addEventListener('click', e => {
-  const btn = e.target.closest('[data-collapse],[data-max]');
-  if (!btn) return;
-  const id = btn.closest('[data-panel]').dataset.panel;
-  if (btn.hasAttribute('data-collapse')) {
-    collapsedPanels.has(id) ? collapsedPanels.delete(id) : collapsedPanels.add(id);
-    localStorage.setItem(PANELS_KEY, JSON.stringify([...collapsedPanels]));
-  } else {
-    maxedPanel = maxedPanel === id ? null : id;
-  }
-  refreshPanels();
-});
-document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && maxedPanel) { maxedPanel = null; refreshPanels(); }
-});
-refreshPanels();
-
-syncChartFilterLayout();
-dashboardFilters.restoreSelect(document.getElementById('hours'));
-populateTokens();
-renderAssetSummary();
-setMarket(market, false);
-setMetric(chartMetric, false);
-setDashboardView(dashboardView, false);
-Overseer.poll(loadActiveCharts, 60);
-
-// ---- market overview panels (venue volume + OI + carry spreads) -------------
-const fmtB = n => n == null ? '—'
-  : n >= 1e9 ? '$' + (n/1e9).toFixed(1) + 'B'
-  : n >= 1e6 ? '$' + (n/1e6).toFixed(0) + 'M'
-  : '$' + (n/1e3).toFixed(0) + 'K';
-
-function bar(label, value, max, color, extra) {
-  const w = max > 0 ? Math.max(1.5, value / max * 100) : 0;
-  return `<div>
-    <div class="mb-0.5 flex items-baseline justify-between font-mono text-data">
-      <span class="text-body">${label}</span>
-      <span class="tabular-nums text-dim">${extra || fmtB(value)}</span></div>
-    <div class="h-1.5 rounded bg-panel2">
-      <div class="h-1.5 rounded" style="width:${w}%;background:${color}"></div></div>
-  </div>`;
-}
-
-function ensureVolumeOiChart() {
-  if (volumeOiChart) return volumeOiChart;
-  volumeOiChart = LightweightCharts.createChart(
-    document.getElementById('volume-oi-chart'),
-    {
-      ...chartOptions,
-      rightPriceScale: { borderColor: CHART_THEME.border, minimumWidth: 68 },
-      localization: { priceFormatter: value => `${value.toFixed(2)}×` },
-    },
-  );
-  return volumeOiChart;
-}
-
-function orderedVolumeOiSeries(payload) {
-  const byVenue = new Map(payload.series.map(item => [item.exchange, item]));
-  return [...VENUE_ORDER, ...byVenue.keys()]
-    .filter((venue, index, all) => all.indexOf(venue) === index && byVenue.has(venue))
-    .map(venue => byVenue.get(venue));
-}
-
-function renderVolumeOiRatio(payload) {
-  const chart = ensureVolumeOiChart();
-  volumeOiSeries.forEach(series => chart.removeSeries(series));
-  volumeOiSeries.clear();
-
-  const ordered = orderedVolumeOiSeries(payload);
-  for (const item of ordered) {
-    const series = chart.addLineSeries({
-      color: colorFor(item.exchange),
-      lineWidth: 2,
-      title: labelFor(item.exchange),
-      priceLineVisible: false,
-      lastValueVisible: true,
-      crosshairMarkerRadius: 4,
-      priceFormat: { type: 'custom', formatter: value => `${value.toFixed(2)}×` },
-    });
-    series.setData(item.points.map(point => ({ time: point.time, value: point.ratio })));
-    volumeOiSeries.set(item.exchange, series);
-  }
-  if (ordered.length) chart.timeScale().fitContent();
-
-  document.getElementById('volume-oi-legend').innerHTML = ordered.map(item => {
-    const latest = item.points[item.points.length - 1];
-    return `<span class="flex shrink-0 items-center gap-1.5 rounded border border-line bg-panel2 px-2 py-1 font-mono text-label text-body">
-      <span class="h-2 w-2 rounded-full" style="background:${colorFor(item.exchange)}"></span>
-      <span>${labelFor(item.exchange)}</span>
-      <span class="tabular-nums text-dim">${latest ? latest.ratio.toFixed(2) + '×' : '—'}</span>
-    </span>`;
-  }).join('') || '<span class="font-mono text-label text-faint">no exchanges reported</span>';
-
-  const empty = document.getElementById('volume-oi-empty');
-  empty.textContent = 'No ratio history exists for this window.';
-  empty.classList.toggle('hidden', ordered.length > 0);
-  empty.classList.toggle('grid', ordered.length === 0);
-
-  const latest = ordered
-    .map(item => [item.exchange, item.points[item.points.length - 1]?.ratio])
-    .filter(([, ratio]) => ratio != null)
-    .sort((a, b) => b[1] - a[1]);
-  document.getElementById('volume-oi-summary').textContent = latest.length
-    ? `Latest volume to open interest ratios. ${latest.map(
-        ([venue, ratio]) => `${labelFor(venue)} ${ratio.toFixed(2)} times`
-      ).join(', ')}.`
-    : 'No volume to open interest ratio history is available.';
-
-}
-
-async function loadVolumeOiRatio({ forceRefresh = false } = {}) {
-  if (dashboardView !== 'overview') return;
-  const requestId = ++volumeOiRequest;
-  const status = document.getElementById('volume-oi-status');
-  status.textContent = 'loading…';
-  const hours = document.getElementById('hours').value;
-  try {
-    const payload = await Overseer.requestJSON(
-      `/api/volume-oi-ratio?${new URLSearchParams({ hours })}`,
-      { forceRefresh },
-    );
-    if (requestId !== volumeOiRequest) return;
-    renderVolumeOiRatio(payload);
-    status.textContent = `${payload.bucket_minutes}m buckets`;
-    payload.series.length
-      ? dashboardState.ready('volume-oi')
-      : dashboardState.empty(
-          'No volume/OI ratio history exists for this window.',
-          loadVolumeOiRatio,
-          'volume-oi',
-        );
-  } catch (error) {
-    if (requestId !== volumeOiRequest) return;
-    status.textContent = 'unavailable';
-    dashboardState.error('Volume/OI ratio', loadVolumeOiRatio, 'volume-oi');
-  }
-}
-
-
-async function loadOverview({ forceRefresh = false } = {}) {
-  if (dashboardView !== 'overview') return;
-  try {
-    const vv = await Overseer.requestJSON('/api/venue-volume', { forceRefresh });
-    const latest = vv.latest.sort((a, b) => b.total - a.total);
-    const max = latest[0]?.total || 0;
-    const cexTotal = latest.filter(v => ['binance','bybit'].includes(v.exchange))
-                           .reduce((s, v) => s + v.total, 0);
-    const all = latest.reduce((s, v) => s + v.total, 0);
-    document.getElementById('cex-share').textContent =
-      all ? `cex ${ (cexTotal / all * 100).toFixed(1) }%` : '—';
-    document.getElementById('vol-bars').innerHTML = latest.length
-      ? latest.map(v => bar(v.exchange, v.total, max, colorFor(v.exchange))).join('')
-      : '<div class="font-mono text-data text-dim">no sweep yet — first run lands at 00:37 UTC</div>';
-    dashboardState.ready('venue-volume');
-  } catch (error) {
-    dashboardState.error('Venue-volume summary', loadOverview, 'venue-volume');
-  }
-
-  try {
-    const fu = await Overseer.requestJSON('/api/funding', { forceRefresh });
-    const oi = Object.entries(fu).map(([coin, rows]) => [coin,
-        rows.reduce((s, r) => s + (r.oi_notional || 0), 0)])
-      .filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
-    const oimax = oi[0]?.[1] || 0;
-    document.getElementById('oi-bars').innerHTML = oi.length
-      ? oi.map(([c, v]) => bar(c, v, oimax, '#C4B5FD')).join('')
-      : '<div class="font-mono text-data text-dim">no liquidity data yet</div>';
-    dashboardState.ready('open-interest');
-
-  } catch (error) {
-    dashboardState.error('Open-interest summary', loadOverview, 'open-interest');
-  }
-
-  await loadVolumeOiRatio({ forceRefresh });
-}
-
-Overseer.poll(loadOverview, 300);
-
-// ---- basis snapshot: same-venue spot/perp pairs, latest bar -----------------
-async function loadBasis({ forceRefresh = false } = {}) {
-  if (dashboardView !== 'overview') return;
-  const series = JSON.parse(document.getElementById('series-data').textContent);
-  const pairs = [];
-  for (const s of series.filter(x => x.market_type === 'spot')) {
-    if (series.some(p => p.market_type === 'perp' && p.exchange === s.exchange && p.symbol === s.symbol))
-      pairs.push(s);
-  }
-  const shown = pairs.filter(p => p.exchange === 'binance').slice(0, 8);
-  try {
-    const results = await Promise.all(shown.map(async p => {
-      const qs = new URLSearchParams({ spot_exchange: p.exchange, spot_symbol: p.symbol,
-        perp_exchange: p.exchange, perp_symbol: p.symbol, interval: '1m', limit: 1 });
-      const d = await Overseer.requestJSON(`/api/basis?${qs}`, { forceRefresh });
-      return d.length ? { symbol: p.symbol, bps: d[d.length-1].basis_pct * 100 } : null;
-    }));
-    const rows = results.filter(Boolean).sort((a, b) => Math.abs(b.bps) - Math.abs(a.bps));
-    document.getElementById('basis-rows').innerHTML = rows.length
-      ? rows.map(r => `
-        <div class="flex items-baseline justify-between rounded bg-panel2/60 px-2.5 py-1.5 font-mono text-data">
-          <span class="text-body">${r.symbol}</span>
-          <span class="tabular-nums ${r.bps >= 0 ? 'text-gain' : 'text-loss'}">
-            ${r.bps >= 0 ? '+' : ''}${r.bps.toFixed(1)} bp</span></div>`).join('')
-      : '<div class="font-mono text-data text-dim">no joined bars yet</div>';
-    dashboardState.ready('basis-snapshot');
-  } catch (error) {
-    dashboardState.error('Basis snapshot', loadBasis, 'basis-snapshot');
-  }
-}
-
-
-Overseer.poll(loadBasis, 60);
-
-</script>
+<script src="{{ url_for('static', filename='js/venues.js', v='ui-consistency') }}"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js', v='panel-controls') }}"></script>
 {% endblock %}

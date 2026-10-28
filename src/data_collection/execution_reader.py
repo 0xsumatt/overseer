@@ -122,7 +122,9 @@ class ExecutionReader:
         self._parallel = asyncio.Semaphore(self.parallelism)
         self._fx_lock = asyncio.Lock()
 
-    def capture(self, listings: dict[str, str]) -> dict:
+    def capture(self, listings: dict[str, str], *, margin: bool = False) -> dict:
+        """Public books for each listed venue, with each venue's margin schedule
+        when `margin` is set. A margin read never costs a venue its book."""
         if not isinstance(listings, dict) or len(listings) > 10 or any(
                 not isinstance(venue, str) or not isinstance(symbol, str) or not symbol
                 for venue, symbol in listings.items()):
@@ -134,7 +136,7 @@ class ExecutionReader:
         try:
             with self._lock:
                 self._start_locked()
-                coroutine = self._bounded(dict(listings), admission)
+                coroutine = self._bounded(dict(listings), admission, margin)
                 try:
                     future = asyncio.run_coroutine_threadsafe(coroutine, self._loop)
                 except Exception:
@@ -155,14 +157,14 @@ class ExecutionReader:
             if not submitted:
                 admission.release()
 
-    async def _bounded(self, listings, admission):
+    async def _bounded(self, listings, admission, margin=False):
         if not admission.start():
             raise asyncio.CancelledError
         task = asyncio.current_task()
         self._active.add(task)
         try:
             await self._ensure_clients()
-            return await self._capture(listings)
+            return await self._capture(listings, margin)
         except ReaderFailure:
             raise
         except Exception:
@@ -184,6 +186,20 @@ class ExecutionReader:
                 return None, self._http_error(exc, "Public depth")
             except Exception:
                 return None, "Public depth is unavailable from this provider."
+
+    async def _margin(self, venue, symbol):
+        async with self._parallel:
+            try:
+                async with asyncio.timeout(self.individual_timeout):
+                    return await self._provider.margin(venue, symbol), None
+            except TimeoutError:
+                return None, "Public margin request timed out."
+            except DepthUnavailable as exc:
+                return None, str(exc)
+            except HttpError as exc:
+                return None, self._http_error(exc, "Public margin")
+            except Exception:
+                return None, "Public margin data is unavailable from this provider."
 
     @staticmethod
     def _http_error(exc, subject):
@@ -251,10 +267,12 @@ class ExecutionReader:
         if interrupted:
             raise asyncio.CancelledError
 
-    async def _capture(self, listings):
+    async def _capture(self, listings, margin=False):
         tasks = {venue: asyncio.create_task(self._venue(venue, symbol)) for venue, symbol in listings.items()}
+        margin_tasks = ({venue: asyncio.create_task(self._margin(venue, symbol)) for venue, symbol in listings.items()}
+                        if margin else {})
         fx_task = asyncio.create_task(self._exchange_rates())
-        all_tasks = [*tasks.values(), fx_task]
+        all_tasks = [*tasks.values(), *margin_tasks.values(), fx_task]
         try:
             done, pending = await asyncio.wait(all_tasks, timeout=self.deadline)
             # Admission and worker slots remain owned until cancellation ends.
@@ -275,7 +293,17 @@ class ExecutionReader:
                     errors[venue] = error
             fx = fx_task.result() if fx_task in done and not fx_task.cancelled() else self._fx_error(
                 "Current USD reference FX exceeded the capture deadline.")
-            return {"books": books, "errors": errors, "fx": fx}
+            result = {"books": books, "errors": errors, "fx": fx}
+            if margin:
+                result["margins"], result["margin_errors"] = {}, {}
+                for venue, task in margin_tasks.items():
+                    schedule, error = (task.result() if task in done and not task.cancelled()
+                                       else (None, "Public margin data exceeded the overall capture deadline."))
+                    if schedule is not None:
+                        result["margins"][venue] = schedule
+                    else:
+                        result["margin_errors"][venue] = error
+            return result
         finally:
             await self._cancel_and_wait(all_tasks)
 

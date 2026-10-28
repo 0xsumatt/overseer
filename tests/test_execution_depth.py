@@ -12,7 +12,7 @@ from core.execution import BookLevel, DepthBook
 from data_collection.execution import (
     DecimalHttpClient, DepthUnavailable, ExecutionDepth, levels, optional_limit,
 )
-from web.execution_reader import ExecutionReader, ReaderBusy, _Admission
+from data_collection.execution_reader import ExecutionReader, ReaderBusy, _Admission
 
 
 class HTTP:

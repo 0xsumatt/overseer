@@ -1,0 +1,72 @@
+{#- Shared page structure. Import with:
+      {% import "_ui.html" as ui %}
+
+    Every page follows: page_header → filters (a .toolbar, folded on phones by
+    ui.filters) → page_status → content. The title row never moves between
+    pages; filters live in the toolbar, and the header's right side only
+    holds view switches, a primary action or status badges (pass them with a
+    call block). -#}
+
+{% macro page_header(title, subtitle=None, title_id=None, subtitle_id=None) -%}
+<header class="page-header">
+  <div class="min-w-0">
+    <h1{% if title_id %} id="{{ title_id }}"{% endif %} class="page-title">{{ title }}</h1>
+    {%- if subtitle %}
+    <p{% if subtitle_id %} id="{{ subtitle_id }}"{% endif %} class="page-subtitle">{{ subtitle }}</p>
+    {%- endif %}
+  </div>
+  {%- if caller is defined %}
+  <div class="page-actions">{{ caller() }}</div>
+  {%- endif %}
+</header>
+{%- endmacro %}
+
+{#- The slot Overseer.pageState() writes into: loading, empty and error
+    states for the whole page, directly above the content they describe. -#}
+{% macro page_status() -%}
+<div id="page-status" class="hidden" role="status" aria-live="polite" aria-atomic="true">
+  <span data-status-message class="min-w-0 flex-1"></span>
+  <button data-status-retry type="button" class="bracket-btn hidden shrink-0">Retry</button>
+</div>
+{%- endmacro %}
+
+{#- Folds a page's filters behind one summary line on phones; from 640px the
+    fold dissolves and the caller's toolbar sits on the page as usual. Wire it
+    with Overseer.filtersFold(element, describe), where describe() returns
+    the summary text, e.g. "BTC · buy · 24h".
+
+      {% call ui.filters('execution-filters') %}<div class="toolbar">…</div>{% endcall %} -#}
+{% macro filters(id, label='Filters') -%}
+<details id="{{ id }}" class="filters">
+  <summary class="select select-summary filters-summary">
+    <span class="filters-title">{{ label }}</span>
+    <span data-filters-selection class="filters-selection"></span>
+  </summary>
+  <div class="filters-body">{{ caller() }}</div>
+</details>
+{%- endmacro %}
+
+{#- The strip under the navigation saying how current this page's data is.
+    Every page except login renders exactly one, so the frame never moves:
+    the base template's default is the market feed; a tool overrides
+    {% block status_bar %} with its own. The caller fills two slots:
+
+      {% call(slot) ui.status_bar('Order books') %}
+        {%- if slot == 'value' %}<span class="status-bar-value">…</span>
+        {%- else %}<span>…</span>{% endif %}
+      {% endcall %}
+
+    'value' follows the label (a .status-bar-value, optionally a
+    .status-bar-state); 'meta' is the right-hand detail, hidden on phones.
+    Keep both to one line on desktop. -#}
+{% macro status_bar(label, attrs={}) -%}
+<div class="status-bar"{{ attrs | xmlattr }}>
+  <div class="shell status-bar-inner">
+    <div class="status-bar-main">
+      <span class="status-bar-label">{{ label }}</span>
+      {{ caller('value') }}
+    </div>
+    <div class="status-bar-meta">{{ caller('meta') }}</div>
+  </div>
+</div>
+{%- endmacro %}

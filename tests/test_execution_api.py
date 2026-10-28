@@ -1,18 +1,18 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import time
 
 from aiosonic.exceptions import BaseTimeout
 import pytest
 
+from core import execution_fees
 from core.execution import BookLevel, DepthBook
 from data_collection.http import HttpError
 from web import create_app
-from web.execution_reader import ExecutionReader
-from web.views import execution
+from data_collection.execution_reader import ExecutionReader
 
 D = Decimal
 
@@ -49,7 +49,7 @@ def setup(monkeypatch):
     monkeypatch.setenv("FLASK_SECRET_KEY", "execution-test")
     monkeypatch.delenv("OVERSEER_PROXY_HOPS", raising=False)
     monkeypatch.delenv("OVERSEER_SECURE_COOKIES", raising=False)
-    monkeypatch.setattr(execution, "FEE_SCHEDULES", {
+    monkeypatch.setattr(execution_fees, "FEE_SCHEDULES", {
         "binance_perp": schedule("5", "1"), "bybit_perp": schedule("5.5", "3"),
     })
     app = create_app()
@@ -108,7 +108,7 @@ def test_manual_refresh_returns_new_book_price_without_response_cache(setup):
 def test_unverified_public_fee_remains_gross_only_not_free_or_best(setup, monkeypatch):
     client, reader = setup
     reader.add_unknown = True
-    monkeypatch.setitem(execution.FEE_SCHEDULES, "rise", schedule(None, None))
+    monkeypatch.setitem(execution_fees.FEE_SCHEDULES, "rise", schedule(None, None))
     payload = client.post("/api/execution", json={"asset": "BTC", "side": "buy"}).get_json()
     cell = rows(payload)["rise"]["estimates"][0]
     assert cell["status"] == "fee_unknown" and cell["complete"]
@@ -116,6 +116,52 @@ def test_unverified_public_fee_remains_gross_only_not_free_or_best(setup, monkey
     assert cell["effective_price_usd"] is None and cell["fee_usd"] is None and not cell["best"]
     assert D(cell["top_of_book_price"]) == 100 and D(cell["top_of_book_price_usd"]) == 90
     assert cell["fee_per_coin"] is None and cell["fee_per_coin_usd"] is None
+
+
+def test_round_trip_ranks_the_whole_trade_and_follows_fee_tiers(setup):
+    client, _ = setup
+    base = client.post("/api/execution", json={"asset": "BTC", "side": "buy_sell"}).get_json()
+    assert (base["side"], base["hold_hours"]) == ("buy_sell", 0)
+    cell = rows(base)["binance_perp"]["estimates"][0]
+    # Bought at 100 plus 5 bps, sold at 99 less 5 bps.
+    assert abs(D(cell["total_cost_usd"]) - D(cell["quantity"]) * (D("100.05") - D("98.9505"))) < D("1e-24")
+    assert cell["best"] and not rows(base)["bybit_perp"]["estimates"][0]["best"]
+    vip = client.post("/api/execution", json={
+        "asset": "BTC", "side": "sell_buy", "fees": {"bybit_perp": "vip_1"}}).get_json()
+    assert rows(vip)["bybit_perp"]["estimates"][0]["best"]
+
+
+@pytest.mark.parametrize("hold,method,basis,steps", [
+    (24, "current_funding_rates", "current", 1),
+    (168, "settled_funding_rates", "previous_24h", 3),
+])
+def test_held_trades_rank_after_funding_and_unreadable_funding_ranks_nothing(setup, monkeypatch, hold, method, basis, steps):
+    client, _ = setup
+    store = client.application.extensions["read_storage"]
+    now = datetime.now(timezone.utc)
+    # Binance longs pay 0.04% every 8 hours; Bybit's funding is flat.
+    rates = {"binance": D("0.0004"), "bybit": D("0")}
+    monkeypatch.setattr(store, method, lambda exchanges, symbols, *since: [
+        {"exchange": exchange, "symbol": "BTC/USDT", "ts": now - timedelta(hours=8 * step),
+         "rate": rate, "interval_hours": 8}
+        for exchange, rate in rates.items() for step in range(steps)])
+    long = client.post("/api/execution", json={"asset": "BTC", "side": "buy", "hold_hours": hold}).get_json()
+    binance, bybit = rows(long)["binance_perp"], rows(long)["bybit_perp"]
+    assert binance["funding"]["basis"] == basis
+    assert D(binance["funding"]["cost_bps"]) == D("0.0004") / 8 * hold * 10000
+    assert bybit["estimates"][0]["best"] and not binance["estimates"][0]["best"]
+    short = client.post("/api/execution", json={"asset": "BTC", "side": "sell", "hold_hours": hold}).get_json()
+    assert D(rows(short)["binance_perp"]["funding"]["cost_bps"]) == -D(binance["funding"]["cost_bps"])
+
+    def unreadable(*_args):
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(store, method, unreadable)
+    failed = client.post("/api/execution", json={"asset": "BTC", "side": "buy", "hold_hours": hold}).get_json()
+    for row in failed["venues"]:
+        assert row["status"] == "funding_unknown"
+        assert row["funding"]["unavailable"] == "Funding data could not be read"
+        assert all(not cell["best"] and cell["effective_price_usd"] is not None for cell in row["estimates"])
 
 
 @pytest.mark.parametrize("body", [
@@ -126,6 +172,9 @@ def test_unverified_public_fee_remains_gross_only_not_free_or_best(setup, monkey
     {"asset": "BTC", "side": "buy", "fees": {"binance_perp": "invented_tier"}},
     {"asset": "BTC", "side": "buy", "fees": {"unsupported": "base"}},
     {"asset": "BTC", "side": "buy", "account": "not an account-reading endpoint"},
+    {"asset": "BTC", "side": "buy", "hold_hours": 12},
+    {"asset": "BTC", "side": "buy", "hold_hours": True},
+    {"asset": "BTC", "side": "buy", "hold_hours": "24"},
 ])
 def test_unknown_coin_side_and_fee_assumptions_are_rejected(setup, body):
     client, _ = setup

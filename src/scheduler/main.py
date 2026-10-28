@@ -4,21 +4,25 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from core.config import settings
+from core.execution_fees import execution_listings
+from core.execution_history import HISTORY_ASSETS, HISTORY_INTERVAL_SECONDS
 from core.symbols import SymbolRegistry
 from data_collection.exchanges.registry import REGISTRY, STREAM_REGISTRY
+from data_collection.execution_reader import ExecutionReader
 from scheduler.capture import SettlementCapture
 from scheduler.jobs import (
     DislocationConfirmation,
     UsdcUsdtQuoteCache,
     check_dislocations,
     post_digest,
+    run_execution_history,
     run_fills,
     run_funding,
     run_liquidity,
@@ -41,6 +45,7 @@ def build_scheduler(
     scrapers, storage, notifier, state,
     ohlcv_targets, fills_targets, funding_targets, liquidity_targets,
     orderbook_targets, registry: SymbolRegistry | None = None,
+    execution_reader: ExecutionReader | None = None,
 ) -> AsyncIOScheduler:
     sched = AsyncIOScheduler(
         job_defaults={
@@ -103,6 +108,22 @@ def build_scheduler(
             id="alert:dislocations", name="alert:dislocations",
             replace_existing=True,
         )
+    # Cheapest-venue history: a fixed clock, so "cheapest X% of the time" is
+    # not "X% of the times someone had the page open". Only coins at least two
+    # compared venues list can produce a comparison.
+    if registry is not None and execution_reader is not None:
+        history_assets = [
+            asset for asset in HISTORY_ASSETS
+            if len(execution_listings(registry, asset)) >= 2
+        ]
+        if history_assets:
+            sched.add_job(
+                run_execution_history,
+                trigger=IntervalTrigger(seconds=HISTORY_INTERVAL_SECONDS),
+                args=[execution_reader, storage, notifier, state, registry, history_assets],
+                id="execution:history", name="execution:history", replace_existing=True,
+                next_run_time=datetime.now(timezone.utc) + timedelta(seconds=60),
+            )
     return sched
 
 
@@ -150,10 +171,11 @@ async def main() -> None:
 
     state: dict[str, str] = {}      # job_id -> last status, for edge-triggered alerts
     registry = SymbolRegistry.load(settings.symbols_file)
+    execution_reader = ExecutionReader()
     sched = build_scheduler(
         scrapers, storage, notifier, state,
         ohlcv_targets, fills_targets, funding_targets, liquidity_targets,
-        orderbook_targets, registry=registry,
+        orderbook_targets, registry=registry, execution_reader=execution_reader,
     )
     sched.start()
     log.info("scheduler started with %d job(s)", len(sched.get_jobs()))
@@ -213,6 +235,8 @@ async def main() -> None:
             await asyncio.gather(*stream_tasks, return_exceptions=True)
         for s in scrapers.values():
             await s.aclose()
+        # Blocks while an in-flight capture finishes, so keep it off the loop.
+        await asyncio.to_thread(execution_reader.close)
         await notifier.aclose()
         await storage.close()
 

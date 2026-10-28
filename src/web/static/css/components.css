@@ -1,0 +1,505 @@
+/* Shared components. Pages compose these; page partials (css/pages/*) only
+ * hold layout that genuinely belongs to one screen.
+ *
+ * Voice: mono for data, labels, controls, navigation and system messages;
+ * sans for page titles and prose. Amber marks the brand, focus, the current
+ * location, the page's main view switch, the one primary action and
+ * warnings — never neutral values, filters or routine information.
+ *
+ * Surfaces are separated by fill, not outline: the page is ink, cards are
+ * opaque panel with a soft edge, and raised or selected things are panel2.
+ *
+ * Type hierarchy, largest to smallest: page title (sans) · panel title
+ * (14px mono, body, medium) · section label (spaced capitals between rules)
+ * · field, KPI and table-header labels (spaced capitals) · data · meta.
+ * Badges, bracket controls and disclosures are written in plain case.
+ *
+ * Inner gutter: every container's text starts 12px in on phones and 16px in
+ * from 640px, so labels, titles and first table columns share one edge.
+ */
+@layer components {
+  /* ---- frame ------------------------------------------------------------ */
+  .shell { @apply mx-auto w-full max-w-6xl px-4 sm:px-6; }
+
+  .wordmark {
+    @apply inline-flex h-12 shrink-0 items-center font-mono text-data font-semibold tracking-label text-phosphor;
+  }
+
+  /* Drawn, not a glyph: U+25AE is outside the Plex subsets, so as text it
+     renders from a fallback font. A box painted in currentColor always
+     matches the type it follows. */
+  .cursor {
+    display: inline-block;
+    width: 0.52em;
+    height: 1em;
+    margin-left: 0.1em;
+    vertical-align: -0.14em;
+    background: currentColor;
+  }
+
+  .nav-link {
+    @apply -mb-px flex h-12 items-center border-b-2 border-transparent pt-px font-mono text-data uppercase tracking-label text-dim transition-colors hover:text-body;
+  }
+  .nav-link:is([aria-current="page"], [data-active="true"]) { @apply border-phosphor text-body; }
+
+  .menu-item {
+    @apply flex min-h-9 w-full items-center gap-2 rounded px-3 text-left font-mono text-data text-dim transition-colors hover:bg-panel2 hover:text-body;
+  }
+  .menu-item:is([aria-current="page"], [aria-checked="true"], [aria-selected="true"], [data-active="true"]) {
+    @apply bg-panel2 text-body;
+    box-shadow: inset 2px 0 0 theme('colors.phosphor');
+  }
+
+  /* ---- status bar --------------------------------------------------------- */
+  /* One strip under the navigation on every page, saying how current that
+     page's data is, so the frame never moves between pages. The base
+     template fills it with the market feed; tools render their own through
+     ui.status_bar(). One line on desktop, so its height never varies. */
+  .status-bar { @apply border-b border-line-soft bg-panel/50; }
+  .status-bar-inner { @apply flex min-h-[2.375rem] flex-wrap items-center justify-between gap-x-6 gap-y-1 py-2; }
+  .status-bar-main { @apply flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 font-mono sm:gap-x-3; }
+  /* Secondary words a phone drops so the bar stays one line ("8/8 captured",
+     "7/8 ranked"); screen readers still hear them. Problems never use it. */
+  @media (max-width: 639px) {
+    .status-bar-wide { @apply sr-only; }
+  }
+  .status-bar-label { @apply text-label uppercase tracking-label text-faint; }
+  /* 12px on phones so label, value and state stay on one line there too. */
+  .status-bar-value { @apply text-label font-semibold tabular-nums text-body sm:text-data; }
+  .status-bar-state { @apply inline-flex items-center gap-1.5 text-label text-dim; }
+  .status-bar-state > .status-dot { @apply h-1.5 w-1.5; }
+  .status-bar-state[data-tone="fresh"] { @apply text-gain; }
+  .status-bar-state[data-tone="warning"] { @apply text-phosphor; }
+  .status-bar-state[data-tone="error"] { @apply text-loss; }
+  .status-bar-meta {
+    @apply hidden min-w-0 flex-wrap items-center gap-x-4 gap-y-1 font-mono text-label tabular-nums text-dim sm:flex;
+  }
+  /* [refresh] beside the age it resets. Negative margins keep its 32px hit
+     area from growing the bar (assets.css widens them for 44px on touch). */
+  .status-bar .bracket-btn { @apply -my-2; }
+  /* A feed problem tints the bar itself rather than adding a second strip
+     (reliability.js sets data-alert). */
+  .status-bar[data-alert="warning"] { @apply bg-phosphor/10; }
+  .status-bar[data-alert="error"] { @apply bg-loss/10; }
+
+  /* ---- page structure --------------------------------------------------- */
+  .page-header { @apply mb-5 flex flex-wrap items-start justify-between gap-x-6 gap-y-3; }
+  .page-title { @apply font-sans text-title font-semibold text-body; }
+  .page-subtitle { @apply mt-1 font-sans text-data text-dim; }
+  .page-actions { @apply flex flex-wrap items-center gap-2; }
+
+  /* ── SECTION LABEL ─────────── a rule either side, the terminal motif. A
+     short qualifier goes inside it as .section-count, not on a line below. */
+  .section-label {
+    @apply mb-2 flex items-center gap-3 font-mono text-label font-normal uppercase tracking-label text-dim;
+  }
+  .section-label::before {
+    content: '';
+    @apply h-px w-4 shrink-0 bg-line-strong;
+  }
+  .section-label::after {
+    content: '';
+    @apply h-px min-w-4 flex-1 bg-line;
+  }
+  .section-count { @apply normal-case tracking-normal text-faint; }
+  @media (max-width: 639px) {
+    /* On phones a qualifier runs on after the label as wrapping text, rather
+       than the two squeezing into separate columns between the rules. */
+    .section-label:has(> .section-count) { display: block; }
+    .section-label:has(> .section-count)::before {
+      display: inline-block;
+      vertical-align: middle;
+      margin-right: 0.75rem;
+    }
+    .section-label:has(> .section-count)::after { display: none; }
+  }
+
+  .caption { @apply font-sans text-data text-dim; }
+
+  /* Units and case-sensitive abbreviations keep their case inside spaced
+     capitals: "Gap, <span class="unit">bps</span>" reads GAP, bps and a
+     24h toggle reads 24h, never 24H. */
+  .unit { text-transform: none; }
+
+  /* Items separated by a centred dot that sits in the gap. A wrapped item's
+     dot falls outside the line's left edge and is clipped, so no line starts
+     with "·". Inset a meta line with margin, never padding, or the clipped
+     dot shows in the padding. */
+  .meta-line {
+    overflow-x: clip;
+    @apply flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-label text-faint;
+  }
+  .meta-line > * + * { position: relative; }
+  .meta-line > * + *::before {
+    content: '·';
+    content: '·' / '';
+    position: absolute;
+    left: calc(-0.5rem - 0.5ch);
+    @apply font-mono text-label text-line-strong;
+  }
+
+  /* ---- surfaces --------------------------------------------------------- */
+  .chart-card,
+  .summary-card,
+  .table-card {
+    @apply rounded-md border border-line-soft bg-panel;
+  }
+  .summary-card { @apply p-3 sm:p-4; }
+
+  .panel-header {
+    @apply flex min-h-11 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-line-soft px-3 py-1 sm:px-4;
+  }
+  .panel-title { @apply min-w-0 font-mono text-data font-medium text-body; }
+  .panel-subtitle { @apply ml-2 font-normal text-label text-faint; }
+  .panel-actions { @apply ml-auto flex items-center gap-1; }
+  .panel-body { @apply p-3 sm:p-4; }
+  /* A toggle in a panel header is a size smaller, so that header keeps the
+     same 44px as every other. */
+  .panel-header .segmented { min-height: 2.125rem; }
+
+  /* Filters sit on the page itself, not in a card: the controls carry their
+     own edges, and the content below is the only boxed thing. */
+  .toolbar { @apply mb-5 flex flex-wrap items-end gap-3; }
+  .field { @apply flex min-w-0 flex-col gap-1; }
+  .field-label { @apply font-mono text-label uppercase tracking-label text-faint; }
+
+  /* Phones fold a page's filters behind one summary line (ui.filters with
+     Overseer.filtersFold); from 640px the fold dissolves and the filters sit
+     on the page as usual. */
+  .filters-summary { @apply mb-5 flex min-h-11 cursor-pointer flex-col items-start gap-1 py-2; }
+  .filters[open] > .filters-summary { @apply mb-3; }
+  .filters-title { @apply font-mono text-label uppercase tracking-label text-body; }
+  .filters-selection { @apply font-mono text-data text-dim; }
+  @media (min-width: 640px) {
+    .filters,
+    .filters-body { display: contents; }
+    .filters > .filters-summary { display: none; }
+  }
+
+  /* ---- form controls ---------------------------------------------------- */
+  /* 36px on desktop; assets.css raises every control to 44px on touch. */
+  .select,
+  .input {
+    min-height: 2.25rem;
+    box-shadow: inset 0 1px 2px theme('colors.black / 38%');
+    @apply rounded-md border border-line-strong bg-ink px-3 py-1.5 font-mono text-data text-body focus:border-phosphor focus:outline-none;
+  }
+  .select:focus,
+  .input:focus {
+    box-shadow: inset 0 1px 2px theme('colors.black / 38%'), 0 0 0 3px theme('colors.phosphor / 18%');
+  }
+  .select:disabled,
+  .input:disabled {
+    @apply cursor-not-allowed border-line text-faint;
+  }
+  .input { @apply placeholder:text-faint; }
+  /* A value the page cannot use; the message beside it says what to enter. */
+  .input[aria-invalid="true"] { @apply border-loss; }
+
+  /* Dense filter rows use tighter padding at the same height. */
+  .select-sm { min-height: 2.25rem; @apply px-2 py-1; }
+
+  /* Keep native keyboard/mobile pickers; normalise only the closed control. */
+  .select-shell { @apply relative inline-flex min-w-0 items-center; }
+  .select-shell::after,
+  .select-summary::after {
+    content: '';
+    pointer-events: none;
+    position: absolute;
+    right: 0.875rem;
+    top: 50%;
+    width: 0.375rem;
+    height: 0.375rem;
+    border-right: 0.0625rem solid theme('colors.faint');
+    border-bottom: 0.0625rem solid theme('colors.faint');
+    transform: translateY(-65%) rotate(45deg);
+  }
+  .select-shell:focus-within::after,
+  .select-summary:focus::after {
+    border-color: theme('colors.phosphor');
+  }
+  .select-polished {
+    appearance: none;
+    text-align: left;
+    text-align-last: left;
+    @apply w-full rounded-md pl-3 pr-9;
+  }
+  .select-polished option,
+  .select-polished optgroup {
+    text-align: left;
+  }
+  .select-summary {
+    list-style: none;
+    @apply relative justify-start rounded-md pl-3 pr-9 text-left;
+  }
+  .select-summary::-webkit-details-marker { display: none; }
+
+  /* ---- actions ---------------------------------------------------------- */
+  /* Write labels in sentence case; the component supplies the uppercase
+     terminal voice, so assistive technology reads normal words. */
+  .btn {
+    @apply inline-flex min-h-9 items-center justify-center gap-2 rounded-md border px-3 py-1.5 text-center font-mono text-data uppercase tracking-label transition-colors;
+  }
+  .btn-primary { @apply border-phosphor bg-phosphor font-semibold text-ink hover:border-phosphor/90 hover:bg-phosphor/90; }
+  .btn-secondary { @apply border-line-strong bg-panel text-body hover:bg-panel2; }
+  .btn-ghost { @apply border-transparent bg-transparent text-dim hover:bg-panel2 hover:text-body; }
+  .btn-danger { @apply border-loss/40 bg-transparent text-loss hover:bg-loss/10; }
+  .btn-sm { @apply min-h-8 px-2 py-1 text-label; }
+  .btn:is(:disabled, [aria-disabled="true"]) {
+    @apply cursor-not-allowed border-line bg-transparent font-normal text-faint;
+  }
+
+  /* [+] [−] [×] [retry] [details] — controls in the console's own idiom,
+     lower case like typed commands. Give glyph-only ones an aria-label; the
+     brackets are decoration. */
+  .bracket-btn {
+    @apply inline-flex min-h-8 min-w-8 items-center justify-center whitespace-nowrap rounded px-1 font-mono text-label lowercase text-dim transition-colors hover:bg-panel2 hover:text-body;
+  }
+  .bracket-btn::before {
+    content: '[';
+    content: '[' / '';
+    @apply text-faint;
+  }
+  .bracket-btn::after {
+    content: ']';
+    content: ']' / '';
+    @apply text-faint;
+  }
+  .bracket-btn-danger { @apply hover:text-loss; }
+  /* At a limit (a panel already at its largest or smallest) or busy (a
+     refresh already running): dimmed, not an error. */
+  .bracket-btn:is(:disabled, [aria-disabled="true"]) { @apply cursor-default opacity-40 hover:bg-transparent hover:text-dim; }
+  /* Inside a notice the control speaks in the notice's colour. */
+  .notice .bracket-btn { @apply text-current; }
+  .notice .bracket-btn::before,
+  .notice .bracket-btn::after { @apply text-current opacity-60; }
+
+  /* Filter toggles: the chosen option is raised, like a selected chip. */
+  .segmented {
+    @apply inline-flex min-h-9 max-w-full items-stretch gap-0.5 rounded-md border border-line bg-panel p-0.5;
+  }
+  .segmented > :is(button, a) {
+    @apply inline-flex min-w-0 flex-auto items-center justify-center whitespace-nowrap rounded px-3 font-mono text-data uppercase tracking-label text-dim transition-colors hover:text-body;
+  }
+  .segmented > :is([aria-pressed="true"], [aria-selected="true"], [aria-current="page"]) {
+    @apply bg-panel2 text-body;
+    box-shadow: inset 0 0 0 1px theme('colors.line-strong');
+  }
+  /* The page's main view switch, in the page header: inverse video, the one
+     place amber is a fill. One per page at most. */
+  .segmented-view > :is([aria-pressed="true"], [aria-selected="true"], [aria-current="page"]) {
+    @apply bg-phosphor font-semibold text-ink hover:text-ink;
+    box-shadow: none;
+  }
+
+  /* Venue toggles: identity comes from the swatch, selection from the fill. */
+  .chip {
+    @apply inline-flex min-h-9 items-center gap-2 rounded-md border border-line bg-transparent px-2.5 font-mono text-data text-faint transition-colors hover:border-line-strong hover:text-body;
+  }
+  .chip[aria-pressed="true"] { @apply border-line-strong bg-panel2 text-body; }
+  .chip-swatch {
+    @apply h-2 w-2 shrink-0 rounded-full;
+    background-color: var(--swatch, currentColor);
+  }
+  .chip[aria-pressed="false"] .chip-swatch { @apply opacity-30; }
+  .chip-value { @apply tabular-nums text-faint; }
+  /* A chip can wrap a checkbox, for multiple choice inside a form: checked
+     reads exactly like pressed. */
+  .chip:has(> input:checked) { @apply border-line-strong bg-panel2 text-body; }
+  .chip:has(> input:disabled) { @apply cursor-not-allowed opacity-50 hover:border-line hover:text-faint; }
+  .chip > input[type="checkbox"] {
+    appearance: none;
+    @apply m-0 h-3.5 w-3.5 shrink-0 cursor-pointer rounded-none border border-line-strong bg-ink;
+  }
+  .chip > input[type="checkbox"]:checked {
+    @apply border-body bg-body;
+    box-shadow: inset 0 0 0 2px theme('colors.ink');
+  }
+  .chip > input[type="checkbox"]:disabled { @apply cursor-not-allowed; }
+
+  .legend { @apply flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-label text-dim; }
+  .legend-item { @apply inline-flex items-center gap-1.5 whitespace-nowrap; }
+  .legend-swatch {
+    @apply inline-block h-0.5 w-3 shrink-0 rounded-full;
+    background-color: var(--swatch, currentColor);
+  }
+  .legend-swatch[data-shape="dot"] { @apply h-2 w-2; }
+  .legend-swatch[data-shape="bar"] { @apply h-2 w-2 rounded-sm; }
+  .legend-swatch[data-shape="dash"] {
+    @apply h-0 rounded-none;
+    background: none;
+    border-top: 2px dashed var(--swatch, currentColor);
+  }
+  .legend-value { @apply tabular-nums text-faint; }
+  /* The readout's time slot: "Latest", or the hovered time (legendReadout). */
+  .legend-time { @apply ml-auto whitespace-nowrap tabular-nums text-faint; }
+
+  /* ---- data ------------------------------------------------------------- */
+  /* One strip, divided inside, rather than a box per figure. Four figures:
+     two columns, four from 1024px. .kpi-grid-3 (one per row, three from
+     768px) and .kpi-grid-2 (one per row, two from 640px) suit smaller sets.
+     Cells are transparent, so the corners stay round, and nothing is
+     clipped, so a cell may open a popover. */
+  .kpi-grid { @apply grid grid-cols-2 rounded-md border border-line-soft bg-panel lg:grid-cols-4; }
+  .kpi { @apply min-w-0 border-line-soft px-3 py-3 sm:px-4; }
+  .kpi-grid:not(.kpi-grid-2, .kpi-grid-3) > .kpi:nth-child(even) { @apply border-l; }
+  .kpi-grid:not(.kpi-grid-2, .kpi-grid-3) > .kpi:nth-child(n + 3) { @apply border-t; }
+  @media (min-width: 1024px) {
+    .kpi-grid:not(.kpi-grid-2, .kpi-grid-3) > .kpi:nth-child(n) { @apply border-l border-t-0; }
+    .kpi-grid:not(.kpi-grid-2, .kpi-grid-3) > .kpi:nth-child(4n + 1) { @apply border-l-0; }
+    .kpi-grid:not(.kpi-grid-2, .kpi-grid-3) > .kpi:nth-child(n + 5) { @apply border-t; }
+  }
+  .kpi-grid:is(.kpi-grid-2, .kpi-grid-3) { @apply grid-cols-1; }
+  .kpi-grid:is(.kpi-grid-2, .kpi-grid-3) > .kpi + .kpi { @apply border-t; }
+  @media (min-width: 640px) {
+    .kpi-grid.kpi-grid-2 { @apply grid-cols-2; }
+    .kpi-grid.kpi-grid-2 > .kpi:nth-child(n) { @apply border-l border-t-0; }
+    .kpi-grid.kpi-grid-2 > .kpi:nth-child(2n + 1) { @apply border-l-0; }
+    .kpi-grid.kpi-grid-2 > .kpi:nth-child(n + 3) { @apply border-t; }
+  }
+  @media (min-width: 768px) {
+    .kpi-grid.kpi-grid-3 { @apply grid-cols-3; }
+    .kpi-grid.kpi-grid-3 > .kpi:nth-child(n) { @apply border-l border-t-0; }
+    .kpi-grid.kpi-grid-3 > .kpi:nth-child(3n + 1) { @apply border-l-0; }
+    .kpi-grid.kpi-grid-3 > .kpi:nth-child(n + 4) { @apply border-t; }
+  }
+  .kpi-label { @apply font-mono text-label uppercase tracking-label text-faint; }
+  .kpi-value {
+    overflow-wrap: anywhere;
+    @apply mt-1 font-mono text-title font-normal tabular-nums text-body sm:text-hero;
+  }
+  .kpi-meta {
+    overflow-wrap: anywhere;
+    @apply mt-1 font-mono text-label text-faint;
+  }
+
+  .data-table { @apply w-full border-collapse text-left text-data; }
+  .data-table thead th {
+    @apply sticky top-0 z-10 whitespace-nowrap bg-panel px-3 py-2 text-left align-bottom font-mono text-label font-normal uppercase tracking-label text-faint;
+    box-shadow: inset 0 -1px 0 theme('colors.line');
+  }
+  .data-table tbody :is(td, th) { @apply border-t border-line-soft px-3 py-2 align-middle font-normal; }
+  /* The card-edge columns use the 16px gutter, like panel headers. */
+  .data-table :is(td, th):first-child { @apply sm:pl-4; }
+  .data-table :is(td, th):last-child { @apply sm:pr-4; }
+  .data-table tbody tr:first-child > :is(td, th) { @apply border-t-0; }
+  .data-table tbody tr { @apply transition-colors hover:bg-panel2/40; }
+  .data-table .num { @apply whitespace-nowrap text-right font-mono tabular-nums; }
+  /* Sticky cells paint the card's own surface, so scrolled cells pass
+     beneath them; the row hover is mixed in so it still reads across. */
+  .data-table .sticky-col { @apply sticky left-0 z-[1] bg-panel; }
+  .data-table tbody tr:hover > .sticky-col {
+    background-color: color-mix(in srgb, theme('colors.panel2') 40%, theme('colors.panel'));
+  }
+  .data-table thead .sticky-col { @apply z-20; }
+  /* The winner: a whole row (tr) or one cell (td). A background image sits
+     over a sticky cell's opaque surface, so the tint spans the row. */
+  .data-table :is(tr[data-best="true"] > :is(td, th), td[data-best="true"]) {
+    background-image: linear-gradient(theme('colors.gain / 6%'), theme('colors.gain / 6%'));
+  }
+  .empty-cell { @apply px-3 py-8 font-mono text-data text-dim sm:px-4; }
+
+  /* The header row of a list laid out as a grid rather than a table. */
+  .list-head {
+    @apply border-b border-line bg-panel px-3 py-2 font-mono text-label uppercase tracking-label text-faint sm:px-4;
+  }
+
+  /* A venue row's first cell (Execution, Margin): dot and short name, then
+     one line of notes with [details] at its end; open details drop below. */
+  .venue-heading { @apply flex min-w-0 items-center gap-2 font-medium text-body; }
+  .venue-name { @apply min-w-0 truncate; }
+  .venue-meta {
+    grid-template-columns: minmax(0, 1fr) auto;
+    @apply mt-1 grid min-w-0 items-center gap-x-2 text-label text-faint;
+  }
+  .venue-meta > details { grid-column: 2; grid-row: 1; @apply min-w-0 text-label text-dim; }
+  .venue-meta > details[open] { grid-column: 1 / -1; grid-row: 2; }
+  .venue-meta > details > summary { list-style: none; cursor: pointer; }
+  .venue-meta > details > summary::-webkit-details-marker { display: none; }
+
+  .status-dot { @apply inline-block h-2 w-2 shrink-0 rounded-full bg-current; }
+  .badge {
+    @apply inline-flex items-center gap-1.5 whitespace-nowrap rounded border border-line bg-panel px-2 py-0.5 font-mono text-label text-dim;
+  }
+  .badge[data-tone="warning"] { @apply border-phosphor/40 bg-phosphor/10 text-phosphor; }
+  .badge[data-tone="error"] { @apply border-loss/40 bg-loss/10 text-loss; }
+  .badge[data-tone="success"] { @apply border-gain/40 bg-gain/10 text-gain; }
+
+  /* ---- states ----------------------------------------------------------- */
+  .notice {
+    overflow-wrap: anywhere;
+    @apply flex min-h-11 items-center gap-3 rounded-md border border-line-soft bg-panel px-3 py-2 font-mono text-data text-dim sm:px-4;
+  }
+  .notice[data-tone="warning"] { @apply border-phosphor/40 bg-phosphor/10 text-phosphor; }
+  .notice[data-tone="error"] { @apply border-loss/40 bg-loss/10 text-loss; }
+  .notice[data-tone="success"] { @apply border-gain/40 bg-gain/10 text-gain; }
+
+  .empty-state { @apply flex flex-col items-start gap-1 px-3 py-8 font-mono sm:px-4; }
+  .empty-state-title { @apply text-data text-body; }
+  .empty-state-hint { @apply text-data text-dim; }
+  /* Fills a chart box when there is nothing to plot, instead of a blank canvas. */
+  .empty-overlay {
+    @apply absolute inset-0 z-10 flex flex-col items-center justify-center gap-1 px-4 text-center font-mono;
+  }
+
+  .skeleton {
+    @apply inline-block h-[0.9em] w-[6ch] max-w-full rounded bg-panel2 align-middle;
+  }
+
+  /* A scroll box whose rows continue below its edge fades its last line
+     (Overseer.scrollFade sets data-more), rather than cutting a row in half
+     with no sign there is more. */
+  .scroll-fade[data-more="true"] {
+    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 2.5rem), transparent);
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 2.5rem), transparent);
+  }
+
+  /* ---- overlays --------------------------------------------------------- */
+  .popover { @apply rounded-md border border-line-strong bg-panel shadow-popover; }
+  .tooltip {
+    @apply pointer-events-none rounded-md border border-line-strong bg-panel px-3 py-2 font-mono text-label text-body shadow-popover;
+  }
+
+  /* [+] How this works — methodology, settings and caveats live in these, on
+     the page itself rather than in another box. The body lines up with the
+     summary's text, after the bracket. */
+  .disclosure { @apply min-w-0; }
+  .disclosure > summary {
+    @apply flex min-h-9 w-fit max-w-full cursor-pointer list-none items-center gap-2 font-mono text-label text-dim transition-colors hover:text-body;
+  }
+  .disclosure > summary::-webkit-details-marker { display: none; }
+  .disclosure > summary::before {
+    content: '[+]';
+    content: '[+]' / '';
+    @apply shrink-0 whitespace-nowrap text-faint;
+  }
+  .disclosure[open] > summary::before {
+    content: '[\2212]';
+    content: '[\2212]' / '';
+  }
+  .disclosure-body {
+    overflow-wrap: anywhere;
+    /* "[+]" is 3ch of 12px mono, plus the summary's 0.5rem gap. */
+    padding-left: calc(3 * 0.6 * 0.75rem + 0.5rem);
+    @apply space-y-2 pb-2 pt-1 font-sans text-data leading-relaxed text-dim;
+  }
+
+  .scroll-thin { scrollbar-width: thin; scrollbar-color: theme('colors.line-strong') transparent; }
+  .scroll-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+  .scroll-thin::-webkit-scrollbar-thumb { background: theme('colors.line-strong'); border-radius: 3px; }
+
+  button:disabled { @apply cursor-not-allowed; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .cursor { animation: cursor-blink 1.2s steps(1) infinite; }
+  .skeleton { animation: skeleton-pulse 1.4s ease-in-out infinite; }
+}
+@keyframes cursor-blink {
+  0%, 55% { opacity: 1; }
+  56%, 100% { opacity: 0; }
+}
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}

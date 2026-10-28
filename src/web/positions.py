@@ -123,7 +123,7 @@ def position_payload(accounts, events, fx, registry, now: datetime, hours: int) 
             leg = {
                 "account_id": account["id"], "account_label": account["label"],
                 "venue": account["venue"],
-                "venue_label": "RISEx" if account["venue"] == "risex" else venue.label,
+                "venue_label": venue.label,
                 "address": account["address"], "scope": scope, "symbol": symbol,
                 "quantity": "0" if account["positions"]["checked_at"] else None,
                 "entry_price": None, "mark_price": None,

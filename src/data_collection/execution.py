@@ -14,6 +14,8 @@ from urllib.parse import quote
 
 from core.enums import MarketType
 from core.execution import BookLevel, DepthBook
+from core.margin import BulkRisk, MarginSchedule, MarginTier, deductions
+from core.margin_tables import BINANCE_BRACKETS, BINANCE_BRACKETS_CHECKED, BINANCE_BRACKETS_URL
 from data_collection.exchanges.binance import BinanceFuturesScraper
 from data_collection.exchanges.bulk import BulkScraper
 from data_collection.exchanges.bullet import BulletScraper
@@ -52,6 +54,39 @@ def optional_limit(value) -> Decimal | None:
         except InvalidOperation:
             pass
     return number(value)
+
+
+def margin_number(value, *, zero: bool = False) -> Decimal:
+    """A finite margin parameter: positive, or non-negative where zero is
+    meaningful (a first tier's floor, a deduction). Empty means zero there."""
+    if zero and value in (None, ""):
+        return Decimal(0)
+    if isinstance(value, (bool, float)) or not isinstance(value, (str, int, Decimal)):
+        raise DepthUnavailable("Invalid public margin parameter.")
+    try:
+        result = Decimal(value)
+    except InvalidOperation:
+        raise DepthUnavailable("Invalid public margin parameter.") from None
+    if not result.is_finite() or result < 0 or (result == 0 and not zero):
+        raise DepthUnavailable("Invalid public margin parameter.")
+    return result
+
+
+# Caps at or above this are a venue's "no limit" sentinel (Bullet sends 1.8e308).
+UNBOUNDED_CAP = Decimal("1e30")
+
+
+def correlation(value) -> Decimal:
+    """A published correlation between two markets: anywhere in [-1, 1]."""
+    if isinstance(value, (bool, float)) or not isinstance(value, (str, int, Decimal)):
+        raise DepthUnavailable("Invalid public margin parameter.")
+    try:
+        result = Decimal(value)
+    except InvalidOperation:
+        raise DepthUnavailable("Invalid public margin parameter.") from None
+    if not result.is_finite() or not -1 <= result <= 1:
+        raise DepthUnavailable("Invalid public margin parameter.")
+    return result
 
 
 def levels(rows, price_key, quantity_key, *, bids: bool) -> tuple[BookLevel, ...]:
@@ -122,9 +157,13 @@ class DecimalHttpClient(HttpClient):
 
 
 class ExecutionDepth:
-    """One loop-owned provider; caches only public metadata (at most 60s)."""
+    """One loop-owned provider; caches only public metadata (at most 60s;
+    margin tables, which rarely change, for an hour)."""
 
     metadata_ttl = 60
+    margin_ttl = 3600
+    # BULK's risk surfaces are about 0.7 MB a market and change with its regime.
+    surface_ttl = 600
 
     def __init__(self, clients: dict[str, HttpClient]):
         self.clients = clients
@@ -135,11 +174,11 @@ class ExecutionDepth:
         self._metadata = {}
         self._locks = {}
 
-    async def _cached(self, key, load):
+    async def _cached(self, key, load, ttl=None):
         lock = self._locks.setdefault(key, asyncio.Lock())
         async with lock:
             cached = self._metadata.get(key)
-            if cached is not None and time.monotonic() - cached[0] < self.metadata_ttl:
+            if cached is not None and time.monotonic() - cached[0] < (ttl or self.metadata_ttl):
                 return cached[1]
             value = await load()
             self._metadata[key] = (time.monotonic(), value)
@@ -156,6 +195,201 @@ class ExecutionDepth:
         if handler is None:
             raise DepthUnavailable("Public perpetual depth is unsupported for this venue.")
         return await handler(venue, symbol)
+
+    async def margin(self, venue: str, symbol: str) -> MarginSchedule:
+        """The venue's published margin tiers for one market, normalised."""
+        handler = {
+            "binance_perp": self._binance_margin, "bybit_perp": self._bybit_margin,
+            "hyperliquid": self._hyperliquid_margin, "lighter": self._lighter_margin,
+            "extended": self._extended_margin, "rise": self._rise_margin,
+            "bullet": self._bullet_margin, "bulk": self._bulk_margin,
+        }.get(venue)
+        if handler is None:
+            raise DepthUnavailable("Public margin rules are unsupported for this venue.")
+        return await handler(venue, symbol)
+
+    # ---- shared market metadata: one cached read serves depth and margin ----
+
+    async def _hl_meta(self, dex):
+        http = self.clients["hyperliquid"]
+        async def load():
+            params = {"type": "metaAndAssetCtxs"}
+            if dex:
+                params["dex"] = dex
+            response = await http.post_json(f"{HyperliquidScraper.base_url}/info", json=params, weight=20)
+            meta = response[0]
+            if dex:
+                spot = await self._cached("hl_spot", lambda: http.post_json(
+                    f"{HyperliquidScraper.base_url}/info", json={"type": "spotMeta"}, weight=20))
+                tokens = {int(row["index"]): row["name"] for row in spot["tokens"]}
+                accounting = currency(tokens[int(meta["collateralToken"])])
+            else:
+                accounting = "USDC"
+            return meta, accounting
+        return await self._cached(("hl", dex), load)
+
+    async def _lighter_markets(self, venue):
+        async def load():
+            return await self.lighter._market_map(refresh=True)
+        return await self._cached(venue, load)
+
+    async def _extended_market(self, venue, symbol):
+        async def load():
+            return _unwrap(await self.clients[venue].get_json(
+                f"{ExtendedScraper.base_url}/api/v1/info/markets", params={"market": symbol}))
+        return one_market(await self._cached((venue, symbol), load), "name", symbol)
+
+    async def _rise_markets(self, venue):
+        async def load():
+            return await self.rise._market_map(refresh=True)
+        return await self._cached(venue, load)
+
+    # ---- margin tables --------------------------------------------------------
+
+    @staticmethod
+    def _schedule(venue, symbol, tiers, source, source_url=None, notes=()):
+        if not tiers:
+            raise DepthUnavailable("Public margin tiers are empty.")
+        return MarginSchedule(venue, symbol, tuple(tiers), source, source_url, tuple(notes))
+
+    async def _binance_margin(self, venue, symbol):
+        native = self.binance.to_native(symbol)
+        rows = BINANCE_BRACKETS.get(native)
+        if rows is None:
+            raise DepthUnavailable("Binance margin brackets are not on file for this market.")
+        tiers = [MarginTier(Decimal(cap), Decimal(leverage), Decimal(rate), Decimal(cum))
+                 for cap, leverage, rate, cum in rows]
+        return self._schedule(venue, symbol, tiers, f"Binance Leverage & Margin page, copied {BINANCE_BRACKETS_CHECKED}",
+                              BINANCE_BRACKETS_URL, ("Brackets need a signed API key, so they are a dated copy of Binance's public table.",
+                                                     "USDT-margined: USDC collateral needs Binance's Multi-Assets mode.",
+                                                     "Binance caps leverage at 20x for futures accounts in their first 30 days."))
+
+    async def _bybit_margin(self, venue, symbol):
+        native = self.bybit.to_native(symbol)
+        async def load():
+            payload = await self.clients[venue].get_json(f"{self.bybit.base_url}/v5/market/risk-limit",
+                                                         params={"category": "linear", "symbol": native})
+            return self.bybit._unwrap(payload)["list"]
+        rows = sorted((row for row in await self._cached((venue, "risk-limit", native), load, self.margin_ttl)
+                       if row.get("symbol") == native), key=lambda row: margin_number(row["riskLimitValue"]))
+        tiers = [MarginTier(margin_number(row["riskLimitValue"]), margin_number(row["maxLeverage"]),
+                            margin_number(row["maintenanceMargin"]), margin_number(row.get("mmDeduction"), zero=True))
+                 for row in rows]
+        return self._schedule(venue, symbol, tiers, "Bybit public risk-limit tiers",
+                              "https://www.bybit.com/en/help-center/article/Risk-Limit-Perpetual-and-Expiry-Contracts",
+                              ("USDT-margined: USDC collateral needs Bybit's Unified Trading Account.",))
+
+    async def _hyperliquid_margin(self, venue, symbol):
+        meta, _accounting = await self._hl_meta("")
+        market = one_market(meta["universe"], "name", symbol)
+        table_id = int(market["marginTableId"])
+        # Documented: table ids below 50 are a single tier at that leverage.
+        rows = ([{"lowerBound": "0", "maxLeverage": table_id}] if table_id < 50
+                else dict(meta["marginTables"])[table_id]["marginTiers"])
+        floors = [margin_number(str(row["lowerBound"]), zero=True) for row in rows]
+        leverages = [margin_number(str(row["maxLeverage"])) for row in rows]
+        # Maintenance is half the initial margin rate at the tier's maximum leverage.
+        rates = [1 / (2 * leverage) for leverage in leverages]
+        cuts = deductions(rates, floors)
+        tiers = [MarginTier(floors[index + 1] if index + 1 < len(rows) else None,
+                            leverages[index], rates[index], cuts[index]) for index in range(len(rows))]
+        return self._schedule(venue, symbol, tiers, "Hyperliquid public margin tables",
+                              "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/margin-tiers")
+
+    async def _lighter_margin(self, venue, symbol):
+        markets = await self._lighter_markets(venue)
+        if symbol not in markets:
+            raise DepthUnavailable("Public perpetual market metadata is missing.")
+        _market_id, _kind, market = markets[symbol]
+        # Fractions are in units of 1/10,000 of notional.
+        minimum = margin_number(str(market["min_initial_margin_fraction"]))
+        default = margin_number(str(market["default_initial_margin_fraction"]))
+        closeout = margin_number(str(market["closeout_margin_fraction"])) / 10000
+        tier = MarginTier(None, 10000 / minimum, margin_number(str(market["maintenance_margin_fraction"])) / 10000)
+        return self._schedule(venue, symbol, [tier], "Lighter public market details",
+                              "https://docs.lighter.xyz/trading/liquidations-and-llp-insurance-fund",
+                              (f"Accounts start at {10000 / default:.0f}x until a leverage is set.",
+                               f"Partial liquidation starts at maintenance margin; full liquidation at {closeout:.2%}."))
+
+    async def _extended_market_margin(self, market, venue, symbol):
+        config = market["tradingConfig"]
+        rows = sorted((row for row in config["riskFactorConfig"] if row.get("isAvailableForUsers", True) is not False),
+                      key=lambda row: margin_number(row["upperBound"]))
+        # A bracket's risk factor is its minimum initial margin rate; maintenance is half of it.
+        tiers = [MarginTier(margin_number(row["upperBound"]), 1 / margin_number(row["riskFactor"]),
+                            margin_number(row["riskFactor"]) / 2) for row in rows]
+        return self._schedule(venue, symbol, tiers, "Extended public market risk factors",
+                              "https://docs.extended.exchange/extended-resources/trading/crypto-markets/margin-schedule",
+                              ("The whole position takes its bracket's rate, so maintenance margin steps up at bracket edges.",))
+
+    async def _extended_margin(self, venue, symbol):
+        return await self._extended_market_margin(await self._extended_market(venue, symbol), venue, symbol)
+
+    async def _rise_margin(self, venue, symbol):
+        market = (await self._rise_markets(venue)).get(symbol)
+        if market is None:
+            raise DepthUnavailable("Public perpetual market metadata is missing.")
+        config = market["config"]
+        rate = 1 / margin_number(str(config["maintenance_margin_factor"]))
+        tier = MarginTier(None, margin_number(str(config["max_leverage"])), rate)
+        return self._schedule(venue, symbol, [tier], "RISEx public market config",
+                              "https://docs.risechain.com/docs/risex/trading/margin",
+                              (f"Partial liquidation starts at maintenance margin; full liquidation at {rate * 2 / 3:.2%}.",))
+
+    async def _bullet_margin(self, venue, symbol):
+        async def load():
+            return await self.clients[venue].get_json(f"{BulletScraper.base_url}/fapi/v1/leverageBracket")
+        entry = one_market(await self._cached((venue, "brackets"), load, self.margin_ttl), "symbol", symbol)
+        tiers = []
+        for row in sorted(entry["brackets"], key=lambda row: margin_number(str(row["notionalFloor"]), zero=True)):
+            cap = margin_number(str(row["notionalCap"]))
+            tiers.append(MarginTier(None if cap >= UNBOUNDED_CAP else cap, margin_number(str(row["initialLeverage"])),
+                                    margin_number(str(row["maintMarginRatio"])), margin_number(str(row["cum"]), zero=True)))
+        return self._schedule(venue, symbol, tiers, "Bullet public leverage brackets",
+                              "https://docs.bullet.xyz/exchange/trading/unified-margin-engine")
+
+    async def _bulk_margin(self, venue, symbol):
+        http = self.clients[venue]
+        async def load_surfaces():
+            return await http.get_json(f"{BulkScraper.base_url}/riskSurfaces", params={"market": symbol})
+        async def load_ticker():
+            return await http.get_json(f"{BulkScraper.base_url}/ticker/{quote(symbol, safe='')}")
+        payload = await self._cached((venue, "surfaces", symbol), load_surfaces, self.surface_ttl)
+        ticker = await self._cached((venue, "ticker", symbol), load_ticker)
+        if payload.get("symbol") != symbol:
+            raise DepthUnavailable("Public risk surfaces do not match the requested market.")
+        regime = int(ticker.get("regime", payload["liveRegime"]))
+        age = int(ticker.get("regimeDt", 0))
+        surface = next((row for row in payload["surfaces"] if int(row["regime"]) == regime), None)
+        if surface is None:
+            raise DepthUnavailable("Public risk surfaces lack the live regime.")
+
+        def rate(cell):
+            # Rates age from mmrO at the regime's start towards mmrE, as in
+            # BULK's own calculator (which reads p = 0 as 0.99).
+            origin, end = margin_number(str(cell["mmrO"])), margin_number(str(cell["mmrE"]))
+            decay = margin_number(str(cell["p"]), zero=True) or Decimal("0.99")
+            return end + (origin - end) * decay ** age
+
+        curve = payload["leverage"]
+        risk = BulkRisk(
+            base=symbol.split("-", 1)[0],
+            notionals=tuple(margin_number(str(value)) for value in surface["notionals"]),
+            leverages=tuple(margin_number(str(value)) for value in surface["leverage"]),
+            buy=tuple(tuple(rate(cell) for cell in row) for row in surface["buy"]),
+            sell=tuple(tuple(rate(cell) for cell in row) for row in surface["sell"]),
+            leverage_min=margin_number(str(curve["min"])), leverage_max=margin_number(str(curve["max"])),
+            notional_0=margin_number(str(curve["notional_0"]), zero=True),
+            notional_half=margin_number(str(curve["notional_half"])),
+            correlations={str(pair): correlation(rho) for pair, rho in payload.get("corrs", [])},
+            regime=regime,
+        )
+        return MarginSchedule(venue, symbol, (), "BULK public risk surfaces",
+                              "https://docs.bulk.trade/bulk-exchange/Margin",
+                              ("Portfolio margin at BULK's current volatility regime; positions offset by its published correlations.",
+                               "BULK publishes no initial-margin formula: its leverage curve sets the minimum capital.",
+                               "Computed like BULK's published calculator; its engine's correlation discount is undocumented and not applied."),
+                              bulk=risk)
 
     @staticmethod
     def _book(venue, symbol, quote_currency, payload, bid_key, ask_key,
@@ -215,25 +449,11 @@ class ExecutionDepth:
                           notes=("Up to 1000 visible price levels per side; RPI orders excluded.",))
 
     async def _hyperliquid(self, venue, symbol):
-        http = self.clients["hyperliquid"]
         dex = HyperliquidScraper._dex_for_symbol(symbol)
         if (venue == "hyperliquid" and dex) or (venue != "hyperliquid" and dex != venue.removeprefix("hyperliquid_")):
             raise DepthUnavailable("Hyperliquid deployer identity does not match the requested listing.")
-        async def load():
-            params = {"type": "metaAndAssetCtxs"}
-            if dex:
-                params["dex"] = dex
-            response = await http.post_json(f"{HyperliquidScraper.base_url}/info", json=params, weight=20)
-            meta = response[0]
-            if dex:
-                spot = await self._cached("hl_spot", lambda: http.post_json(
-                    f"{HyperliquidScraper.base_url}/info", json={"type": "spotMeta"}, weight=20))
-                tokens = {int(row["index"]): row["name"] for row in spot["tokens"]}
-                accounting = currency(tokens[int(meta["collateralToken"])])
-            else:
-                accounting = "USDC"
-            return meta, accounting
-        meta, accounting = await self._cached(("hl", dex), load)
+        http = self.clients["hyperliquid"]
+        meta, accounting = await self._hl_meta(dex)
         market = one_market(meta["universe"], "name", symbol)
         if market.get("isDelisted", False):
             raise DepthUnavailable("Market is delisted.")
@@ -258,9 +478,7 @@ class ExecutionDepth:
                           max_quote_notional=max_notional, notes=notes)
 
     async def _lighter(self, venue, symbol):
-        async def load():
-            return await self.lighter._market_map(refresh=True)
-        markets = await self._cached(venue, load)
+        markets = await self._lighter_markets(venue)
         if symbol not in markets:
             raise DepthUnavailable("Public perpetual market metadata is missing.")
         market_id, kind, market = markets[symbol]
@@ -285,10 +503,7 @@ class ExecutionDepth:
                                  "Reported order totals are not treated as proof of full-book coverage."))
 
     async def _extended(self, venue, symbol):
-        http = self.clients[venue]
-        async def load():
-            return _unwrap(await http.get_json(f"{ExtendedScraper.base_url}/api/v1/info/markets", params={"market": symbol}))
-        market = one_market(await self._cached((venue, symbol), load), "name", symbol)
+        market = await self._extended_market(venue, symbol)
         if market.get("isRfq") is not False:
             raise DepthUnavailable("RFQ indicative REST depth is not executable; public REST estimates are unsupported.")
         if market.get("active") is not True or market.get("status") != "ACTIVE" or market.get("isOffHours", False):
@@ -297,7 +512,8 @@ class ExecutionDepth:
             raise DepthUnavailable("Market is not a perpetual.")
         accounting = currency(market["collateralAssetName"])
         identity(symbol, market["assetName"] + "-" + accounting)
-        payload = _unwrap(await http.get_json(f"{ExtendedScraper.base_url}/api/v1/info/markets/{quote(symbol, safe='')}/orderbook"))
+        payload = _unwrap(await self.clients[venue].get_json(
+            f"{ExtendedScraper.base_url}/api/v1/info/markets/{quote(symbol, safe='')}/orderbook"))
         if "market" in payload:
             identity(payload["market"], symbol)
         return self._book(venue, symbol, accounting, payload, "bid", "ask", "price", "qty",
@@ -306,9 +522,7 @@ class ExecutionDepth:
                                  "REST publishes no supported depth limit or snapshot time. Captured visible levels only; receipt time is not matching-engine freshness."))
 
     async def _rise(self, venue, symbol):
-        async def load():
-            return await self.rise._market_map(refresh=True)
-        markets = await self._cached(venue, load)
+        markets = await self._rise_markets(venue)
         market = markets.get(symbol)
         if market is None:
             raise DepthUnavailable("Public perpetual market metadata is missing.")

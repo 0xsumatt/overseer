@@ -1,0 +1,174 @@
+/* Execution estimates. Shared components supply the status bar, toolbar, KPI
+ * strip, badges, table, tooltip and disclosures; these rules cover the
+ * comparison's own layout: winner cards and their breakdown overlay, venue
+ * cells, price cells and the price tooltip. */
+@layer components {
+  /* The status bar renders outside #execution-app; its state is toggled. */
+  #execution-status-state[hidden] { display: none; }
+
+  #execution-app { min-width: 0; max-width: 100%; }
+  /* Several hidden-toggled elements also carry display utilities. */
+  #execution-app [hidden] { display: none !important; }
+
+  /* ---- best venue by trade size ----------------------------------------- */
+  /* The strip anchors the breakdown overlay, so opening one never grows it. */
+  #execution-best { position: relative; }
+  .execution-best-card { @apply flex min-w-0 flex-col; }
+  .execution-best-head { @apply flex min-h-6 items-start justify-between gap-2; }
+  .execution-best-detail > summary {
+    list-style: none;
+    cursor: pointer;
+    @apply inline-flex max-w-full items-center rounded underline-offset-4;
+  }
+  .execution-best-detail > summary::-webkit-details-marker { display: none; }
+  .execution-best-detail > summary[aria-disabled="true"] { cursor: default; }
+  .execution-best-detail > summary:not([aria-disabled="true"]):is(:hover, :focus-visible),
+  .execution-best-detail[open] > summary {
+    @apply underline decoration-line-strong;
+  }
+  /* An open breakdown floats below the strip at its full width. */
+  .execution-best-breakdown {
+    position: absolute;
+    top: calc(100% + 0.5rem);
+    left: 0;
+    right: 0;
+    z-index: 30;
+    max-height: min(32rem, 70vh);
+    overflow: auto;
+    overscroll-behavior: contain;
+    overflow-wrap: anywhere;
+    @apply grid content-start gap-x-6 gap-y-3 p-3 font-mono text-label sm:grid-cols-2 sm:p-4 lg:grid-cols-3;
+  }
+  .execution-best-breakdown > :is(.execution-breakdown-head, .execution-price-state) { grid-column: 1 / -1; }
+  .execution-best-breakdown > .execution-detail-list { @apply mt-0; }
+  .execution-breakdown-head { @apply flex items-center justify-between gap-3; }
+  .execution-breakdown-title { @apply font-mono text-data font-medium text-body; }
+  .execution-best-venue { @apply flex items-center gap-2; overflow-wrap: anywhere; }
+  .execution-best-card[data-state="ready"] .execution-best-venue { @apply text-body; }
+  /* A retained winner stays readable but visibly no longer current. */
+  .execution-best-card[data-state="expired"] :is(.kpi-value, .execution-best-venue) { @apply text-dim; }
+
+  /* ---- price tooltip ---------------------------------------------------- */
+  .execution-price-tooltip {
+    position: fixed;
+    z-index: 100;
+    width: min(26rem, calc(100vw - 1rem));
+    max-height: calc(100dvh - 1rem);
+    overflow: auto;
+    overscroll-behavior: contain;
+    overflow-wrap: anywhere;
+    /* The pointer may cross onto the tooltip to read or select it. */
+    @apply pointer-events-auto p-3;
+  }
+  .execution-tooltip-heading { @apply text-data font-medium text-body; }
+  .execution-tooltip-age { @apply mt-1 text-dim; }
+  .execution-tooltip-age[data-expired="true"] { @apply text-phosphor; }
+  .execution-tooltip-list { @apply mt-2 space-y-1; }
+  .execution-tooltip-list dt { @apply text-faint; }
+  .execution-tooltip-list dd { @apply text-data tabular-nums text-body; }
+  .execution-tooltip-help { @apply mt-2 text-faint; }
+
+  /* ---- fees & reference ------------------------------------------------- */
+  .execution-fee-controls { @apply grid gap-3 sm:grid-cols-2 lg:grid-cols-3; }
+  .execution-fee-control .select-shell { @apply w-full; }
+  .execution-fee-select { min-width: 0; text-overflow: ellipsis; }
+  .execution-fee-rate { @apply font-mono text-label text-faint; }
+  .execution-fee-sources { @apply mt-4 space-y-1; }
+  .execution-fee-notes { @apply list-disc space-y-1 pl-5; }
+  .execution-reference { @apply space-y-1 font-mono text-label text-dim; }
+  .execution-source-link {
+    @apply text-dim underline decoration-line-strong underline-offset-4 transition-colors hover:text-body;
+  }
+
+  /* ---- comparison table ------------------------------------------------- */
+  /* Price columns fit "best 12.34 bps total" on one line; 60rem still fits the
+     976px content column at 1024px wide without sideways scrolling. */
+  .execution-table { table-layout: fixed; min-width: 60rem; }
+  /* Room for "5.0 bps fee · Expired 12s" and [details] on one line. */
+  .execution-table thead th:first-child { width: 18rem; }
+  .execution-table tbody :is(th, td) { vertical-align: top; }
+  /* Size headers sort the table best-first; the active one is bright, with ↓. */
+  .execution-sort {
+    @apply inline-flex items-center gap-1 rounded font-mono text-dim transition-colors hover:text-body;
+  }
+  .execution-table th[aria-sort] .execution-sort { @apply text-body; }
+  .execution-table th[aria-sort] .execution-sort::after {
+    content: '↓';
+    content: '↓' / '';
+    @apply text-label text-faint;
+  }
+  .execution-notional { @apply block text-data; }
+  .execution-quantity { @apply mt-0.5 block normal-case tracking-normal text-faint; }
+
+  /* Fee and quote age, dot-separated by .meta-line; an age not yet known
+     takes no space (and no separator). */
+  .execution-row-stats { @apply min-w-0; }
+  .execution-row-stats > :empty { display: none; }
+  .execution-age { @apply tabular-nums; }
+  .execution-table tr[data-stale="true"] .execution-age { @apply text-phosphor; }
+  .execution-row-funding { @apply mt-0.5 text-label tabular-nums text-faint; }
+  .execution-row-state { overflow-wrap: anywhere; @apply mt-1 text-label text-faint; }
+  .execution-book-body { @apply mt-2 space-y-2; }
+  .execution-book-body p { overflow-wrap: anywhere; }
+
+  .execution-price-detail > summary {
+    list-style: none;
+    cursor: pointer;
+    @apply flex min-h-11 flex-col items-end justify-center gap-0.5 rounded;
+  }
+  .execution-price-detail > summary::-webkit-details-marker { display: none; }
+  .execution-price-value { @apply whitespace-nowrap font-medium tabular-nums text-body underline-offset-4; }
+  /* The underline is an affordance, shown only when the price is targeted. */
+  .execution-price-detail > summary:is(:hover, :focus-visible) .execution-price-value,
+  .execution-price-detail[open] > summary .execution-price-value {
+    @apply underline decoration-line-strong;
+  }
+  .execution-all-in-cost { overflow-wrap: anywhere; @apply whitespace-normal text-label tabular-nums text-faint; }
+  .execution-best-mark { @apply mr-1.5 text-gain; }
+  .execution-price-label { @apply text-label text-dim; }
+  /* Number cells never wrap; a state label such as "Snapshot too shallow"
+     wraps inside its own column instead of running into the next. */
+  .execution-price-state { @apply whitespace-normal text-dim; }
+  .execution-fill { @apply mt-1 text-label text-faint; }
+  .execution-price-cell[data-stale="true"] .execution-price-value { @apply text-dim; }
+  .execution-detail-list { overflow-wrap: anywhere; @apply mt-2 space-y-1 text-left font-mono text-label; }
+  .execution-detail-list dt { @apply text-faint; }
+  .execution-detail-list dd { @apply pb-1 text-body; }
+
+  /* ---- cheapest venue history ------------------------------------------- */
+  .execution-history-head { @apply mb-3 flex flex-wrap items-center justify-between gap-3; }
+  /* Side by side only once each card has room for a venue name on one line. */
+  .execution-history-grid { @apply grid gap-3 xl:grid-cols-3; }
+  .execution-history-grid[aria-busy="true"] { @apply opacity-60 transition-opacity; }
+  .execution-history-table { @apply font-mono; }
+  /* Fixed columns keep the numbers aligned inside the card; venue names stay
+     on one line, as they do in the live table. */
+  .data-table.execution-history-table { table-layout: fixed; }
+  .data-table.execution-history-table :is(th, td) { @apply px-2; }
+  /* The card-edge columns keep the shared 16px gutter. */
+  .data-table.execution-history-table :is(th, td):first-child { @apply sm:pl-4; }
+  .data-table.execution-history-table :is(th, td):last-child { @apply sm:pr-4; }
+  .data-table.execution-history-table thead th { @apply tracking-normal; }
+  .execution-history-table thead th:nth-child(2) { width: 4.75rem; }
+  .execution-history-table thead th:nth-child(3) { width: 4.5rem; }
+  .execution-history-table thead th:nth-child(4) { width: 4rem; }
+  /* The win share is drawn as a fill behind its own number. */
+  .execution-history-share {
+    background-image: linear-gradient(to left, theme('colors.dim / 16%') var(--share), transparent var(--share));
+  }
+
+  @media (max-width: 639px) {
+    /* Two cards per row: keep prices on one line rather than breaking digits. */
+    .execution-best-card { @apply px-3; }
+    .execution-best-card .kpi-value { @apply text-data font-semibold; }
+    .execution-table { min-width: 56rem; }
+    /* Fee and age may stack beside [details] in the narrow sticky column. */
+    .execution-table thead th:first-child { width: 12rem; }
+    /* The sticky venue column needs an edge once prices scroll beneath it;
+       the header cell keeps its bottom rule too. */
+    .execution-table tbody .sticky-col { box-shadow: inset -1px 0 0 theme('colors.line'); }
+    .execution-table thead .sticky-col {
+      box-shadow: inset -1px 0 0 theme('colors.line'), inset 0 -1px 0 theme('colors.line');
+    }
+  }
+}

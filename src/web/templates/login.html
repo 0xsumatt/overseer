@@ -1,48 +1,45 @@
 {% extends "base.html" %}
 {% block title %}login · overseer{% endblock %}
+{# A bare frame: signing in needs neither navigation nor a status bar, and
+   the wordmark below is the page's only brand mark and its heading. #}
+{% block nav %}{% endblock %}
+{% block status_bar %}{% endblock %}
+{% block flash %}{% endblock %}
 {% block content %}
-{# The nav is hidden when unauthenticated, so this page carries the wordmark
-   itself — otherwise the first screen anyone sees has no brand on it at all. #}
-<div class="mx-auto mt-20 max-w-xs">
+<div class="mx-auto mt-16 w-full max-w-xs sm:mt-24">
   <div class="mb-8 text-center">
-    {# The wordmark IS this page's heading — as a div it left the login page
-       with no h1 at all. Visual size stays small; semantic level doesn't have
-       to follow it. #}
     <h1 class="font-mono text-title font-semibold tracking-label text-phosphor">
       OVERSEER<span class="cursor" aria-hidden="true"></span>
     </h1>
-    <p class="mt-1.5 font-mono text-label tracking-label uppercase text-faint">
-      market operations console
-    </p>
+    <p class="mt-1.5 font-mono text-label uppercase tracking-label text-faint">Market operations console</p>
   </div>
 
+  {% with messages = get_flashed_messages() %}
+    {% for m in messages %}
+    <div class="notice mb-4" data-tone="error" role="alert">{{ m }}</div>
+    {% endfor %}
+  {% endwith %}
+
   <form method="post" class="space-y-3">
-    {# Real labels, not placeholders. A placeholder vanishes the moment you
-       type, isn't announced reliably by screen readers, and leaves nothing to
-       click. The uppercase mono label is also the house style elsewhere. #}
-    <label class="block">
-      <span class="font-mono text-label tracking-label uppercase text-faint">email</span>
+    {# Real labels, not placeholders: a placeholder vanishes on typing and is
+       not announced reliably by screen readers. #}
+    <label class="field">
+      <span class="field-label">Email</span>
       <input name="email" type="email" required autofocus autocomplete="username"
-             class="input mt-1 w-full">
+             class="input w-full">
     </label>
-    <label class="block">
-      <span class="font-mono text-label tracking-label uppercase text-faint">password</span>
+    <label class="field">
+      <span class="field-label">Password</span>
       <input name="password" type="password" required autocomplete="current-password"
-             class="input mt-1 w-full">
+             class="input w-full">
     </label>
-    {# The one primary action on the page, so it gets the solid high-contrast
-       treatment. Was bg-slate-100 — a near-white block in a dark console. #}
-    <button type="submit"
-            class="toolbar-button mt-1 w-full bg-phosphor font-semibold
-                   tracking-label uppercase text-ink hover:bg-phosphor/90
-                   focus-visible:outline focus-visible:outline-2
-                   focus-visible:outline-offset-2 focus-visible:outline-phosphor">
-      sign in
-    </button>
+    <button type="submit" class="btn btn-primary mt-2 w-full">Sign in</button>
   </form>
 
-  <p class="mt-6 text-center font-mono text-label text-faint">
-    accounts are created from the CLI
+  <p class="mt-6 text-center font-mono text-label text-faint">Accounts are created from the command line.</p>
+  <p class="mt-2 text-center">
+    <a href="{{ url_for('pages.dashboard') }}"
+       class="font-mono text-label text-dim underline decoration-line-strong underline-offset-4 transition-colors hover:text-body">Back to charts</a>
   </p>
 </div>
 {% endblock %}

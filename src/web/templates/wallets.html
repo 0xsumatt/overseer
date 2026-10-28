@@ -1,268 +1,116 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui %}
 {% block title %}wallets · overseer{% endblock %}
 {% block content %}
-<div class="mb-5 flex flex-wrap items-end justify-between gap-3 sm:gap-4">
-  <div>
-    <h1 class="text-title font-semibold text-body">Tracked wallets</h1>
-    <p class="mt-1 text-data text-dim">Follow cumulative wallet flow against market price.</p>
-  </div>
-  <div class="grid w-full gap-2 font-mono text-data sm:ml-auto sm:flex sm:w-auto sm:items-end">
-    <label for="wsym" class="flex min-w-0 flex-col gap-1">
-      <span class="text-label tracking-label uppercase text-faint">Asset</span>
-      <span class="select-shell min-w-0 w-full sm:w-auto">
-        <select id="wsym" class="select select-polished w-full">
-          {% for s in symbols %}
-          <option value="{{ s.symbol }}">{{ s.symbol }} · {{ s.fills }} fills</option>
-          {% endfor %}
-        </select>
-      </span>
-    </label>
-    <label for="whours" class="flex min-w-0 flex-col gap-1">
-      <span class="text-label tracking-label uppercase text-faint">Window</span>
-      <span class="select-shell min-w-0 w-full sm:w-auto">
-        <select id="whours" class="select select-polished w-full">
-          <option value="24">24h</option>
-          <option value="48" selected>48h</option>
-          <option value="168">7d</option>
-        </select>
-      </span>
-    </label>
-  </div>
-</div>
+{{ ui.page_header('Tracked wallets', 'Follow cumulative wallet flow against market price.') }}
 
-{% if not symbols %}
-<div class="summary-card font-mono text-data text-dim">
-  No fills recorded yet — tracked wallets are polled every 30s; first rows land shortly after the scheduler starts.
+{% if symbols %}
+<div class="toolbar">
+  <label class="field" for="wsym">
+    <span class="field-label">Asset</span>
+    <span class="select-shell">
+      <select id="wsym" class="select select-polished">
+        {% for s in symbols %}
+        <option value="{{ s.symbol }}">{{ s.symbol }} · {{ s.fills }} fills</option>
+        {% endfor %}
+      </select>
+    </span>
+  </label>
+  <label class="field" for="whours">
+    <span class="field-label">Window</span>
+    <span class="select-shell">
+      <select id="whours" class="select select-polished">
+        <option value="24">24h</option>
+        <option value="48" selected>48h</option>
+        <option value="168">7d</option>
+      </select>
+    </span>
+  </label>
 </div>
-{% else %}
-<div id="wlegend" class="scroll-thin mb-3 flex flex-nowrap gap-2 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible sm:pb-0"></div>
-<div id="wchart" class="chart-card h-[22rem] w-full sm:h-[27.5rem]"></div>
-<p class="chart-caption">
-  <span id="wchart-scope">Chart: selected asset and window.</span>
-  Cumulative net flow (buys − sells, base units, left axis) vs price (right axis);
-  flow measures drift from the window-start position, not absolute inventory.</p>
-
-<p class="chart-caption mt-4">Wallet share · Last 24h, all assets.</p>
-<div id="wshare" class="mt-2 grid gap-4 sm:grid-cols-2"></div>
 {% endif %}
 
-<div class="mt-8 grid gap-4 lg:grid-cols-2">
-  {% for label, venue, rows in summaries %}
-  <section class="summary-card flex h-[18rem] flex-col sm:h-[21rem]">
-    <div class="flex items-baseline justify-between gap-2">
-      <h2 class="font-mono text-label tracking-label uppercase text-dim">{{ label }}</h2>
-      <span class="font-mono text-label text-faint">{{ venue }}</span>
+{{ ui.page_status() }}
+
+<div class="space-y-6">
+{% if not symbols %}
+  <div class="summary-card empty-state">
+    <p class="empty-state-title">No wallet fills recorded yet.</p>
+    <p class="empty-state-hint">Tracked wallets are checked every 30 seconds; fills appear here as they arrive.</p>
+  </div>
+{% else %}
+  <section class="chart-card" aria-labelledby="wchart-title">
+    <div class="panel-header">
+      <h2 id="wchart-title" class="panel-title">Net flow vs price<span id="wchart-scope" class="panel-subtitle"></span></h2>
     </div>
-    <p class="chart-caption mb-3">All recorded fills, all assets; size in base units.</p>
-    <div class="scroll-thin min-h-0 flex-1 overflow-y-auto pr-3">
-      {% if rows %}
-      <table class="w-full font-mono text-data">
-        <thead>
-          <tr class="text-left text-label tracking-label uppercase text-faint">
-            <th class="pb-1.5">symbol</th><th class="pb-1.5">side</th>
-            <th class="pb-1.5 text-right">fills</th><th class="pb-1.5 text-right">total size</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for r in rows %}
-          <tr class="border-t border-line/60">
-            <td class="py-1.5 text-body">{{ r.symbol }}</td>
-            <td class="py-1.5 {{ 'text-gain' if r.side == 'buy' else 'text-loss' }}">{{ r.side }}</td>
-            <td class="py-1.5 text-right tabular-nums text-dim">{{ r.fills }}</td>
-            <td class="py-1.5 text-right tabular-nums text-dim">{{ r.total_amount }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      {% else %}
-      <div class="font-mono text-data text-dim">no fills yet</div>
-      {% endif %}
+    <div id="wlegend" class="legend px-3 pt-2 sm:px-4"></div>
+    <div class="wallets-chart-box h-[20rem] sm:h-[26rem]">
+      <div id="wchart" class="absolute inset-0"></div>
+    </div>
+    <p class="meta-line mx-3 mb-3 sm:mx-4">
+      <span>Flow: buys − sells, base units, left axis</span><span>Price: right axis</span>
+    </p>
+  </section>
+
+  <section aria-labelledby="wshare-title">
+    <h2 id="wshare-title" class="section-label">Wallet share <span class="section-count">Last 24h · all assets</span></h2>
+    <div id="wshare" class="kpi-grid kpi-grid-2"></div>
+  </section>
+{% endif %}
+
+  <section aria-labelledby="fills-title">
+    <h2 id="fills-title" class="section-label">Fill history <span class="section-count">All assets · base units</span></h2>
+    <div class="grid items-start gap-4 lg:grid-cols-2">
+      {% for label, venue, rows in summaries %}
+      <section class="table-card flex max-h-[21rem] flex-col" aria-label="{{ label }} fills">
+        <div class="panel-header">
+          <h3 class="panel-title">{{ label | upper }}<span class="panel-subtitle">{{ venue_labels.get(venue, venue) }}</span></h3>
+        </div>
+        <div class="scroll-thin scroll-fade min-h-0 overflow-y-auto" data-fills-scroll>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th scope="col">Symbol</th><th scope="col">Side</th>
+                <th scope="col" class="num">Fills</th><th scope="col" class="num">Total size</th>
+              </tr>
+            </thead>
+            <tbody class="font-mono">
+              {% for r in rows %}
+              <tr>
+                <td class="text-body">{{ r.symbol }}</td>
+                <td class="{{ 'text-long' if r.side == 'buy' else 'text-short' }}">{{ r.side }}</td>
+                <td class="num text-dim">{{ '{:,}'.format(r.fills | int) }}</td>
+                <td class="num text-dim">{{ '{:,.4f}'.format(r.total_amount | float) }}</td>
+              </tr>
+              {% else %}
+              <tr><td colspan="4" class="empty-cell">No fills recorded for this wallet yet.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      {% endfor %}
     </div>
   </section>
-  {% endfor %}
+
+  <details class="disclosure">
+    <summary>How this works</summary>
+    <div class="disclosure-body">
+      <p>Net flow is cumulative buys − sells in base units from the start of the selected window, so it shows
+        drift from the window-start position, not absolute inventory. Price is the Hyperliquid perpetual close.</p>
+      <p>Line colour follows each wallet's venue; two wallets on the same venue are told apart by line style.</p>
+      <p>Wallet share compares a wallet's 24h filled notional with its venue's 24h volume, taken from the daily
+        venue-wide sweep. The fills feed is best-effort and may miss fills, so wallet share may be understated.</p>
+      <p>Fill history totals every recorded fill for each wallet across all assets; sizes are in base units.</p>
+    </div>
+  </details>
 </div>
 {% endblock %}
 
 {% block scripts %}
 {% if symbols %}
 <script src="{{ url_for('static', filename='js/lightweight-charts.standalone.js') }}"></script>
-<script src="{{ url_for('static', filename='js/venues.js') }}"></script>
-<script>
-// Wallet colour follows the wallet's VENUE, from the validated palette in
-// venues.js — not its position in an array.
-//
-// The old `WALLET_COLORS[i % length]` was wrong twice over. It keyed colour to
-// rank, so adding or removing a tracked wallet repainted the others; and the
-// chart iterated /api/wallet-flows (an object keyed by label) while the share
-// meters iterated /api/wallet-share (an array in config order), so the same
-// wallet could be drawn in two different colours in the two panels on the same
-// screen. Both now resolve through this one map, so they cannot disagree.
-// It also had the phosphor brand amber sitting in the series array.
-const WALLET_VENUE = Object.fromEntries(
-  {{ wallets | tojson }}.map(w => [w.label, w.venue]));
-
-// Two wallets on one venue would share a hue, so they are separated by line
-// style instead — colour still says "which venue", dash says "which wallet".
-// (LightweightCharts.LineStyle: 0 solid, 2 dashed, 1 dotted, 3 large-dashed.)
-const _venueSeen = {};
-const DASHES = [0, 2, 1, 3];
-function walletStyle(label) {
-  const venue = WALLET_VENUE[label];
-  if (!(label in _venueSeen)) {
-    const n = Object.entries(_venueSeen).filter(([, v]) => v.venue === venue).length;
-    _venueSeen[label] = { venue, dash: DASHES[n % DASHES.length] };
-  }
-  return { color: colorFor(venue), lineStyle: _venueSeen[label].dash };
-}
-
-const chart = LightweightCharts.createChart(document.getElementById('wchart'), {
-  layout: { background: { color: 'transparent' }, textColor: CHART_THEME.text,
-            fontFamily: CHART_THEME.font, fontSize: 12 },
-  grid: { vertLines: { color: CHART_THEME.grid }, horzLines: { color: CHART_THEME.grid } },
-  crosshair: { vertLine: { color: CHART_THEME.crosshair },
-               horzLine: { color: CHART_THEME.crosshair } },
-  timeScale: { timeVisible: true, secondsVisible: false, borderColor: CHART_THEME.border },
-  rightPriceScale: { borderColor: CHART_THEME.border },
-  leftPriceScale: { visible: true, borderColor: CHART_THEME.border },
-  autoSize: true,
-});
-let handles = [];
-const walletFilters = Overseer.filterState('wallets');
-const walletState = Overseer.pageState();
-let walletRequest = 0;
-
-async function loadWallets({ forceRefresh = false } = {}) {
-  const request = ++walletRequest;
-  const symbol = document.getElementById('wsym').value;
-  const hours = document.getElementById('whours').value;
-  // price context comes from hyperliquid, whose bare-coin symbols match the
-  // wallet venues' convention (HL + lighter both call it just "BTC")
-  const pxQs = new URLSearchParams({ exchange: 'hyperliquid', market_type: 'perp',
-                                     symbol, interval: '1m', hours, limit: 5000 });
-  walletState.loading('Loading tracked-wallet flows…');
-  try {
-    const [flows, candles] = await Promise.all([
-      Overseer.requestJSON(
-        `/api/wallet-flows?${new URLSearchParams({ symbol, hours })}`,
-        { forceRefresh },
-      ),
-      Overseer.requestJSON(`/api/candles?${pxQs}`, { forceRefresh }),
-    ]);
-    if (request !== walletRequest) return;
-    document.getElementById('wchart-scope').textContent =
-      `Chart: ${symbol} · selected ${hours === '168' ? '7d' : hours + 'h'} window.`;
-    handles.forEach(h => chart.removeSeries(h));
-    handles = [];
-
-    const legend = [];
-    if (candles.length) {
-      const px = chart.addLineSeries({
-        color: CHART_THEME.crosshair, lineWidth: 1, priceScaleId: 'right',
-        lastValueVisible: false, priceLineVisible: false,
-      });
-      px.setData(candles.map(c => ({ time: c.time, value: c.close })));
-      handles.push(px);
-      legend.push({ label: `${symbol} price`, color: CHART_THEME.crosshair });
-    }
-    Object.entries(flows).forEach(([label, pts]) => {
-      if (!pts.length) return;
-      let cum = 0;
-      const style = walletStyle(label);
-      const line = chart.addLineSeries({
-        color: style.color, lineStyle: style.lineStyle, lineWidth: 2, priceScaleId: 'left',
-      });
-      line.setData(pts.map(p => ({ time: p.time, value: (cum += p.net) })));
-      handles.push(line);
-      legend.push({ label: `${label} net flow`, color: style.color,
-                    venue: WALLET_VENUE[label], dashed: style.lineStyle !== 0 });
-    });
-    // The swatch mirrors the line it stands for — dashed lines get a dashed
-    // swatch, so the legend still identifies a series when two wallets share a
-    // venue hue.
-    document.getElementById('wlegend').innerHTML = legend.map(e => {
-      const swatch = e.dashed
-        ? `<span class="inline-block h-0.5 w-4" style="background:repeating-linear-gradient(
-               90deg, ${e.color} 0 3px, transparent 3px 6px)"></span>`
-        : `<span class="inline-block h-0.5 w-4 rounded" style="background:${e.color}"></span>`;
-      return `<span class="inline-flex items-center gap-2 rounded border border-line bg-panel
-                           px-2.5 py-1 font-mono text-data">
-        ${swatch}<span class="text-body">${e.label}</span>
-        ${e.venue ? `<span class="text-faint">${e.venue}</span>` : ''}</span>`;
-    }).join('');
-    chart.timeScale().fitContent();
-    const hasFlow = Object.values(flows).some(points => points.length);
-    if (candles.length || hasFlow) walletState.ready();
-    else walletState.empty('No wallet flows or price bars exist for this window.', loadWallets);
-  } catch (error) {
-    if (request === walletRequest) walletState.error('Wallet flow', loadWallets);
-  }
-}
-
-// ---- share meters: wallet 24h notional vs venue 24h volume ------------------
-// Radial meter, not a 2-slice pie: one filled arc on a muted same-hue track,
-// the share % as the figure. Entity hues match the flow lines above.
-const fmtUsd = n => n == null ? '—'
-  : n >= 1e9 ? '$' + (n/1e9).toFixed(2) + 'B'
-  : n >= 1e6 ? '$' + (n/1e6).toFixed(0) + 'M'
-  : '$' + (n/1e3).toFixed(0) + 'K';
-
-function meter(w, color) {
-  const r = 34, c = 2 * Math.PI * r;
-  const pct = w.share_pct;
-  const dash = pct == null ? 0 : Math.min(pct, 100) / 100 * c;
-  return `
-  <section class="summary-card flex flex-col items-start gap-3 md:flex-row md:items-center">
-    <svg viewBox="0 0 84 84" class="h-24 w-24 shrink-0" role="img"
-         aria-label="${w.label} is ${pct == null ? 'unknown' : pct.toFixed(2) + '%'} of ${w.venue} 24h volume">
-      <circle cx="42" cy="42" r="${r}" fill="none" stroke="${color}22" stroke-width="8"/>
-      <circle cx="42" cy="42" r="${r}" fill="none" stroke="${color}" stroke-width="8"
-              stroke-linecap="round" stroke-dasharray="${dash} ${c}"
-              transform="rotate(-90 42 42)"/>
-      <text x="42" y="47" text-anchor="middle" fill="#EEF2F7"
-            font-family="ui-sans-serif,system-ui" font-size="15" font-weight="600">
-        ${pct == null ? '—' : pct.toFixed(1) + '%'}</text>
-    </svg>
-    <div class="min-w-0">
-      <div class="flex flex-wrap items-center gap-2">
-        <span class="h-2 w-2 shrink-0 rounded-full" style="background:${color}"></span>
-        <span class="min-w-0 break-words font-mono text-data tracking-label uppercase text-body">${w.label}</span>
-        <span class="font-mono text-label text-dim">${w.venue}</span>
-      </div>
-      <div class="mt-1 text-data text-dim">
-        ${fmtUsd(w.wallet_notional_24h)} filled of ${fmtUsd(w.venue_notional_24h)} venue-wide 24h volume</div>
-      <p class="chart-caption">${w.fills_24h.toLocaleString()} fills ·
-        venue total from the daily sweep. The best-effort fills feed may miss fills, so wallet share may be understated.</p>
-    </div>
-  </section>`;
-}
-
-async function loadShare({ forceRefresh = false } = {}) {
-  try {
-    const rows = await Overseer.requestJSON('/api/wallet-share', { forceRefresh });
-    // colorFor(w.venue), not the row index — same source as the chart lines,
-    // so a wallet is one colour everywhere on this page.
-    document.getElementById('wshare').innerHTML = rows.length
-      ? rows.map(w => meter(w, colorFor(w.venue))).join('')
-      : '<div class="summary-card text-data text-dim">No 24h wallet fills have been recorded yet.</div>';
-    walletState.ready('share');
-  } catch (error) {
-    walletState.error('Wallet share', loadShare, 'share');
-  }
-}
-
-for (const id of ['wsym', 'whours']) {
-  walletFilters.restoreSelect(document.getElementById(id));
-}
-document.getElementById('wsym').addEventListener('change', event => {
-  walletFilters.set('wsym', event.target.value);
-  loadWallets();
-});
-document.getElementById('whours').addEventListener('change', event => {
-  walletFilters.set('whours', event.target.value);
-  loadWallets();
-});
-Overseer.poll(loadWallets, 120);
-Overseer.poll(loadShare, 120);
-</script>
+<script src="{{ url_for('static', filename='js/venues.js', v='ui-consistency') }}"></script>
+<script id="wallets-config" type="application/json">{{ {'wallets': wallets} | tojson }}</script>
 {% endif %}
+<script src="{{ url_for('static', filename='js/wallets.js', v='ui-consistency') }}"></script>
 {% endblock %}

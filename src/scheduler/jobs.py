@@ -7,7 +7,10 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from itertools import combinations
 
+from core.depth import depth_snapshots
 from core.enums import MarketType, QuoteCurrency
+from core.execution_fees import execution_listings
+from core.execution_history import history_samples
 from core.models import OrderBookSnapshot, TopOfBook
 from core.symbols import SymbolRegistry
 from data_collection.base import BaseExchangeScraper, Capability
@@ -256,6 +259,41 @@ async def scrape_venue_volume(
 async def run_venue_volume(scrapers: dict, storage, notifier, state) -> None:
     outcome = await scrape_venue_volume(scrapers, storage, notifier, state)
     await _record_and_alert(outcome, storage, notifier, state)
+
+
+async def capture_execution_history(
+    reader, storage: Storage, registry: SymbolRegistry, asset: str
+) -> JobOutcome:
+    """One scheduled capture of every compared venue for one coin: pre-fee
+    execution samples, and each book's depth near the mid for heatmaps."""
+    job_id = f"execution:{asset}"
+    ran_at = datetime.now(timezone.utc)
+    listings = execution_listings(registry, asset)
+    try:
+        # The reader is synchronous and owns its own event loop; a worker
+        # thread keeps it off the scheduler's loop.
+        snapshot = await asyncio.to_thread(reader.capture, listings)
+        if not snapshot["books"]:
+            # Every venue failing at once is far likelier our network than all
+            # exchanges; recording it would understate their availability.
+            return JobOutcome(job_id, "fail", 0, 0, "no venue returned a public book", ran_at)
+        captured_at = datetime.now(timezone.utc)
+        samples = history_samples(asset, listings, snapshot, captured_at)
+        new_rows = await storage.write_execution_samples(samples)
+        new_rows += await storage.write_depth_snapshots(depth_snapshots(asset, snapshot, captured_at))
+    except Exception as exc:
+        log.exception("execution history capture failed: %s", job_id)
+        return JobOutcome(job_id, "fail", 0, 0, repr(exc), ran_at)
+    return JobOutcome(job_id, "ok", len(snapshot["books"]), new_rows, None, ran_at)
+
+
+async def run_execution_history(
+    reader, storage, notifier, state, registry: SymbolRegistry, assets: list[str]
+) -> None:
+    # Sequential: one reader slot at a time, and the venues' rate limits are shared.
+    for asset in assets:
+        outcome = await capture_execution_history(reader, storage, registry, asset)
+        await _record_and_alert(outcome, storage, notifier, state)
 
 
 def _fmt_px(value: Decimal) -> str:

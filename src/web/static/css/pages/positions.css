@@ -1,0 +1,335 @@
+/* Positions — the browser-local, read-only account monitor. Shared components
+ * (buttons, badges, notices, KPIs, data tables, disclosures) carry the visual
+ * language; this partial only holds what is unique to the screen: the sticky
+ * watchlist strip, expandable account/asset rows and exact-value disclosures.
+ * Long/short direction uses the long/short tokens; financial results use
+ * gain/loss. */
+@layer components {
+  #positions-app { @apply min-w-0 max-w-full; }
+  #positions-app [hidden] { display: none !important; }
+  #positions-app a {
+    overflow-wrap: anywhere;
+    @apply text-body underline decoration-line-strong underline-offset-2 transition-colors hover:decoration-body;
+  }
+  #positions-app .badge { overflow-wrap: anywhere; @apply max-w-full whitespace-normal; }
+
+  /* ---- tones and text roles ------------------------------------------- */
+  .positions-muted { @apply text-label text-faint; }
+  .positions-warning { @apply text-phosphor; }
+  .positions-error { @apply text-loss; }
+  .positions-long { @apply text-long; }
+  .positions-short { @apply text-short; }
+  .positions-wide { @apply col-span-full min-w-0; }
+
+  /* ---- status bar: read freshness (outside #positions-app) -------------- */
+  #positions-funding-read-age[hidden] { display: none; }
+
+  /* ---- sticky watchlist strip ------------------------------------------ */
+  #positions-watchlist-anchor { overflow-anchor: none; @apply -mb-px h-px; }
+  #positions-watchlist-space {
+    height: calc(var(--positions-watchlist-space, 0px) + theme('spacing.6'));
+    overflow-anchor: none;
+  }
+  .positions-watchlist-sticky { overflow-anchor: none; @apply sticky top-0 z-20 border-y border-line-soft bg-panel; }
+  .positions-watchlist-bar {
+    grid-template-columns: minmax(7rem, auto) minmax(0, 1fr) auto;
+    @apply grid min-w-0 items-center gap-x-3 gap-y-1 px-3 py-1 sm:px-4;
+  }
+  .positions-watchlist-overview { @apply col-start-1 row-start-1 flex min-w-0 flex-col items-start; }
+  #positions-app .positions-watchlist-bar h2 {
+    overflow-wrap: anywhere;
+    @apply m-0 font-mono text-label font-normal uppercase tracking-label text-dim;
+  }
+  #positions-watchlist-count { @apply text-body; }
+  .positions-watchlist-health { @apply font-mono text-label; }
+  #positions-watchlist-health-short { display: none; }
+  .positions-watchlist-tiles {
+    overscroll-behavior-x: contain;
+    @apply col-start-2 row-start-1 flex min-w-0 overflow-x-auto py-1;
+  }
+  #positions-app .positions-watchlist-tile {
+    @apply min-h-11 w-44 max-w-44 shrink-0 grow-0 cursor-pointer rounded-none border-0 border-r border-line-soft bg-transparent px-3 py-1 text-left font-mono transition-colors hover:bg-panel2/40;
+  }
+  #positions-app .positions-watchlist-tile:last-child { @apply border-r-0; }
+  #positions-app .positions-watchlist-tile[aria-expanded="true"] {
+    @apply bg-panel2;
+    box-shadow: inset 0 -2px 0 theme('colors.phosphor');
+  }
+  .positions-tile-line { @apply flex min-w-0 items-baseline justify-between gap-2; }
+  .positions-tile-label { @apply min-w-0 truncate text-data font-medium text-body; }
+  .positions-tile-venue,
+  .positions-tile-quality { @apply shrink-0 text-label; }
+  .positions-tile-venue { @apply text-faint; }
+  .positions-tile-logo { @apply hidden h-5 w-5 shrink-0 object-contain; }
+  .positions-tile-marker { @apply hidden text-label font-semibold; }
+  .positions-watchlist-controls { @apply col-start-3 row-start-1 flex gap-1; }
+  #positions-app .positions-watchlist-controls .btn[aria-expanded="true"] { @apply bg-panel2 text-body; }
+
+  /* Pinned: one slim line of logos, short identities and attention badges. */
+  .positions-watchlist-sticky[data-compact="true"] .positions-watchlist-bar {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    @apply gap-2 px-2 py-0;
+  }
+  .positions-watchlist-sticky[data-compact="true"] .positions-watchlist-overview { @apply flex-row items-center gap-2; }
+  .positions-watchlist-sticky[data-compact="true"] .positions-watchlist-prefix { display: none; }
+  .positions-watchlist-sticky[data-compact="true"] .positions-watchlist-health[data-attention="0"] { display: none; }
+  .positions-watchlist-sticky[data-compact="true"] #positions-watchlist-health-full { @apply sr-only; }
+  .positions-watchlist-sticky[data-compact="true"] #positions-watchlist-health-short {
+    @apply inline-flex h-5 items-center whitespace-nowrap rounded border border-current px-1 leading-none;
+  }
+  .positions-watchlist-sticky[data-compact="true"] .positions-watchlist-controls { @apply col-start-3; }
+  .positions-watchlist-sticky[data-compact="true"] .positions-watchlist-tiles { @apply col-start-2 row-start-1 py-0; }
+  #positions-app .positions-watchlist-sticky[data-compact="true"] .positions-watchlist-tile {
+    @apply flex min-h-9 w-auto max-w-none flex-auto items-center gap-2 px-2 py-1;
+  }
+  .positions-watchlist-sticky[data-compact="true"] .positions-tile-logo { display: block; animation: positions-logo-reveal 0.12s ease-out; }
+  .positions-watchlist-sticky[data-compact="true"] .positions-tile-name,
+  .positions-watchlist-sticky[data-compact="true"] .positions-tile-quality { display: none; }
+  .positions-watchlist-sticky[data-compact="true"] .positions-tile-identity { @apply m-0 items-center gap-2; }
+  .positions-watchlist-sticky[data-compact="true"] .positions-tile-marker:not(:empty) {
+    @apply inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border border-current leading-none;
+  }
+
+  #positions-app :is(.positions-account, #positions-add, #positions-management),
+  .positions-account-heading,
+  #positions-add input {
+    scroll-margin-top: calc(var(--positions-watchlist-height, 132px) + theme('spacing.3'));
+  }
+
+  /* ---- shared row disclosure marker: [+] / [−] -------------------------- */
+  .positions-asset-heading::-webkit-details-marker,
+  .positions-account-heading::-webkit-details-marker { display: none; }
+  .positions-asset-heading::before,
+  .positions-account-heading::before {
+    content: '[+]';
+    content: '[+]' / '';
+    @apply font-mono text-label text-faint;
+  }
+  .positions-asset[open] > .positions-asset-heading::before,
+  .positions-account[open] > .positions-account-heading::before {
+    content: '[\2212]';
+    content: '[\2212]' / '';
+  }
+
+  /* ---- manage: framed account list ------------------------------------- */
+  .positions-accounts { @apply m-0; }
+  #positions-management,
+  #positions-add { @apply mb-6; }
+  #positions-account-list { @apply overflow-hidden font-mono; }
+  #positions-account-list > .positions-account-list-head { @apply pl-14; }
+  #positions-account-list > .positions-account { @apply border-t border-line-soft; }
+  #positions-account-list > .positions-account-list-head + .positions-account { @apply border-t-0; }
+  #positions-account-list > .positions-account[open] { @apply bg-panel2/30; }
+  #positions-app .positions-account-heading {
+    grid-template-columns: 1.75rem minmax(0, 1fr);
+    @apply grid min-h-14 cursor-pointer list-none items-center gap-3 px-4 py-2 transition-colors hover:bg-panel2/40;
+  }
+  .positions-account-summary {
+    grid-template-columns: minmax(0, 1.2fr) minmax(5rem, 0.7fr) minmax(7rem, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+    @apply grid min-w-0 items-center gap-x-3 gap-y-1;
+  }
+  .positions-account-name { overflow-wrap: anywhere; @apply min-w-0 text-data font-medium text-body; }
+  .positions-account-venue { overflow-wrap: anywhere; @apply text-label text-dim; }
+  .positions-account-identity { overflow-wrap: anywhere; @apply min-w-0 font-mono text-label text-faint; }
+  .positions-account-reading { @apply flex min-w-0 flex-col items-start gap-1; }
+  .positions-account-reading-label { @apply sr-only text-label text-faint; }
+  .positions-account-body { @apply min-w-0 space-y-3 px-4 pb-4 sm:pl-14; }
+  .positions-account-address { overflow-wrap: anywhere; @apply text-label text-faint; }
+  .positions-account-state { @apply flex flex-wrap items-center gap-x-3 gap-y-1 text-label; }
+  .positions-account-state > :is(p, details) { @apply m-0 min-w-0 basis-full; }
+  .positions-account-actions { @apply flex flex-wrap items-end gap-3; }
+  .positions-account-actions > .field { flex: 1 1 11rem; }
+  .positions-account-actions .input { @apply w-full min-w-0; }
+  .positions-watchlist-footer { @apply mt-3 flex flex-wrap items-start justify-between gap-x-4 gap-y-2; }
+  .positions-watchlist-footer > .disclosure { flex: 1 1 15rem; @apply min-w-0; }
+
+  /* ---- add / edit panel ------------------------------------------------- */
+  #positions-add:not([open]) { display: none; }
+  #positions-add > summary {
+    @apply flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 border-b border-line-soft px-3 font-mono text-data font-medium text-body sm:px-4;
+  }
+  #positions-add > summary::-webkit-details-marker { display: none; }
+  #positions-add > summary::after {
+    content: '[\2212]';
+    content: '[\2212]' / '';
+    @apply text-faint;
+  }
+  .positions-form { @apply grid grid-cols-2 items-start gap-4 p-3 sm:p-4; }
+  .positions-form .input { @apply w-full min-w-0; }
+  .positions-exchange-options { @apply m-0 flex min-w-0 flex-wrap items-center gap-2 border-0 p-0; }
+  .positions-exchange-options > legend { @apply mb-2 p-0; }
+  .positions-exchange-options > .chip { @apply cursor-pointer; }
+  .positions-exchange-help { @apply min-w-0 basis-full; }
+  .positions-token-fields { @apply flex flex-col gap-2; }
+  #positions-entry-result { overflow-wrap: anywhere; @apply font-mono text-label; }
+  #positions-entry-result > p { @apply m-0; }
+  .positions-discovery-results { @apply mt-2 space-y-2 pl-0; }
+  .positions-discovery-results p { @apply mt-1; }
+  .positions-form-actions { @apply flex flex-wrap gap-2; }
+
+  /* ---- status, filters and portfolio totals ----------------------------- */
+  .positions-notice,
+  .positions-offline,
+  .positions-period { @apply mb-6; }
+  .positions-period-meta { @apply min-h-11; }
+  .positions-metric { @apply flex flex-col; }
+  .positions-metric-heading { @apply mb-1 flex flex-wrap items-center justify-between gap-2; }
+  .positions-metric-value { @apply min-w-0 pb-3; }
+  .positions-metric-value > span { @apply text-data text-dim; }
+  .positions-metric-note { @apply mt-auto border-t border-line-soft pt-3; }
+  .positions-metric-note p { @apply m-0; }
+  .positions-metric-note .positions-inline-metric { @apply flex-row flex-wrap items-center justify-between gap-x-3 gap-y-1; }
+  .positions-metric:is([data-kind="funding"], [data-kind="pnl"]) .positions-number[data-sign="positive"] > summary { @apply text-gain; }
+  .positions-metric:is([data-kind="funding"], [data-kind="pnl"]) .positions-number[data-sign="negative"] > summary { @apply text-loss; }
+  .positions-placeholder { @apply border-0; }
+  .positions-fx { @apply mt-2 font-mono text-label text-faint; }
+  .positions-fx:empty { display: none; }
+
+  /* ---- exposure: expandable asset rows ----------------------------------- */
+  .positions-exposure { @apply mt-6; }
+  .positions-legend { @apply flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b border-line-soft px-3 py-2 sm:px-4; }
+  #positions-assets { @apply font-mono; }
+  .positions-list-head,
+  #positions-app .positions-asset-heading {
+    grid-template-columns: 1.75rem minmax(9rem, 1fr) minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1fr);
+    @apply grid items-center gap-x-4 gap-y-2;
+  }
+  .positions-list-head > :nth-child(n + 3) { @apply text-right; }
+  #positions-assets > .positions-asset { @apply border-t border-line-soft; }
+  #positions-assets > .positions-list-head + .positions-asset { @apply border-t-0; }
+  #positions-assets > .positions-asset[open] { @apply bg-panel2/30; }
+  #positions-app .positions-asset-heading {
+    @apply min-h-16 cursor-pointer list-none px-4 py-3 transition-colors hover:bg-panel2/40;
+  }
+  .positions-asset-identity { @apply flex min-w-0 flex-col gap-1; }
+  .positions-asset-name { @apply flex flex-wrap items-center gap-x-2 gap-y-1; }
+  .positions-asset-title { overflow-wrap: anywhere; @apply min-w-0 text-data font-semibold text-body; }
+  .positions-asset-net { overflow-wrap: anywhere; @apply min-w-0 text-label tabular-nums; }
+  .positions-scan-metric { @apply flex min-w-0 flex-col items-end gap-1 text-right; }
+  .positions-scan-label { @apply text-label text-faint; }
+  .positions-scan-metric[data-kind="delta"] > .positions-scan-label { display: none; }
+  .positions-scan-values { @apply flex min-w-0 max-w-full flex-col gap-1; }
+  .positions-scan-number { overflow-wrap: anywhere; @apply min-w-0 text-data font-medium tabular-nums; }
+  .positions-scan-metric[data-kind="delta"] .positions-scan-number[data-sign="positive"] { @apply text-long; }
+  .positions-scan-metric[data-kind="delta"] .positions-scan-number[data-sign="negative"] { @apply text-short; }
+  .positions-scan-metric:is([data-kind="funding"], [data-kind="pnl"]) .positions-scan-number[data-sign="positive"] { @apply text-gain; }
+  .positions-scan-metric:is([data-kind="funding"], [data-kind="pnl"]) .positions-scan-number[data-sign="negative"] { @apply text-loss; }
+  .positions-details { @apply min-w-0 space-y-3 px-4 pb-4; }
+  .positions-asset-overview { @apply space-y-3; }
+  .positions-asset-line { @apply flex min-w-0 flex-wrap gap-x-6 gap-y-3 tabular-nums; }
+  .positions-inline-metric { @apply flex min-w-0 max-w-full flex-col gap-1; }
+  .positions-buckets { @apply flex min-w-0 flex-col; }
+  .positions-leg-grid { @apply grid grid-cols-3 gap-x-4 gap-y-2; }
+  .positions-leg-metadata { @apply text-left text-label text-dim; }
+  .positions-leg-metadata dt,
+  .positions-leg-grid dt { @apply mt-2 font-mono text-label text-faint; }
+  .positions-leg-metadata dd,
+  .positions-leg-grid dd { overflow-wrap: anywhere; @apply m-0; }
+
+  /* ---- exact-value disclosure ------------------------------------------ */
+  .positions-number { @apply min-w-0 max-w-full font-mono font-medium tabular-nums; }
+  .positions-number > summary {
+    @apply flex cursor-pointer list-none flex-wrap items-baseline justify-end gap-x-1 gap-y-1 py-1;
+  }
+  .positions-number > summary::-webkit-details-marker { display: none; }
+  .positions-number > summary::after {
+    content: '';
+    width: 0.375rem;
+    height: 0.375rem;
+    border-right: 1px solid theme('colors.faint');
+    border-bottom: 1px solid theme('colors.faint');
+    transform: translateY(-0.125rem) rotate(45deg);
+    @apply ml-1 shrink-0 self-center;
+  }
+  .positions-number[open] > summary::after { transform: translateY(0.125rem) rotate(-135deg); }
+  .positions-number-amount { overflow-wrap: anywhere; @apply min-w-0; }
+  .positions-number-unit { @apply text-label font-normal tracking-normal text-faint; }
+  .positions-exact {
+    overflow-wrap: anywhere;
+    @apply select-text whitespace-normal border-t border-line-soft px-1 py-2 text-left text-label font-normal text-dim;
+  }
+  .positions-inline-metric .positions-number > summary,
+  .positions-metric .positions-number > summary { @apply justify-start; }
+
+  /* ---- asset legs table (data-table) ------------------------------------ */
+  .positions-table-hint { display: none; }
+  .positions-table-scroll {
+    max-height: 34rem;
+    overscroll-behavior: contain;
+    @apply w-full min-w-0 max-w-full overflow-auto;
+  }
+  .positions-table {
+    table-layout: fixed;
+    min-width: 1024px;
+    @apply border-separate border-spacing-0 font-mono;
+  }
+  .positions-table caption { @apply bg-panel px-3 py-2 text-left text-label text-faint; }
+  .positions-table :is(td, th) { overflow-wrap: anywhere; }
+  .positions-table thead th { @apply whitespace-normal; }
+  .positions-table tbody :is(td, th) { @apply align-top; }
+  .positions-table .num { @apply whitespace-normal; }
+  .positions-table th:first-child { width: 11rem; }
+  .positions-table th:nth-child(2) { width: 4rem; }
+  .positions-table th:nth-child(3),
+  .positions-table th:nth-child(4),
+  .positions-table th:nth-child(5) { width: 7.5rem; }
+  .positions-table th:nth-child(6),
+  .positions-table th:nth-child(7) { width: 9rem; }
+  .positions-table th:nth-child(8) { width: 8rem; }
+  .positions-table td:nth-child(2) { @apply pt-3; }
+  .positions-table td:is(:nth-child(6), :nth-child(7)) .positions-number[data-sign="positive"] > summary { @apply text-gain; }
+  .positions-table td:is(:nth-child(6), :nth-child(7)) .positions-number[data-sign="negative"] > summary { @apply text-loss; }
+  .positions-table .disclosure > summary { @apply min-h-8; }
+  .positions-venue-name,
+  .positions-leg-account { @apply block; }
+  .positions-venue-name { @apply text-data font-medium text-body; }
+  .positions-leg-account { @apply text-label text-dim; }
+  .positions-cell-state { @apply mt-1 block text-label; }
+  .positions-table .positions-freshness { @apply pt-3 text-left; }
+  .positions-freshness > [data-positions-age] { @apply mt-1 block text-label text-faint; }
+
+  .positions-methodology { @apply mt-6; }
+
+  @media (max-width: 1100px) {
+    .positions-table-hint { display: block; }
+  }
+  @media (max-width: 850px) {
+    .positions-watchlist-bar { grid-template-columns: minmax(0, 1fr) auto; @apply gap-x-3 gap-y-0; }
+    .positions-watchlist-controls { @apply col-start-2; }
+    .positions-watchlist-tiles { @apply col-span-full row-start-2; }
+    .positions-list-head { display: none; }
+    #positions-app .positions-asset-heading {
+      grid-template-columns: 1.75rem minmax(0, 1fr) minmax(0, 1fr);
+      @apply items-start gap-x-3 gap-y-3;
+    }
+    .positions-asset-heading::before { @apply self-center; }
+    .positions-asset-identity { @apply col-start-2 row-start-1; }
+    .positions-scan-metric[data-kind="delta"] { @apply col-start-3 row-start-1; }
+    .positions-scan-metric[data-kind="funding"] { @apply col-start-2 row-start-2 items-start text-left; }
+    .positions-scan-metric[data-kind="pnl"] { @apply col-start-3 row-start-2; }
+    .positions-scan-metric[data-kind="delta"] > .positions-scan-label { display: block; }
+    .positions-scan-metric[data-kind="delta"] .positions-number-unit { display: none; }
+  }
+  @media (max-width: 680px) {
+    .positions-form,
+    .positions-leg-grid { @apply grid-cols-1; }
+    .positions-account-actions > .btn { flex: 1 1 7.5rem; }
+    .positions-account-summary { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); @apply gap-x-3 gap-y-1; }
+    .positions-account-list-head { display: none; }
+    .positions-account-name { @apply col-start-1 row-start-1; }
+    .positions-account-venue { @apply col-start-2 row-start-1 text-right; }
+    .positions-account-identity { @apply col-span-full row-start-2; }
+    .positions-account-reading { @apply row-start-3; }
+    .positions-account-reading-label { @apply not-sr-only; }
+    .positions-table-scroll { max-height: 30rem; }
+    .positions-exchange-options > .chip { flex: 1 1 6.5rem; }
+  }
+}
+
+@keyframes positions-logo-reveal {
+  from { opacity: 0.5; }
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .positions-watchlist-sticky[data-compact="true"] .positions-tile-logo { animation: none; }
+}

@@ -268,6 +268,39 @@ class ReadStorage:
             (symbols, hours, limit),
         )
 
+    def current_funding_rates(self, exchanges: list[str], symbols: list[str]) -> list[Row]:
+        """Newest venue-published rate per market within the last day, for the
+        given exchanges and native symbols. Callers match exact (exchange,
+        symbol) pairs and judge freshness themselves."""
+        return self._fetch(
+            """
+            SELECT DISTINCT ON (exchange, symbol)
+                   exchange, symbol, ts, current_funding_rate AS rate,
+                   funding_interval_hours AS interval_hours
+            FROM liquidity
+            WHERE exchange = ANY(%s) AND symbol = ANY(%s)
+              AND ts >= now() - interval '1 day'
+              AND current_funding_rate IS NOT NULL
+              AND funding_interval_hours > 0
+            ORDER BY exchange, symbol, ts DESC
+            """,
+            (exchanges, symbols),
+        )
+
+    def settled_funding_rates(self, exchanges: list[str], symbols: list[str],
+                              since: datetime) -> list[Row]:
+        """Settled funding since `since` for the given exchanges and native
+        symbols, oldest first. Callers match exact (exchange, symbol) pairs."""
+        return self._fetch(
+            """
+            SELECT exchange, symbol, ts, rate, interval_hours
+            FROM funding_rates
+            WHERE exchange = ANY(%s) AND symbol = ANY(%s) AND ts >= %s
+            ORDER BY exchange, symbol, ts
+            """,
+            (exchanges, symbols, since),
+        )
+
     def liquidity_series_multi(
         self, symbols: list[str], hours: int = 48,
         bucket_minutes: int | None = None, limit: int = 20_000,
@@ -540,4 +573,34 @@ class ReadStorage:
             ORDER BY fills DESC
             """,
             (wallet_address,),
+        )
+
+    def execution_samples(self, asset: str, sides: list[str], since: datetime) -> list[Row]:
+        """Pre-fee cheapest-venue samples for one coin and the given sides since
+        `since`. Floats suffice: the history ranks venues, it does not quote prices."""
+        return self._fetch(
+            """
+            SELECT ts, side, notional_usd::int8 AS notional_usd, venue, status,
+                   average_price_usd::float8 AS average_price_usd
+            FROM execution_samples
+            WHERE asset = %s AND side = ANY(%s) AND ts >= %s
+            """,
+            (asset, sides, since),
+        )
+
+    def depth_snapshots(self, asset: str, venue: str, since: datetime, step_seconds: int) -> list[Row]:
+        """The latest stored book in each step_seconds slot since `since`,
+        oldest first: one real snapshot per heatmap column, never an average."""
+        return self._fetch(
+            """
+            SELECT DISTINCT ON (slot)
+                   date_bin(make_interval(secs => %s), ts, TIMESTAMPTZ '2000-01-01 00:00:00+00') AS slot,
+                   ts, source, bucket_bps, mid::float8 AS mid, quote_currency,
+                   usd_rate::float8 AS usd_rate, book_age_seconds::float8 AS book_age_seconds,
+                   bid_reach_bps, ask_reach_bps, bid_levels, ask_levels, bids, asks
+            FROM depth_snapshots
+            WHERE asset = %s AND venue = %s AND ts >= %s
+            ORDER BY slot, ts DESC
+            """,
+            (step_seconds, asset, venue, since),
         )

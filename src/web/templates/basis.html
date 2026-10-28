@@ -1,156 +1,93 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui %}
 {% block title %}basis · overseer{% endblock %}
-{#
-  SINGLE-CHART / DUAL-AXIS version, restored for side-by-side comparison.
-  The two-pane version is parked at:
-    scratchpad/basis.twopane.html
-  Everything else on this page (type scale, .select controls, drawn swatches,
-  radius) is current — the ONLY difference between the two files is how the
-  two measures share a plot, so the comparison is about that and nothing else.
-
-  Note this is NOT what `git checkout HEAD -- basis.html` would give you: the
-  committed version still uses text-xs / text-[11px] / text-xl, none of which
-  exist in the compiled CSS any more, so it would render unstyled.
-#}
 {% block content %}
-<div class="mb-5 flex flex-wrap items-end justify-between gap-3 sm:gap-4">
-  <div>
-    <h1 class="text-title font-semibold text-body">Spot–perpetual basis</h1>
-    <p class="mt-1 text-data text-dim">Track price spread and funding carry for a selected pair.</p>
-  </div>
-  <div class="grid w-full gap-2 font-mono text-data sm:ml-auto sm:flex sm:w-auto sm:items-end">
-    <label for="spot" class="flex min-w-0 flex-col gap-1">
-      <span class="text-label tracking-label uppercase text-faint">Spot</span>
-      <span class="select-shell w-full sm:w-auto">
-      <select id="spot" class="select select-polished min-w-0">
+{{ ui.page_header('Spot–perpetual basis', 'Track price spread and funding carry for a selected pair.') }}
+
+<div class="toolbar">
+  <label class="field" for="spot">
+    <span class="field-label">Spot</span>
+    <span class="select-shell">
+      <select id="spot" class="select select-polished">
         {% for s in series if s.market_type == 'spot' %}
-        <option value="{{ s.exchange }}|{{ s.symbol }}">{{ s.exchange }} · {{ s.symbol }}</option>
+        <option value="{{ s.exchange }}|{{ s.symbol }}">{{ venue_labels.get(s.exchange, s.exchange) }} · {{ s.symbol }}</option>
         {% endfor %}
       </select>
-      </span>
-    </label>
-    <label for="perp" class="flex min-w-0 flex-col gap-1">
-      <span class="text-label tracking-label uppercase text-faint">Perp</span>
-      <span class="select-shell w-full sm:w-auto">
-      <select id="perp" class="select select-polished min-w-0">
+    </span>
+  </label>
+  <label class="field" for="perp">
+    <span class="field-label">Perp</span>
+    <span class="select-shell">
+      <select id="perp" class="select select-polished">
         {% for s in series if s.market_type == 'perp' %}
-        <option value="{{ s.exchange }}|{{ s.symbol }}">{{ s.exchange }} · {{ s.symbol }}</option>
+        <option value="{{ s.exchange }}|{{ s.symbol }}">{{ venue_labels.get(s.exchange, s.exchange) }} · {{ s.symbol }}</option>
         {% endfor %}
       </select>
-      </span>
-    </label>
-    <label for="hours" class="flex min-w-0 flex-col gap-1">
-      <span class="text-label tracking-label uppercase text-faint">Window</span>
-      <span class="select-shell w-full sm:w-24">
-      <select id="hours" class="select select-polished min-w-0">
+    </span>
+  </label>
+  <label class="field" for="hours">
+    <span class="field-label">Window</span>
+    <span class="select-shell">
+      <select id="hours" class="select select-polished">
         <option value="24">24h</option>
         <option value="48" selected>48h</option>
         <option value="168">7d</option>
       </select>
-      </span>
-    </label>
+    </span>
+  </label>
+</div>
+
+{{ ui.page_status() }}
+
+<div class="space-y-6">
+  <div id="basis-kpis" class="kpi-grid">
+    <div class="kpi">
+      <p class="kpi-label">Current basis</p>
+      <p id="kpi-basis" class="kpi-value">—</p>
+      <p id="kpi-basis-meta" class="kpi-meta">Perp vs spot</p>
+    </div>
+    <div class="kpi">
+      <p class="kpi-label">Avg funding APR</p>
+      <p id="kpi-apr" class="kpi-value">—</p>
+      <p class="kpi-meta">Perp leg, settled</p>
+    </div>
+    <div class="kpi">
+      <p class="kpi-label">Total funding</p>
+      <p id="kpi-sum" class="kpi-value">—</p>
+      <p id="kpi-sum-meta" class="kpi-meta">Over window</p>
+    </div>
+    <div class="kpi">
+      <p class="kpi-label">Settlements</p>
+      <p id="kpi-count" class="kpi-value">—</p>
+      <p class="kpi-meta">In window</p>
+    </div>
   </div>
-</div>
 
-<div id="chart" class="chart-card h-[22rem] w-full sm:h-[30rem]"></div>
+  <section class="chart-card" aria-labelledby="basis-title">
+    <div class="panel-header">
+      <h2 id="basis-title" class="panel-title">Basis<span id="basis-pair" class="panel-subtitle"></span></h2>
+    </div>
+    <div id="basis-legend" class="legend px-3 pt-2 sm:px-4"></div>
+    <div class="basis-chart-box h-[20rem] sm:h-[28rem]">
+      <div id="chart" class="absolute inset-0"></div>
+    </div>
+  </section>
 
-<p class="chart-caption">Basis is how far the perpetual price is above or below spot:
-  (perpetual − spot) ÷ spot × 100. Compare the same asset on both sides.</p>
-<div class="mt-2 flex flex-wrap items-baseline justify-between gap-2">
-  <p class="text-data text-dim">
-    <span class="text-phosphor">—</span> basis % (right) ·
-    <span class="inline-block h-2.5 w-1.5 align-middle bg-gain"></span><span
-          class="inline-block h-2.5 w-1.5 align-middle bg-loss"></span>
-    funding APR of the perp leg (left) ·
-    long spot / short perp collects positive funding</p>
-  <p id="carry-stat" class="font-mono text-data text-dim"></p>
+  <details class="disclosure">
+    <summary>How this works</summary>
+    <div class="disclosure-body">
+      <p>Basis is how far the perpetual price sits above or below spot: (perpetual − spot) ÷ spot × 100.
+        Compare the same asset on both sides.</p>
+      <p>The line is basis % on the right axis; bars are the funding APR of the perpetual leg on the left
+        axis. A long spot / short perpetual position collects positive funding.</p>
+      <p>Funding APR annualises settled rates; it is not a promised return.</p>
+    </div>
+  </details>
 </div>
-<p class="chart-caption">Funding APR annualises settled rates; it is not a promised return.</p>
 {% endblock %}
 
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/lightweight-charts.standalone.js') }}"></script>
-<script src="{{ url_for('static', filename='js/venues.js') }}"></script>
-<script>
-const chart = LightweightCharts.createChart(document.getElementById('chart'), {
-  layout: { background: { color: 'transparent' }, textColor: CHART_THEME.text,
-            fontFamily: CHART_THEME.font, fontSize: 12 },
-  grid: { vertLines: { color: CHART_THEME.grid }, horzLines: { color: CHART_THEME.grid } },
-  crosshair: { vertLine: { color: CHART_THEME.crosshair },
-               horzLine: { color: CHART_THEME.crosshair } },
-  timeScale: { timeVisible: true, secondsVisible: false, borderColor: CHART_THEME.border },
-  rightPriceScale: { borderColor: CHART_THEME.border },
-  leftPriceScale: { visible: true, borderColor: CHART_THEME.border },
-  autoSize: true,
-});
-const line = chart.addLineSeries({
-  color: CHART_THEME.accent, lineWidth: 2,
-  priceFormat: { type: 'custom', formatter: v => v.toFixed(4) + '%' },
-});
-const zero = chart.addLineSeries({ color: CHART_THEME.zero, lineWidth: 1,
-  priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
-const funding = chart.addHistogramSeries({
-  priceScaleId: 'left',
-  priceFormat: { type: 'custom', formatter: v => v.toFixed(1) + '%' },
-  base: 0,
-});
-const basisFilters = Overseer.filterState('basis');
-const basisState = Overseer.pageState();
-let basisRequest = 0;
-
-async function load({ forceRefresh = false } = {}) {
-  const request = ++basisRequest;
-  const [se, ss] = document.getElementById('spot').value.split('|');
-  const [pe, ps] = document.getElementById('perp').value.split('|');
-  const hours = document.getElementById('hours').value;
-  const qs = new URLSearchParams({
-    spot_exchange: se, spot_symbol: ss, perp_exchange: pe, perp_symbol: ps,
-    interval: '1m', hours, limit: 10000,
-  });
-  const fqs = new URLSearchParams({ exchange: pe, symbol: ps, hours });
-  basisState.loading('Loading basis and funding history…');
-  try {
-    const [data, fdata] = await Promise.all([
-      Overseer.requestJSON(`/api/basis?${qs}`, { forceRefresh }),
-      Overseer.requestJSON(`/api/funding-history?${fqs}`, { forceRefresh }),
-    ]);
-    if (request !== basisRequest) return;
-    line.setData(data.map(d => ({ time: d.time, value: d.basis_pct })));
-    zero.setData(data.map(d => ({ time: d.time, value: 0 })));
-    funding.setData(fdata.map(f => ({
-      time: f.time, value: f.apr_pct,
-      color: f.apr_pct >= 0 ? 'rgba(100,214,154,.5)' : 'rgba(255,113,133,.5)',
-    })));
-
-    const stat = document.getElementById('carry-stat');
-    if (!data.length) {
-      stat.textContent = 'no overlapping bars for this pair in window';
-      basisState.empty('No overlapping bars exist for this pair and window.', load);
-    } else if (fdata.length) {
-      const cum = fdata.reduce((s2, f) => s2 + f.rate, 0) * 100;
-      const avg = fdata.reduce((s2, f) => s2 + f.apr_pct, 0) / fdata.length;
-      stat.innerHTML = `Σ funding over window
-        <span class="tabular-nums ${cum >= 0 ? 'text-gain' : 'text-loss'}">${cum >= 0 ? '+' : ''}${cum.toFixed(3)}%</span>
-        · avg <span class="tabular-nums ${avg >= 0 ? 'text-gain' : 'text-loss'}">${avg >= 0 ? '+' : ''}${avg.toFixed(1)}% APR</span>
-        · ${fdata.length} settlements`;
-      basisState.ready();
-    } else {
-      stat.textContent = 'no funding history for this perp in window';
-      basisState.ready();
-    }
-    chart.timeScale().fitContent();
-  } catch (error) {
-    if (request === basisRequest) basisState.error('Basis data', load);
-  }
-}
-for (const id of ['spot', 'perp', 'hours']) {
-  const control = document.getElementById(id);
-  basisFilters.restoreSelect(control);
-  control.addEventListener('change', () => {
-    basisFilters.set(id, control.value);
-    load();
-  });
-}
-Overseer.poll(load, 60);
-</script>
+<script src="{{ url_for('static', filename='js/venues.js', v='ui-consistency') }}"></script>
+<script src="{{ url_for('static', filename='js/basis.js', v='ui-consistency') }}"></script>
 {% endblock %}

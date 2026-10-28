@@ -6,7 +6,9 @@ from typing import Any
 
 import asyncpg
 
+from core.depth import DepthSnapshot
 from core.enums import Exchange, MarketType, Timeframe
+from core.execution_history import ExecutionSample
 from core.models import (OHLCV, FundingRate, LeverageStats, LiquiditySnapshot,
                          OrderBookSnapshot, Trade, TradeFlow, VenueVolume)
 
@@ -120,6 +122,37 @@ _FLOW_COLS: tuple[_Col, ...] = (
     ("close",       "numeric",     lambda r: r.close),
 )
 _FLOW_CONFLICT = ("exchange", "market_type", "symbol", "bucket")
+
+_EXEC_SAMPLE_COLS: tuple[_Col, ...] = (
+    ("ts",                "timestamptz", lambda r: r.ts),
+    ("asset",             "text",        lambda r: r.asset),
+    ("side",              "text",        lambda r: r.side),
+    ("notional_usd",      "numeric",     lambda r: r.notional_usd),
+    ("venue",             "text",        lambda r: r.venue),
+    ("status",            "text",        lambda r: r.status),
+    ("average_price_usd", "numeric",     lambda r: r.average_price_usd),
+    ("book_age_seconds",  "numeric",     lambda r: r.book_age_seconds),
+)
+_EXEC_SAMPLE_CONFLICT = ("asset", "side", "notional_usd", "venue", "ts")
+
+# (db column, postgres type of one value, value extractor)
+_DEPTH_COLS: tuple[_Col, ...] = (
+    ("ts",               "timestamptz", lambda r: r.ts),
+    ("asset",            "text",        lambda r: r.asset),
+    ("venue",            "text",        lambda r: r.venue),
+    ("source",           "text",        lambda r: r.source),
+    ("bucket_bps",       "real",        lambda r: r.bucket_bps),
+    ("mid",              "numeric",     lambda r: r.mid),
+    ("quote_currency",   "text",        lambda r: r.quote_currency),
+    ("usd_rate",         "numeric",     lambda r: r.usd_rate),
+    ("book_age_seconds", "numeric",     lambda r: r.book_age_seconds),
+    ("bid_reach_bps",    "real",        lambda r: r.bid_reach_bps),
+    ("ask_reach_bps",    "real",        lambda r: r.ask_reach_bps),
+    ("bid_levels",       "int",         lambda r: r.bid_levels),
+    ("ask_levels",       "int",         lambda r: r.ask_levels),
+    ("bids",             "real[]",      lambda r: list(r.bids)),
+    ("asks",             "real[]",      lambda r: list(r.asks)),
+)
 
 
 class Storage:
@@ -250,6 +283,29 @@ class Storage:
         return await self._bulk_upsert(
             "venue_volume", _VENUE_VOL_COLS, _VENUE_VOL_CONFLICT, records
         )
+
+    async def write_execution_samples(self, records: Sequence[ExecutionSample]) -> int:
+        return await self._bulk_upsert(
+            "execution_samples", _EXEC_SAMPLE_COLS, _EXEC_SAMPLE_CONFLICT, records
+        )
+
+    async def write_depth_snapshots(self, records: Sequence[DepthSnapshot]) -> int:
+        """Array columns cannot ride the unnest() bulk path, which would
+        flatten them, so a capture's few dozen rows go in one multi-row
+        VALUES insert. A replayed capture inserts nothing."""
+        if not records:
+            return 0
+        width = len(_DEPTH_COLS)
+        values = ", ".join(
+            "(" + ", ".join(f"${row * width + col + 1}::{_DEPTH_COLS[col][1]}" for col in range(width)) + ")"
+            for row in range(len(records))
+        )
+        sql = (
+            f"INSERT INTO depth_snapshots ({', '.join(name for name, _, _ in _DEPTH_COLS)}) "
+            f"VALUES {values} ON CONFLICT (asset, venue, source, ts) DO NOTHING RETURNING TRUE"
+        )
+        args = [extract(record) for record in records for _, _, extract in _DEPTH_COLS]
+        return len(await self.pool.fetch(sql, *args))
 
     async def write_trade_flow(self, records: Sequence[TradeFlow]) -> int:
         # DO NOTHING, not UPDATE: a minute is written once, sealed, and the

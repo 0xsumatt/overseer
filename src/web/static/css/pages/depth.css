@@ -1,0 +1,7 @@
+/* Depth heatmap page. */
+@layer components {
+  /* Definite height for the autoSize chart; the canvas fills it absolutely. */
+  .depth-chart-box { @apply relative mx-1 mb-1 mt-2; }
+  /* Matches the canvas band: the line colour at 35% over the chart surface. */
+  .depth-band-swatch { background-color: theme('colors.line / 35%'); }
+}

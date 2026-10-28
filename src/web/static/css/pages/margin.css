@@ -1,0 +1,49 @@
+/* Margin calculator page. Uses the shared toolbar, KPI, table and disclosure
+   components; these rules cover only the page's own layout. */
+@layer components {
+  .margin-number { @apply w-28; }
+  .margin-number-wide { @apply w-36; }
+  .margin-pair-help { @apply self-center; }
+
+  .margin-fee-controls { @apply grid gap-3 sm:grid-cols-2 lg:grid-cols-4; }
+
+  /* Fixed layout with each column sized for its longest unbreakable header
+     word ("Maintenance"): 57.75rem in all, inside the 976px card at 1024px.
+     A narrower card scrolls the table rather than clip a column. */
+  .margin-table { table-layout: fixed; }
+  .margin-col-venue { width: 13rem; }
+  .margin-col-leverage { width: 5.5rem; }
+  .margin-col-money { width: 5.75rem; }
+  .margin-col-wide { width: 7rem; }
+  .margin-col-small { width: 5rem; }
+  /* Nine columns: let two-word headers wrap rather than clip. */
+  .data-table.margin-table thead th { @apply whitespace-normal; }
+  .margin-table tbody :is(th, td) { vertical-align: top; }
+  .margin-venue-notes { @apply flex min-w-0 flex-wrap items-center gap-x-2; }
+  .margin-portfolio-tag { @apply text-dim; }
+  .margin-row-state { overflow-wrap: anywhere; }
+  .margin-detail-body { @apply mt-2 space-y-2 whitespace-normal; }
+  .margin-detail-note { overflow-wrap: anywhere; @apply font-sans text-data text-dim; }
+  .margin-detail-list { overflow-wrap: anywhere; @apply space-y-1 font-mono text-label; }
+  .margin-detail-list dt { @apply text-faint; }
+  .margin-detail-list dd { @apply pb-1 text-body; }
+  .margin-offset { @apply block whitespace-normal text-label; }
+  .margin-offset[data-tone="gain"] { @apply text-gain; }
+  .margin-offset[data-tone="loss"] { @apply text-loss; }
+  .margin-flow-note { @apply block whitespace-normal text-label text-faint; }
+  .margin-flow-note[data-tone="gain"] { @apply text-gain; }
+  .margin-flow-note[data-tone="warning"] { @apply text-phosphor; }
+  .margin-total-value { @apply block text-body; }
+  .margin-total-bps { @apply block text-label tabular-nums text-faint; }
+  .margin-best-mark { @apply text-gain; }
+
+  @media (max-width: 639px) {
+    :is(.margin-number, .margin-number-wide) { @apply w-full; }
+    .margin-col-venue { width: 10rem; }
+    /* The sticky venue column needs an edge once numbers scroll beneath it. */
+    .margin-table tbody .sticky-col { box-shadow: inset -1px 0 0 theme('colors.line'); }
+    .margin-table thead .sticky-col {
+      box-shadow: inset -1px 0 0 theme('colors.line'), inset 0 -1px 0 theme('colors.line');
+    }
+  }
+}

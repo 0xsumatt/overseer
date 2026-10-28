@@ -9,6 +9,21 @@ class SymbolConfigError(ValueError):
     pass
 
 
+# Display names, keyed by the exchange id stored with every row. These are the
+# only venue names the UI shows; product names ("Binance USD-M (USDT)") stay in
+# the fee schedules for tooltips. HIP-3 deployers are named from symbols.toml.
+VENUE_NAMES = {
+    "binance": "Binance",
+    "bybit": "Bybit",
+    "hyperliquid": "Hyperliquid",
+    "lighter": "Lighter",
+    "extended": "Extended",
+    "bulk": "BULK",
+    "rise": "RISEx",
+    "bullet": "Bullet",
+}
+
+
 @dataclass(frozen=True, slots=True)
 class AssetMetadata:
     family: str
@@ -164,9 +179,9 @@ class SymbolRegistry:
     def _hip3_label(self, deployer: str) -> str:
         return f"hip3:{self._hyperliquid_deployers.get(deployer, deployer).lower()}"
 
-    def hip3_venue_labels(self) -> dict[str, str]:
-        """Configured HIP-3 display names, keyed by stable venue identity."""
-        return {
+    def venue_labels(self) -> dict[str, str]:
+        """Display name for every venue identity, HIP-3 deployers included."""
+        return VENUE_NAMES | {
             f"hyperliquid:{deployer}": self._hip3_label(deployer)
             for deployer in self._hyperliquid_deployers
         }
@@ -179,7 +194,7 @@ class SymbolRegistry:
                 label=self._hip3_label(deployer),
                 deployer=deployer,
             )
-        return VenueIdentity(key=exchange, label=exchange)
+        return VenueIdentity(key=exchange, label=VENUE_NAMES.get(exchange, exchange))
 
     def venue_symbols(self, venue: str) -> list[str]:
         """Every symbol this config lists on one venue."""

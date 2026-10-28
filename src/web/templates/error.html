@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui %}
+{% block title %}{{ code }} · overseer{% endblock %}
+{% block content %}
+{{ ui.page_header(title, message) }}
+<p class="meta-line mb-6"><span>Error {{ code }}</span><span class="break-all">{{ request.path }}</span></p>
+<div class="flex flex-wrap gap-2">
+  <a href="{{ url_for('pages.dashboard') }}" class="btn btn-secondary">Back to charts</a>
+  <a href="{{ url_for('pages.funding') }}" class="btn btn-ghost">Funding</a>
+</div>
+{% endblock %}

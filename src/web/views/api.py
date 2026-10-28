@@ -12,8 +12,14 @@ import io
 from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, Response, current_app, jsonify, request
+from core.depth import HEATMAP_WINDOWS, WINDOW_BPS
 from core.enums import Exchange, MarketType
+from core.execution_fees import FEE_SCHEDULES, execution_listings, selected_tiers
+from core.execution_history import (
+    HISTORY_ASSETS, HISTORY_INTERVAL_SECONDS, HISTORY_SIDES, HISTORY_WINDOWS_DAYS, ROUND_TRIP, summarise,
+)
 from core.positions import asset_id
+from data_collection.exchanges.registry import REGISTRY
 from web.volatility import rolling_volatility
 
 bp = Blueprint("api", __name__, url_prefix="/api")
@@ -534,3 +540,94 @@ def wallet_flows():
         out.setdefault(label, []).append(
             {"time": int(r["bucket"].timestamp()), "net": float(r["net"])})
     return jsonify(out)
+
+
+@bp.get("/execution-history")
+def execution_history():
+    """Cheapest-venue statistics from scheduled captures. Fees are applied
+    here: base tiers by default, or ?fees=venue:tier,… for chosen tiers."""
+    q = request.args
+    asset = q.get("asset", "")
+    if asset not in HISTORY_ASSETS:
+        return jsonify(error=f"History is collected for {', '.join(HISTORY_ASSETS)}."), 400
+    side = q.get("side", "")
+    if side not in HISTORY_SIDES:
+        return jsonify(error=f"side must be {', '.join(HISTORY_SIDES[:-1])} or {HISTORY_SIDES[-1]}"), 400
+    days = q.get("days", "7")
+    if not days.isdigit() or int(days) not in HISTORY_WINDOWS_DAYS:
+        windows = " or ".join(str(window) for window in HISTORY_WINDOWS_DAYS)
+        return jsonify(error=f"days must be {windows}"), 400
+    days = int(days)
+    requested = dict(pair.partition(":")[::2] for pair in q.get("fees", "").split(",") if pair)
+    try:
+        tiers = selected_tiers(requested)
+    except ValueError as error:
+        return jsonify(error=str(error)), 400
+    fees = {venue: float(tier["taker_bps"]) if tier["taker_bps"] is not None else None
+            for venue, tier in tiers.items()}
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = _store().execution_samples(asset, ["buy", "sell"] if side == ROUND_TRIP else [side], since)
+    registry = current_app.extensions["symbols"]
+    listings = execution_listings(registry, asset)
+    sizes = summarise(rows, side, fees)
+    for size in sizes:
+        for entry in size["venues"]:
+            venue, symbol = entry["venue"], listings.get(entry["venue"])
+            entry["label"] = FEE_SCHEDULES[venue]["label"] if venue in FEE_SCHEDULES else venue
+            entry["identity"] = (registry.venue_identity(REGISTRY[venue].exchange, symbol).key
+                                 if symbol and venue in REGISTRY else venue)
+    captured = [row["ts"] for row in rows]
+    return jsonify(
+        asset=asset, side=side, days=days, interval_seconds=HISTORY_INTERVAL_SECONDS,
+        first_capture=min(captured).isoformat() if captured else None,
+        last_capture=max(captured).isoformat() if captured else None,
+        custom_fees=any(tiers[venue]["id"] != FEE_SCHEDULES[venue]["default_tier"]
+                        for venue in requested),
+        sizes=sizes,
+    )
+
+
+def _compact_sizes(sizes) -> list[float | int]:
+    """Four significant figures, far below a heatmap's resolution, and no
+    trailing empty buckets: a short array means zero beyond its end."""
+    values = [0 if size == 0 else float(f"{size:.4g}") for size in sizes]
+    while values and values[-1] == 0:
+        values.pop()
+    return values
+
+
+@bp.get("/depth-heatmap")
+def depth_heatmap():
+    """Stored order-book depth near the mid for one coin on one venue, one
+    real snapshot per column; longer windows use longer columns."""
+    q = request.args
+    asset = q.get("asset", "")
+    if asset not in HISTORY_ASSETS:
+        return jsonify(error=f"Depth is stored for {', '.join(HISTORY_ASSETS)}."), 400
+    registry = current_app.extensions["symbols"]
+    listings = execution_listings(registry, asset)
+    venue = q.get("venue", "")
+    if venue not in listings:
+        return jsonify(error=f"venue must be one of {', '.join(listings)}"), 400
+    steps = {hours: step for hours, step, _label in HEATMAP_WINDOWS}
+    hours = q.get("hours", "24")
+    if not hours.isdigit() or int(hours) not in steps:
+        return jsonify(error=f"hours must be {', '.join(str(window) for window in steps)}"), 400
+    hours = int(hours)
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+    rows = _store().depth_snapshots(asset, venue, since, steps[hours])
+    schedule = FEE_SCHEDULES[venue]
+    return jsonify(
+        asset=asset, venue=venue, label=schedule["label"],
+        identity=registry.venue_identity(REGISTRY[venue].exchange, listings[venue]).key,
+        hours=hours, step_seconds=steps[hours], window_bps=WINDOW_BPS,
+        columns=[{
+            "time": int(row["slot"].timestamp()), "captured_at": row["ts"].isoformat(),
+            "source": row["source"], "bucket_bps": row["bucket_bps"], "mid": row["mid"],
+            "quote_currency": row["quote_currency"], "usd_rate": row["usd_rate"],
+            "book_age_seconds": row["book_age_seconds"],
+            "bid_reach_bps": row["bid_reach_bps"], "ask_reach_bps": row["ask_reach_bps"],
+            "bid_levels": row["bid_levels"], "ask_levels": row["ask_levels"],
+            "bids": _compact_sizes(row["bids"]), "asks": _compact_sizes(row["asks"]),
+        } for row in rows],
+    )

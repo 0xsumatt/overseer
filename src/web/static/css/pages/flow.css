@@ -1,0 +1,10 @@
+/* Trade flow page layout. */
+@layer components {
+  /* Venue chips take the toolbar's remaining width so they wrap as a group. */
+  .flow-venues { @apply basis-full lg:basis-auto lg:flex-1; }
+  .flow-detail-toggle { @apply w-full sm:ml-auto sm:w-auto; }
+  .flow-detail-toggle[aria-expanded="true"] { @apply bg-panel2; }
+
+  /* Definite height for autoSize charts; the canvas fills it absolutely. */
+  .flow-chart-box { @apply relative mx-1 mb-1 mt-2; }
+}

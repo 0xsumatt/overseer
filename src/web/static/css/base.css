@@ -1,0 +1,66 @@
+/* Element defaults and published tokens. Values come from tailwind.config.js
+ * through theme(); nothing here restates a colour by hand. */
+@layer base {
+  /* Charts read these through venues.js, so canvas chrome tracks the same
+     tokens as the DOM instead of a hand-copied palette. */
+  :root {
+    --color-ink: theme('colors.ink');
+    --color-panel: theme('colors.panel');
+    --color-panel2: theme('colors.panel2');
+    --color-line-soft: theme('colors.line-soft');
+    --color-line: theme('colors.line');
+    --color-line-strong: theme('colors.line-strong');
+    --color-phosphor: theme('colors.phosphor');
+    --color-gain: theme('colors.gain');
+    --color-loss: theme('colors.loss');
+    --color-long: theme('colors.long');
+    --color-short: theme('colors.short');
+    --color-body: theme('colors.body');
+    --color-dim: theme('colors.dim');
+    --color-faint: theme('colors.faint');
+    --font-mono: theme('fontFamily.mono');
+  }
+
+  /* Native form controls (select popups, scrollbars, pickers) render light
+     unless the page declares a dark color-scheme. */
+  html { color-scheme: dark; }
+
+  /* Ink page with a faint amber glow at the top. The page stays one colour
+     all the way down, so opaque panel cards contrast with it equally wherever
+     they sit on screen. */
+  body {
+    background-color: theme('colors.ink');
+    background-image:
+      radial-gradient(58rem 26rem at 50% -10rem, theme('colors.phosphor / 5%'), transparent 62%);
+    background-attachment: fixed;
+  }
+
+  select option {
+    background-color: theme('colors.panel');
+    color: theme('colors.body');
+  }
+  ::selection {
+    background: theme('colors.phosphor / 30%');
+    color: theme('colors.body');
+  }
+
+  /* One focus treatment for every control. Components never add their own
+     rings; the outline follows rounded corners in current engines. */
+  :focus-visible {
+    outline: 2px solid theme('colors.phosphor');
+    outline-offset: 2px;
+  }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: theme('colors.line'); border-radius: 5px; }
+  ::-webkit-scrollbar-thumb:hover { background: theme('colors.line-strong'); }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  button,
+  a,
+  input,
+  select,
+  summary {
+    touch-action: manipulation;
+  }
+}

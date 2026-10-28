@@ -1,392 +1,56 @@
-/* IBM Plex Mono — self-hosted, SIL Open Font License 1.1.
+/* Stylesheet entry, compiled to app.css by `npm run css`.
  *
- * Self-hosted rather than loaded from a CDN: no third-party request on every
- * page view, no external dependency that can fail or change, and it matches
- * how lightweight-charts is already vendored. latin + latin-ext subsets only,
- * three weights, 72 KB total.
- *
- * Weights: 400 body/data, 500 spare for hierarchy work, 600 headings and the
- * wordmark. Only 400 and 600 are used today; 500 is here because weight — not
- * just size — is what should carry emphasis once the type scale is tightened.
- *
- * font-display: swap so text paints immediately in the fallback and reflows
- * when Plex lands, rather than leaving the dashboard blank.
+ * The Tailwind CLI bundles postcss-import, which inlines these files in order
+ * and requires every @import to precede other statements. Shared components
+ * come before page partials so a page rule wins a same-specificity tie;
+ * utilities come last so markup can still adjust a component.
  */
-@font-face {
-  font-family: 'IBM Plex Mono';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/static/fonts/ibm-plex-mono-400-latin-ext.woff2') format('woff2');
-  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
-}
-@font-face {
-  font-family: 'IBM Plex Mono';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/static/fonts/ibm-plex-mono-400-latin.woff2') format('woff2');
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-@font-face {
-  font-family: 'IBM Plex Mono';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('/static/fonts/ibm-plex-mono-500-latin-ext.woff2') format('woff2');
-  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
-}
-@font-face {
-  font-family: 'IBM Plex Mono';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('/static/fonts/ibm-plex-mono-500-latin.woff2') format('woff2');
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-@font-face {
-  font-family: 'IBM Plex Mono';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('/static/fonts/ibm-plex-mono-600-latin-ext.woff2') format('woff2');
-  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
-}
-@font-face {
-  font-family: 'IBM Plex Mono';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('/static/fonts/ibm-plex-mono-600-latin.woff2') format('woff2');
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
+@import "./fonts.css";
+@import "tailwindcss/base";
+@import "./base.css";
+@import "tailwindcss/components";
+@import "./components.css";
+@import "./pages/dashboard.css";
+@import "./pages/funding.css";
+@import "./pages/flow.css";
+@import "./pages/basis.css";
+@import "./pages/wallets.css";
+@import "./pages/execution.css";
+@import "./pages/positions.css";
+@import "./pages/margin.css";
+@import "./pages/depth.css";
+@import "tailwindcss/utilities";
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-@layer base {
-  /* Native form controls (select popups, scrollbars, pickers) render LIGHT
-     unless the page declares a dark color-scheme — this is the fix for the
-     harsh white dropdown lists. */
-  html { color-scheme: dark; }
-  select option {
-    background-color: #111721;
-    color: #EEF2F7;
-  }
-  ::selection {
-    background: rgba(230, 184, 92, 0.3);
-    color: #EEF2F7;
-  }
-}
-
-@layer components {
-  /* Form controls.
-   *
-   * Was four different padding/focus combinations across five templates for
-   * the same <select>, and two of them had no focus style at all. One
-   * definition plus one size variant IS a system; four ad-hoc paddings is
-   * not. Sizes stay explicit here rather than inheriting, so a control never
-   * changes size because of the container it landed in.
-   */
-  .select,
-  .input {
+/* Touch devices get finger-sized targets regardless of viewport width;
+   editable inputs stay at 1rem so iOS Safari never zooms on focus. Placed
+   after utilities so a dense utility cannot undercut the minimum. */
+@media (pointer: coarse) {
+  button,
+  .btn,
+  .bracket-btn,
+  .chip,
+  .menu-item,
+  .disclosure > summary {
     min-height: 2.75rem;
-    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.38);
-    @apply rounded-md border border-line-strong bg-ink px-3 py-2
-           font-mono text-data text-body
-           focus:border-phosphor focus:outline-none;
   }
-  .select:focus,
-  .input:focus {
-    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.38),
-                0 0 0 3px rgba(230, 184, 92, 0.18);
-  }
-  .input { @apply placeholder:text-faint; }
-
-  /* Dense filter rows use tighter padding without shrinking the hit target. */
-  .select-sm { min-height: 2.75rem; @apply px-2 py-1; }
-
-  /* Keep native keyboard/mobile pickers; normalize only the closed control. */
-  .select-shell {
-    @apply relative inline-flex min-w-0 items-center;
-  }
-  .select-shell::after,
-  .select-summary::after {
-    content: '';
-    pointer-events: none;
-    position: absolute;
-    right: 0.875rem;
-    top: 50%;
-    width: 0.375rem;
-    height: 0.375rem;
-    border-right: 0.0625rem solid theme('colors.faint');
-    border-bottom: 0.0625rem solid theme('colors.faint');
-    transform: translateY(-65%) rotate(45deg);
-  }
-  .select-shell:focus-within::after,
-  .select-summary:focus::after {
-    border-color: theme('colors.phosphor');
-  }
-  .select-polished {
-    appearance: none;
-    text-align: left;
-    text-align-last: left;
-    @apply w-full rounded-md pl-3 pr-9;
-  }
-  .select-polished option,
-  .select-polished optgroup {
-    text-align: left;
-  }
-  .select-summary {
-    list-style: none;
-    @apply relative justify-start rounded-md pl-3 pr-9 text-left;
-  }
-  .select-summary::-webkit-details-marker {
-    display: none;
-  }
-
-  .toolbar-button {
-    min-height: 2.75rem;
-    @apply rounded-md px-3 py-2 font-mono text-data transition-colors;
-  }
-  .compact-button {
-    min-height: 2rem;
-    @apply rounded px-2 py-1 font-mono text-label transition-colors;
-  }
-  .chart-card,
-  .summary-card,
-  .table-card {
-    @apply rounded-md border border-line bg-panel/50;
-  }
-  .summary-card { @apply p-4; }
-  .chart-caption { @apply mt-2 text-data text-dim; }
-
-  .dashboard-market-chart {
-    min-width: 0;
-    height: var(--market-chart-height, clamp(26rem, 58vh, 36rem));
-  }
-  .market-chart-grid[data-chart-count="1"] {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .market-chart-grid[data-chart-count="2"] {
-    --market-chart-height: clamp(24rem, 52vh, 30rem);
-  }
-  .market-chart-grid[data-chart-count="3"] {
-    --market-chart-height: clamp(23rem, 46vh, 26rem);
-  }
-  .market-chart-grid[data-chart-count="4"] {
-    --market-chart-height: 22rem;
-  }
-  @media (min-width: 640px) {
-    .dashboard-market-chart {
-      height: var(--market-chart-height, clamp(32rem, 62vh, 44rem));
-    }
-    .market-chart-grid[data-chart-count="2"] {
-      --market-chart-height: clamp(28rem, 52vh, 36rem);
-    }
-    .market-chart-grid[data-chart-count="3"] {
-      --market-chart-height: clamp(26rem, 44vh, 30rem);
-    }
-    .market-chart-grid[data-chart-count="4"] {
-      --market-chart-height: 25rem;
-    }
-  }
-  .chart-metric-options button { flex: 1 1 auto; }
-  button:disabled {
-    @apply cursor-not-allowed text-faint;
-    filter: none;
-  }
-
-  /* funding.html's table header.
-   *
-   * A rule rather than utility classes because the venue columns are injected
-   * into #fhead by JS on every refresh, so there is no markup to put classes
-   * on. theme() keeps it tracking the tokens — it previously hardcoded
-   * rgb(17 22 36) in an inline <style> block, alongside a comment claiming
-   * app.css had no .sticky utility, which stopped being true once other pages
-   * started using it.
-   */
-  #ftable thead th {
-    position: sticky;
-    top: 0;
-    z-index: 5;
-    background: theme('colors.panel');
-    box-shadow: 0 1px 0 theme('colors.line');
-  }
-}
-
-/* Phone and tablet controls expose finger-sized targets; editable inputs
-   stay at 1rem to prevent iOS Safari focus zoom on every page. */
-button,
-a,
-input,
-select {
-  touch-action: manipulation;
-}
-
-@media (max-width: 1279px) {
-  button {
+  button,
+  .bracket-btn {
     min-width: 2.75rem;
-    min-height: 2.75rem;
   }
   .select,
   .input,
-  .select-sm,
-  .compact-button {
+  .select-sm {
     min-height: 2.75rem;
-  }
-  .input,
-  .select {
     font-size: 1rem;
   }
-  footer a,
-  #tv-attr-logo {
-    display: inline-flex !important;
-    min-width: 2.75rem;
+  footer a {
+    display: inline-flex;
     min-height: 2.75rem;
     align-items: center;
   }
-}
-
-@media (max-width: 639px) {
-  .chart-metric-options button {
-    padding-inline: 0.375rem;
-  }
-}
-
-/* Execution uses the shared cards, typography and controls; rules stay scoped. */
-@layer components {
-  #execution-app { min-width: 0; max-width: 100%; @apply text-data text-body; }
-  #execution-app [hidden] { display: none !important; }
-  #execution-app .execution-muted { @apply text-data text-dim; }
-  #execution-app .execution-toolbar {
-    @apply grid w-full grid-cols-2 items-end gap-2 font-mono text-data sm:flex sm:w-auto;
-  }
-  #execution-app .execution-toolbar > button { @apply col-span-2 sm:col-span-1; }
-  #execution-app .execution-control {
-    min-width: 0;
-    @apply flex flex-col gap-1 font-mono text-label uppercase tracking-label text-faint;
-  }
-  #execution-app .execution-control .select-shell { width: 100%; }
-  #execution-app .execution-notice { @apply mb-4 text-data text-dim; overflow-wrap: anywhere; }
-  #execution-app .execution-notice[data-state="loading"],
-  #execution-app .execution-notice[data-state="stale"] { @apply text-phosphor; }
-  #execution-app .execution-notice[data-state="error"] { @apply text-loss; }
-  #execution-app .execution-best-card { min-width: 0; @apply p-3; }
-  #execution-app .execution-best-venue {
-    overflow-wrap: anywhere;
-    @apply mt-1 text-data font-medium text-dim;
-  }
-  #execution-app .execution-best-card[data-state="ready"] .execution-best-venue { @apply text-body; }
-  #execution-app .execution-best-price {
-    @apply mb-1 font-mono text-data font-semibold text-body tabular-nums sm:text-title;
-  }
-  #execution-app .execution-best-detail > summary {
-    min-height: 2.75rem; cursor: pointer; list-style: none;
-    @apply flex items-center rounded underline decoration-line-strong underline-offset-4;
-  }
-  #execution-app .execution-best-detail > summary::-webkit-details-marker { display: none; }
-  #execution-app .execution-best-detail > summary[aria-disabled="true"] { cursor: default; text-decoration: none; }
-  #execution-app .execution-price-tooltip {
-    position: fixed; z-index: 100; width: min(26rem, calc(100vw - 1rem));
-    max-height: calc(100dvh - 1rem); overflow: auto; overscroll-behavior: contain;
-    overflow-wrap: anywhere; box-shadow: 0 8px 28px rgb(0 0 0 / 0.35);
-    @apply rounded border border-line-strong bg-panel p-3 text-data text-body;
-  }
-  #execution-app .execution-tooltip-heading { @apply font-medium text-body; }
-  #execution-app .execution-tooltip-age { @apply mt-1 text-label text-dim; }
-  #execution-app .execution-tooltip-age[data-expired="true"] { @apply text-phosphor; }
-  #execution-app .execution-tooltip-list { @apply mt-2 space-y-1; }
-  #execution-app .execution-tooltip-list dt { @apply text-label text-dim; }
-  #execution-app .execution-tooltip-list dd { @apply font-mono text-data text-body tabular-nums; }
-  #execution-app .execution-tooltip-help { @apply mt-2 text-label text-dim; }
-  #execution-app .execution-fee-controls { @apply grid gap-3 sm:grid-cols-2 lg:grid-cols-3; }
-  #execution-app .execution-fee-control { min-width: 0; @apply flex flex-col gap-1; }
-  #execution-app .execution-fee-control .select-shell { width: 100%; }
-  #execution-app .execution-fee-select { min-width: 0; text-overflow: ellipsis; @apply text-data; }
-  #execution-app .execution-fee-rate { @apply text-label text-dim; }
-  #execution-app .execution-reference { @apply space-y-1 font-mono text-label text-dim; }
-  #execution-app .execution-reference p { overflow-wrap: anywhere; }
-  #execution-app .execution-table-scroll {
-    width: 100%; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain;
-  }
-  #execution-app table {
-    width: 100%; min-width: 48rem; table-layout: fixed; border-collapse: collapse;
-    @apply font-mono text-data;
-  }
-  #execution-app thead th { @apply border-b border-line-strong bg-panel px-3 py-3 text-right font-medium text-dim; }
-  #execution-app thead th:first-child { width: 14rem; text-align: left; }
-  #execution-app tbody th,
-  #execution-app tbody td { vertical-align: top; @apply border-b border-line px-3 py-1.5 text-left font-normal; }
-  #execution-app tbody tr:last-child th,
-  #execution-app tbody tr:last-child td { border-bottom: 0; }
-  #execution-app .execution-venue-heading { @apply flex items-center gap-2 font-medium text-body; }
-  #execution-app .execution-venue-dot {
-    width: 0.5rem; height: 0.5rem; border-radius: 50%; flex: 0 0 auto;
-    background: theme('colors.dim');
-  }
-  #execution-app .execution-venue-name { overflow-wrap: anywhere; }
-  #execution-app .execution-venue-meta {
-    min-width: 0; grid-template-columns: minmax(0, 1fr) auto;
-    @apply grid items-center gap-x-2;
-  }
-  #execution-app .execution-venue-stats { min-width: 0; @apply flex flex-col gap-0.5; }
-  #execution-app .execution-age { @apply text-label text-dim tabular-nums; }
-  #execution-app .execution-row-state { overflow-wrap: anywhere; @apply mt-1 text-label text-faint; }
-  #execution-app tr[data-stale="true"] .execution-age { @apply text-phosphor; }
-  #execution-app .execution-source-link {
-    display: inline-flex; align-items: center; min-height: 2.75rem; overflow-wrap: anywhere;
-    @apply text-label text-dim underline decoration-line-strong underline-offset-4 hover:text-phosphor;
-  }
-  #execution-app .execution-notional { @apply block font-medium text-body; }
-  #execution-app .execution-quantity { @apply mt-1 block text-label text-faint; }
-  #execution-app .execution-price-cell { text-align: right; }
-  #execution-app .execution-price-detail > summary {
-    min-height: 2.75rem; cursor: pointer; list-style: none;
-    @apply flex flex-col items-end justify-center gap-0.5 rounded;
-  }
-  #execution-app .execution-price-detail > summary::-webkit-details-marker { display: none; }
-  #execution-app .execution-price-value { @apply whitespace-nowrap font-medium text-body underline decoration-line-strong underline-offset-4 tabular-nums; }
-  #execution-app .execution-all-in-cost { overflow-wrap: anywhere; @apply text-label text-dim tabular-nums; }
-  #execution-app .execution-price-label { @apply text-label text-dim; }
-  #execution-app .execution-price-state { @apply text-data text-dim; }
-  #execution-app .execution-fill { @apply mt-1 text-label text-dim; }
-  #execution-app .execution-price-badges { @apply flex justify-end; }
-  #execution-app .execution-best { @apply bg-phosphor/10; }
-  #execution-app .execution-best-badge { @apply text-label text-phosphor; }
-  #execution-app td[data-stale="true"] .execution-price-value { @apply text-dim; }
-  #execution-app td[data-stale="true"] .execution-all-in-cost { @apply text-faint; }
-  #execution-app .execution-detail-list { overflow-wrap: anywhere; @apply mt-2 space-y-1 text-left text-label; }
-  #execution-app .execution-detail-list dt { @apply text-faint; }
-  #execution-app .execution-detail-list dd { @apply pb-1 text-body; }
-  #execution-app .execution-book-details { min-width: 0; grid-column: 2; grid-row: 1; @apply text-label text-dim; }
-  #execution-app .execution-book-details[open] { grid-column: 1 / -1; grid-row: 2; }
-  #execution-app .execution-book-details > summary {
-    cursor: pointer; min-height: 2.75rem; min-width: 2.75rem;
-    @apply flex items-center rounded underline decoration-line-strong underline-offset-4;
-  }
-  #execution-app .execution-book-body { @apply space-y-2; }
-  #execution-app .execution-book-body p { overflow-wrap: anywhere; }
-  #execution-app .execution-disclosure { @apply mt-3; }
-  #execution-app .execution-disclosure > summary,
-  #execution-app .execution-fee-source > summary { min-height: 2.75rem; cursor: pointer; @apply px-3 py-3 text-data text-body; }
-  #execution-app .execution-disclosure-body { overflow-wrap: anywhere; @apply space-y-3 border-t border-line px-3 py-3 leading-relaxed; }
-  #execution-app .execution-fee-source { @apply border-t border-line; }
-  #execution-app .execution-fee-source:first-child { border-top: 0; }
-  #execution-app .execution-fee-source-body { @apply px-3 pb-3; }
-  #execution-app .execution-fee-source-body ul { @apply list-disc space-y-2 pl-5; }
-  #execution-app .execution-fee-tiers { @apply mt-3; }
-  #execution-app .execution-empty { @apply px-3 py-6 text-dim; }
-  #execution-app :is(summary, a, [tabindex]):focus-visible { @apply outline-none ring-2 ring-phosphor/40; }
-  @media (max-width: 639px) {
-    #execution-app .execution-fee-select { font-size: 1rem; }
-    #execution-app table { min-width: 44rem; }
-    #execution-app thead th:first-child { width: 10rem; }
-    #execution-app thead th:first-child,
-    #execution-app tbody th {
-      position: sticky; left: 0; z-index: 1;
-      @apply border-r border-line bg-panel;
-    }
+  /* A 44px [refresh] reaches into the status bar's padding instead of
+     making the bar taller. */
+  .status-bar .bracket-btn {
+    margin-block: -0.75rem;
   }
 }

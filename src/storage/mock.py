@@ -128,6 +128,58 @@ def _px(seed: str, base: float, i: int) -> float:
     return base * (1 + wave + noise + drift * i % 1_000_000 * 0)  # bounded
 
 
+# Execution-history venue profiles: half-spread bps, size impact in bps per $1m,
+# share of captures with an old book timestamp, smallest size whose captured
+# depth often falls short, and share of captures with no book at all.
+_EXEC_PROFILES = (
+    ("binance_perp", 0.25, 0.6, 0.0, None, 0.003),
+    ("bybit_perp", 0.35, 0.7, 0.18, None, 0.004),
+    ("hyperliquid", 0.45, 1.8, 0.0, 1_000_000, 0.004),
+    ("lighter", 2.6, 1.4, 0.0, None, 0.006),
+    ("extended", 0.3, 1.1, 0.0, None, 0.008),
+    ("rise", 0.9, 4.0, 0.0, 1_000_000, 0.01),
+    ("bullet", 0.8, 5.0, 0.0, 1_000_000, 0.01),
+    ("bulk", 0.9, 3.5, 0.0, 1_000_000, 0.01),
+)
+
+# Depth-heatmap profiles from one live capture: how far each venue's REST book
+# reached either side of the mid for BTC, ETH and SOL, USD resting in the
+# 1-bp bucket next to the mid for BTC, the quote currency and levels per side.
+_DEPTH_PROFILES = {
+    "binance_perp": ((16, 46, 960), 2_300_000, "USDT", 1000),
+    "bybit_perp": ((25, 60, 960), 2_900_000, "USDT", 1000),
+    "hyperliquid": ((2.4, 8, 19), 2_000_000, "USD", 20),
+    "lighter": ((19, 60, 400), 1_000_000, "USD", 220),
+    "extended": ((3400, 5800, 6600), 400_000, "USD", 900),
+    "rise": ((860, 3700, 2000), 50_000, "USDC", 130),
+    "bullet": ((500, 500, 500), 35_000, "USD", 35),
+    "bulk": ((2000, 2900, 2000), 100_000, "USD", 60),
+}
+_DEPTH_COINS = ("BTC", "ETH", "SOL")
+_DEPTH_COIN_SCALE = {"BTC": 1.0, "ETH": 0.4, "SOL": 0.12}
+# Round-number price steps where mock walls rest.
+_DEPTH_WALL_STEP = {"BTC": 250.0, "ETH": 10.0, "SOL": 0.5}
+_DEPTH_QUOTE_RATES = {"USD": 1.0, "USDT": 0.9998, "USDC": 0.9999}
+
+
+def _mock_depth_side(seed: str, minute: int, mid: float, reach: float, scale: float,
+                     wall_step: float, below: bool) -> list[float]:
+    """Base quantity per 1-bp bucket: thinning away from the mid, a wall at
+    each round-number price, nothing beyond the book's reach."""
+    sign = -1 if below else 1
+    sizes = []
+    for index in range(100):
+        if index >= reach:
+            sizes.append(0.0)
+            continue
+        low, high = sorted((mid * (1 + sign * index / 10_000), mid * (1 + sign * (index + 1) / 10_000)))
+        usd = scale / (1 + index / 6) * (0.55 + 0.45 * (_u(seed, minute * 100 + index) + 1))
+        if math.ceil(low / wall_step) * wall_step < high:
+            usd += scale * 5
+        sizes.append(round(usd / ((low + high) / 2), 6))
+    return sizes
+
+
 class MockStorage:
     """Drop-in for storage.queries.ReadStorage."""
 
@@ -393,6 +445,9 @@ class MockStorage:
                 r.update(last_status="fail", fetched=0, new_rows=0,
                          last_error="bybit error 10006: Too many visits. Exceeded the API Rate Limit.",
                          last_success_at=now - timedelta(minutes=31))
+        for r in rows:
+            if r["last_success_at"] is not None:
+                r["since_success"] = now - r["last_success_at"]
         rows.sort(key=lambda r: (r["last_status"] != "fail", r["job_id"]))
         return rows
 
@@ -458,6 +513,42 @@ class MockStorage:
             ):
                 out.append({"exchange": current["exchange"], "symbol": symbol, **row})
         return out
+
+    def current_funding_rates(self, exchanges: list[str], symbols: list[str]) -> list[Row]:
+        """Venue-published rates as funding_table() reports them; markets it
+        does not cover (BULK) get a seeded hourly rate in the same range."""
+        now = datetime.now(UTC).replace(second=0, microsecond=0)
+        table = {(row["exchange"], row["symbol"]): row for row in self.funding_table()}
+        rows: list[Row] = []
+        for exchange in exchanges:
+            for symbol in symbols:
+                row = table.get((exchange, symbol))
+                if row is None:
+                    apr = 8.0 + 18.0 * _u(f"apr:{exchange}:{symbol}", 1)
+                    rows.append({"exchange": exchange, "symbol": symbol, "ts": now,
+                                 "rate": Decimal(f"{apr / 100 / 8760:.10f}"), "interval_hours": 1})
+                elif row["current_funding_rate"] is not None:
+                    rows.append({"exchange": exchange, "symbol": symbol, "ts": row["liq_ts"],
+                                 "rate": row["current_funding_rate"],
+                                 "interval_hours": row["current_interval_hours"]})
+        return rows
+
+    def settled_funding_rates(self, exchanges: list[str], symbols: list[str],
+                              since: datetime) -> list[Row]:
+        table = {(row["exchange"], row["symbol"]): row for row in self.funding_table()}
+        hours = math.ceil((datetime.now(UTC) - since).total_seconds() / 3600)
+        rows: list[Row] = []
+        for exchange in exchanges:
+            for symbol in symbols:
+                current = table.get((exchange, symbol))
+                for row in self.funding_series(
+                    exchange, symbol, hours=hours,
+                    interval_hours=current["interval_hours"] if current else None,
+                ):
+                    if row["ts"] >= since:
+                        rows.append({"exchange": exchange, "symbol": symbol, "ts": row["ts"],
+                                     "rate": row["rate"], "interval_hours": row["interval_hours"]})
+        return rows
 
     def liquidity_series_multi(
         self, symbols: list[str], hours: int = 48,
@@ -678,3 +769,63 @@ class MockStorage:
                     "first_ts": now - timedelta(days=2), "last_ts": now,
                 })
         return out
+
+    def execution_samples(self, asset: str, sides: list[str], since: datetime) -> list[Row]:
+        """Five-minute pre-fee samples, as though collection began nine days ago."""
+        now = datetime.now(UTC).replace(second=0, microsecond=0)
+        now -= timedelta(minutes=now.minute % 5)
+        start = max(since, now - timedelta(days=9)).replace(second=0, microsecond=0)
+        start += timedelta(minutes=(5 - start.minute % 5) % 5)
+        base = _BASES.get(asset, 100.0)
+        rows: list[Row] = []
+        while start <= now:
+            minute = int(start.timestamp() // 60)
+            mid = _px(asset, base, minute)
+            for venue, spread, impact, stale, shallow_from, missing in _EXEC_PROFILES:
+                draw = (_u(f"exec:{asset}:{venue}", minute) + 1) / 2
+                book = "unavailable" if draw < missing else "stale" if draw < missing + stale else "ok"
+                for side in sides:
+                    sign = 1 if side == "buy" else -1
+                    noise = _u(f"exec:{asset}:{venue}:{side}", minute) * 0.5
+                    for notional in (10_000, 100_000, 1_000_000):
+                        status = book
+                        if (status == "ok" and shallow_from and notional >= shallow_from
+                                and _u(f"exec-depth:{asset}:{venue}:{side}", minute) > 0.1):
+                            status = "insufficient_depth"
+                        price = None
+                        if status == "ok":
+                            cost_bps = max(0.05, spread + impact * notional / 1_000_000 + noise)
+                            price = mid * (1 + sign * cost_bps / 10_000)
+                        rows.append({"ts": start, "side": side, "notional_usd": notional, "venue": venue,
+                                     "status": status, "average_price_usd": price})
+            start += timedelta(minutes=5)
+        return rows
+
+    def depth_snapshots(self, asset: str, venue: str, since: datetime, step_seconds: int) -> list[Row]:
+        """One synthetic book per slot, as though collection began nine days ago."""
+        profile = _DEPTH_PROFILES.get(venue)
+        if profile is None or asset not in _DEPTH_COINS:
+            return []
+        reaches, near_usd, quote, levels = profile
+        reach = float(reaches[_DEPTH_COINS.index(asset)])
+        scale = near_usd * _DEPTH_COIN_SCALE[asset]
+        now = datetime.now(UTC)
+        step = timedelta(seconds=step_seconds)
+        origin = datetime(2000, 1, 1, tzinfo=UTC)
+        slot = origin + ((max(since, now - timedelta(days=9)) - origin) // step) * step
+        rows: list[Row] = []
+        while slot <= now:
+            minute = int(slot.timestamp() // 60)
+            mid = _px(asset, _BASES[asset], minute)
+            ask_reach = round(reach * (0.85 + 0.15 * (_u(f"depth-reach:{venue}:{asset}", minute) + 1)), 3)
+            rows.append({
+                "slot": slot, "ts": slot, "source": "rest", "bucket_bps": 1.0, "mid": mid,
+                "quote_currency": quote, "usd_rate": _DEPTH_QUOTE_RATES[quote], "book_age_seconds": 0.4,
+                "bid_reach_bps": reach, "ask_reach_bps": ask_reach, "bid_levels": levels, "ask_levels": levels,
+                "bids": _mock_depth_side(f"depth:{venue}:{asset}:bid", minute, mid, reach, scale,
+                                         _DEPTH_WALL_STEP[asset], below=True),
+                "asks": _mock_depth_side(f"depth:{venue}:{asset}:ask", minute, mid, ask_reach, scale,
+                                         _DEPTH_WALL_STEP[asset], below=False),
+            })
+            slot += step
+        return rows
