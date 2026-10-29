@@ -68,6 +68,15 @@ Set `orderbook = true` on a venue to retain one best-bid/ask snapshot per
 configured market every 60 seconds. Override that cadence with
 `orderbook_poll_seconds`.
 
+Funding rates are stored as what one settlement charges, with that settlement's
+interval, so APR = rate × 8760 ÷ interval hours. Venues that quote an 8-hour
+rate but settle hourly are converted when collected: Lighter's current rate,
+and every Bullet rate, since Bullet charges an eighth of its quoted rate each
+hour (<https://docs.bullet.xyz/exchange/trading/funding>). A database that
+collected Bullet before that conversion needs
+`migrations/014_bullet_funding_basis.sql` once, applied with the scheduler
+stopped, before it restarts; applying it again changes nothing.
+
 ## Run
 
 ```sh

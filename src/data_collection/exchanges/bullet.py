@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import ClassVar
 
 from core.enums import Exchange, MarketType, QuoteCurrency, Timeframe
-from core.models import LiquiditySnapshot, OHLCV, TopOfBook
+from core.models import FundingRate, LiquiditySnapshot, OHLCV, TopOfBook
 from data_collection.base import Capability, UnsupportedCapability
 from data_collection.exchanges.binance import BinanceFuturesScraper
 from data_collection.http import HttpClient
@@ -19,6 +21,12 @@ class BulletScraper(BinanceFuturesScraper):
     quote_currency: ClassVar[QuoteCurrency] = QuoteCurrency.USDC
 
     DEFAULT_FUNDING_HOURS: ClassVar[int] = 1
+    # Bullet quotes every funding rate (settled history, lastFundingRate and,
+    # since 2026-10-27, estimatedFundingRate) on an 8-hour basis comparable with
+    # Binance, but each hourly settlement charges one-eighth of it. Rows store
+    # what one settlement charges, as for every venue:
+    # https://docs.bullet.xyz/exchange/trading/funding
+    QUOTED_BASIS_HOURS: ClassVar[int] = 8
 
     _klines_weight: ClassVar[int] = 1
     _ticker24h_weight: ClassVar[int] = 1
@@ -71,6 +79,18 @@ class BulletScraper(BinanceFuturesScraper):
             except Exception:
                 self._funding_intervals = {}  
         return self._funding_intervals.get(native, self.DEFAULT_FUNDING_HOURS)
+
+    def _settlement_rate(self, quoted: Decimal, hours: int) -> Decimal:
+        return quoted * hours / self.QUOTED_BASIS_HOURS
+
+    async def fetch_funding(
+        self, symbol: str, since: datetime, *, limit: int = 1000
+    ) -> Sequence[FundingRate]:
+        rows = await super().fetch_funding(symbol, since, limit=limit)
+        return [
+            replace(row, rate=self._settlement_rate(row.rate, row.interval_hours))
+            for row in rows
+        ]
 
     async def fetch_bbo(self, symbol: str) -> TopOfBook:
         payload = await self.http.get_json(
@@ -125,7 +145,8 @@ class BulletScraper(BinanceFuturesScraper):
                     mark_price=self._dec(mark["markPrice"]) if mark else self._dec(0),
                     index_price=self._dec(mark["indexPrice"]) if mark else None,
                     current_funding_rate=(
-                        self._dec(current_rate) if current_rate is not None else None
+                        self._settlement_rate(self._dec(current_rate), hours)
+                        if current_rate is not None else None
                     ),
                     funding_interval_hours=hours,
                     next_funding_at=(

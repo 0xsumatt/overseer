@@ -117,7 +117,8 @@ async def test_centralized_and_compatible_tickers_publish_current_funding() -> N
         )
     )
     [row] = await bullet.fetch_liquidity(["BTC-USD"])
-    assert_current(row, rate="0.0004", index="100.0", hours=1)
+    # Quoted per 8 hours; each hourly settlement charges an eighth.
+    assert_current(row, rate="0.00005", index="100.0", hours=1)
 
 
 @pytest.mark.asyncio
@@ -362,7 +363,8 @@ async def test_bullet_funding_defaults_to_hourly_when_info_is_empty() -> None:
         "BTC-USD", datetime(2023, 1, 1, tzinfo=timezone.utc)
     )
 
-    assert row.rate == Decimal("0.000048")
+    # Settled history is quoted per 8 hours too.
+    assert row.rate == Decimal("0.000006")
     assert row.interval_hours == 1
 
 
