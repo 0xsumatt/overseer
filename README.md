@@ -77,6 +77,14 @@ collected Bullet before that conversion needs
 `migrations/014_bullet_funding_basis.sql` once, applied with the scheduler
 stopped, before it restarts; applying it again changes nothing.
 
+The Funding page fetches rates when it opens and every five minutes. Its asset
+filters, search, watchlist and rate mode re-render those rates without asking
+the server again, and the history controls use the 30-second response cache
+like the other public analytics. The table lists markets that reported within
+the last day; the 24h open-interest change compares with the newest snapshot
+from the hour before the 24-hour mark, and is unknown without one. Both bounds
+keep its query to the newest data rather than every snapshot ever stored.
+
 ## Run
 
 ```sh

@@ -315,7 +315,7 @@ function chooseAssetScope(scope) {
   lastOiData = null;
   syncAssetScopeMenu();
   closeAssetScopeMenu(true);
-  load();
+  refilter();
 }
 
 assetScopeTrigger.addEventListener('click', () => {
@@ -506,6 +506,9 @@ new ResizeObserver(() => scheduleMarkets()).observe(document.body);
 window.addEventListener('resize', () => scheduleMarkets());
 document.fonts?.ready.then(() => scheduleMarkets(true));
 
+// Rates are fetched only here: on open, every five minutes (past every cache)
+// and on retry. Filters, search and the rate mode re-render the rows already
+// loaded instead of asking the server again.
 async function load({ forceRefresh = false } = {}) {
   const dot = document.getElementById('refresh-dot');
   fundingState.loading('Loading current funding rates');
@@ -517,85 +520,11 @@ async function load({ forceRefresh = false } = {}) {
     if (activeView === 'history' && (lastHistoryData === null || forceRefresh)) {
       await loadHistory({ forceRefresh });
     }
-    // dislocation-first: sort by max-min APR spread so memecoin/new-listing
-    // outliers surface at the top of a wide-universe table
-    const spread = rows => {
-      const a = rows.map(r => r.apr_pct);
-      return a.length > 1 ? Math.max(...a) - Math.min(...a) : Math.abs(a[0] ?? 0);
-    };
-    renderAssetFilters(data);
-    const coins = fundingEntries(data)
-      .sort(([, ra], [, rb]) => spread(rb) - spread(ra));
-    document.getElementById('market-count').textContent = coins.length;
-    const venuesByKey = new Map();
-    coins.forEach(([, rows]) => rows.forEach(row => {
-      const key = row.venue_key || row.exchange;
-      if (!venuesByKey.has(key)) venuesByKey.set(key, {
-        key,
-        label: row.venue_label || row.exchange,
-        exchange: row.exchange,
-      });
-    }));
-    const venues = [...venuesByKey.values()].sort((a, b) => {
-      const ai = VENUE_ORDER.indexOf(a.key);
-      const bi = VENUE_ORDER.indexOf(b.key);
-      if (ai !== -1 || bi !== -1) return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
-      return a.label.localeCompare(b.label);
-    });
-    marketsModel = { coins, venues, hasFunding: Object.keys(data).length > 0 };
-    renderMarkets();
-    if (!coins.length) {
-      document.getElementById('highlights').innerHTML = '';
-      document.getElementById('market-pulse').hidden = true;
-      if (marketsModel.hasFunding) fundingState.ready();
-      else fundingState.empty('No funding rates yet. Settlements usually arrive within the hour.');
-      return;
-    }
-    // ---- market pulse: superlatives across the filtered universe -----------
-    const flat = coins.flatMap(([coin, rows]) => rows.map(r => ({coin, ...r})));
-    const spreads2 = coins
-      .map(([coin, rows]) => {
-        if (rows.length < 2) return null;
-        const hi = rows.reduce((a,b) => a.apr_pct > b.apr_pct ? a : b);
-        const lo = rows.reduce((a,b) => a.apr_pct < b.apr_pct ? a : b);
-        return { coin, spread: hi.apr_pct - lo.apr_pct, hi, lo };
-      }).filter(Boolean).sort((a,b) => b.spread - a.spread);
-    const richest = flat.reduce((a,b) => (b.apr_pct > (a?.apr_pct ?? -1e9) ? b : a), null);
-    const mostNeg = flat.reduce((a,b) => (b.apr_pct < (a?.apr_pct ?? 1e9) ? b : a), null);
-    const mostLiq = flat.filter(r => r.oi_notional)
-      .reduce((a,b) => (b.oi_notional > (a?.oi_notional ?? -1) ? b : a), null);
-    // href2: a second venue tab opened by JS in the same click — browsers
-    // allow one window.open() per gesture alongside the anchor navigation,
-    // so both legs of a spread open without tripping the popup blocker.
-    const card = (label, big, cls, sub, href, href2) => `
-      <a ${href ? `href="${href}" target="_blank" rel="noopener"` : ''}
-         ${href2 ? `data-href2="${href2}"` : ''}
-         class="kpi block transition-colors hover:bg-panel2/40">
-        <p class="kpi-label">${label}</p>
-        <p class="kpi-value ${cls}">${big}</p>
-        <p class="kpi-meta">${sub}</p></a>`;
-    const signedTone = value => value > 0 ? 'text-gain' : value < 0 ? 'text-loss' : 'text-body';
-    const hl = document.getElementById('highlights');
-    document.getElementById('market-pulse').hidden = false;
-    hl.innerHTML = [
-      spreads2[0] && card('Largest APR spread', Fmt.percent(spreads2[0].spread, 2), 'text-body',
-        `${spreads2[0].coin} · ${spreads2[0].hi.venue_label} vs ${spreads2[0].lo.venue_label} · opens both`,
-        tradeUrl(spreads2[0].hi.exchange, spreads2[0].hi.symbol),
-        tradeUrl(spreads2[0].lo.exchange, spreads2[0].lo.symbol)),
-      richest && card('Highest APR', Fmt.signedPercent(richest.apr_pct, 2),
-        signedTone(richest.apr_pct),
-        `${richest.coin} · ${richest.venue_label}`, tradeUrl(richest.exchange, richest.symbol)),
-      mostNeg && card('Lowest APR', Fmt.signedPercent(mostNeg.apr_pct, 2),
-        signedTone(mostNeg.apr_pct),
-        `${mostNeg.coin} · ${mostNeg.venue_label}`, tradeUrl(mostNeg.exchange, mostNeg.symbol)),
-      mostLiq && card('Most liquid', Fmt.usdCompact(mostLiq.oi_notional), 'text-body',
-        `${mostLiq.coin} · ${mostLiq.venue_label} open interest`,
-        tradeUrl(mostLiq.exchange, mostLiq.symbol)),
-    ].filter(Boolean).join('');
-
-    fundingState.ready();
+    renderFunding(data);
+    if (Object.keys(data).length) fundingState.ready();
+    else fundingState.empty('No funding rates yet. Settlements usually arrive within the hour.');
     const latestRateTimestamp = Math.max(
-      ...fundingEntries(data).flatMap(([, rows]) => rows)
+      ...Object.values(data).flat()
         .map(row => Date.parse(row.rate_ts))
         .filter(Number.isFinite),
     );
@@ -613,6 +542,94 @@ async function load({ forceRefresh = false } = {}) {
     document.getElementById('refresh-label').textContent = 'Refresh failed — retrying';
     fundingState.error('Funding rates', load);
   }
+}
+
+// Filters change which loaded rows show, not the rates: re-render, fetching
+// only when nothing has loaded yet.
+function refilter() {
+  if (!lastFundingData) {
+    load();
+    return;
+  }
+  populateCoinSelector(lastFundingData);
+  if (activeView === 'history' && lastHistoryData === null) loadHistory();
+  renderFunding(lastFundingData);
+}
+
+function renderFunding(data) {
+  // dislocation-first: sort by max-min APR spread so memecoin/new-listing
+  // outliers surface at the top of a wide-universe table
+  const spread = rows => {
+    const a = rows.map(r => r.apr_pct);
+    return a.length > 1 ? Math.max(...a) - Math.min(...a) : Math.abs(a[0] ?? 0);
+  };
+  renderAssetFilters(data);
+  const coins = fundingEntries(data)
+    .sort(([, ra], [, rb]) => spread(rb) - spread(ra));
+  document.getElementById('market-count').textContent = coins.length;
+  const venuesByKey = new Map();
+  coins.forEach(([, rows]) => rows.forEach(row => {
+    const key = row.venue_key || row.exchange;
+    if (!venuesByKey.has(key)) venuesByKey.set(key, {
+      key,
+      label: row.venue_label || row.exchange,
+      exchange: row.exchange,
+    });
+  }));
+  const venues = [...venuesByKey.values()].sort((a, b) => {
+    const ai = VENUE_ORDER.indexOf(a.key);
+    const bi = VENUE_ORDER.indexOf(b.key);
+    if (ai !== -1 || bi !== -1) return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+    return a.label.localeCompare(b.label);
+  });
+  marketsModel = { coins, venues, hasFunding: Object.keys(data).length > 0 };
+  renderMarkets();
+  if (!coins.length) {
+    document.getElementById('highlights').innerHTML = '';
+    document.getElementById('market-pulse').hidden = true;
+    return;
+  }
+  // ---- market pulse: superlatives across the filtered universe -----------
+  const flat = coins.flatMap(([coin, rows]) => rows.map(r => ({coin, ...r})));
+  const spreads2 = coins
+    .map(([coin, rows]) => {
+      if (rows.length < 2) return null;
+      const hi = rows.reduce((a,b) => a.apr_pct > b.apr_pct ? a : b);
+      const lo = rows.reduce((a,b) => a.apr_pct < b.apr_pct ? a : b);
+      return { coin, spread: hi.apr_pct - lo.apr_pct, hi, lo };
+    }).filter(Boolean).sort((a,b) => b.spread - a.spread);
+  const richest = flat.reduce((a,b) => (b.apr_pct > (a?.apr_pct ?? -1e9) ? b : a), null);
+  const mostNeg = flat.reduce((a,b) => (b.apr_pct < (a?.apr_pct ?? 1e9) ? b : a), null);
+  const mostLiq = flat.filter(r => r.oi_notional)
+    .reduce((a,b) => (b.oi_notional > (a?.oi_notional ?? -1) ? b : a), null);
+  // href2: a second venue tab opened by JS in the same click — browsers
+  // allow one window.open() per gesture alongside the anchor navigation,
+  // so both legs of a spread open without tripping the popup blocker.
+  const card = (label, big, cls, sub, href, href2) => `
+    <a ${href ? `href="${href}" target="_blank" rel="noopener"` : ''}
+       ${href2 ? `data-href2="${href2}"` : ''}
+       class="kpi block transition-colors hover:bg-panel2/40">
+      <p class="kpi-label">${label}</p>
+      <p class="kpi-value ${cls}">${big}</p>
+      <p class="kpi-meta">${sub}</p></a>`;
+  const signedTone = value => value > 0 ? 'text-gain' : value < 0 ? 'text-loss' : 'text-body';
+  const hl = document.getElementById('highlights');
+  document.getElementById('market-pulse').hidden = false;
+  hl.innerHTML = [
+    spreads2[0] && card('Largest APR spread', Fmt.percent(spreads2[0].spread, 2), 'text-body',
+      `${spreads2[0].coin} · ${spreads2[0].hi.venue_label} vs ${spreads2[0].lo.venue_label} · opens both`,
+      tradeUrl(spreads2[0].hi.exchange, spreads2[0].hi.symbol),
+      tradeUrl(spreads2[0].lo.exchange, spreads2[0].lo.symbol)),
+    richest && card('Highest APR', Fmt.signedPercent(richest.apr_pct, 2),
+      signedTone(richest.apr_pct),
+      `${richest.coin} · ${richest.venue_label}`, tradeUrl(richest.exchange, richest.symbol)),
+    mostNeg && card('Lowest APR', Fmt.signedPercent(mostNeg.apr_pct, 2),
+      signedTone(mostNeg.apr_pct),
+      `${mostNeg.coin} · ${mostNeg.venue_label}`, tradeUrl(mostNeg.exchange, mostNeg.symbol)),
+    mostLiq && card('Most liquid', Fmt.usdCompact(mostLiq.oi_notional), 'text-body',
+      `${mostLiq.coin} · ${mostLiq.venue_label} open interest`,
+      tradeUrl(mostLiq.exchange, mostLiq.symbol)),
+  ].filter(Boolean).join('');
 }
 
 function fundingPaymentExample(rate, hours) {
@@ -764,7 +781,7 @@ function setRateMode(mode, redraw = true) {
     : "Each venue's own interval · sorted by APR";
   updateHistoryHelp();
   if (redraw) {
-    if (lastFundingData) load();
+    if (lastFundingData) renderFunding(lastFundingData);
     if (lastHistoryData) renderHistoryChart();
   }
 }
@@ -827,7 +844,7 @@ document.getElementById('watchlist-filter').addEventListener('click', () => {
   storedFundingFilters.set('watchlistOnly', watchlistOnly ? 'true' : null);
   lastHistoryData = null;
   lastOiData = null;
-  load();
+  refilter();
 });
 marketsScroll.addEventListener('click', event => {
   const button = event.target.closest('[data-watch]');
@@ -838,12 +855,12 @@ marketsScroll.addEventListener('click', event => {
   storedFundingFilters.setList('watchlist', watchedAssets);
   lastHistoryData = null;
   lastOiData = null;
-  load();
+  refilter();
 });
 
 document.getElementById('ffilter').addEventListener('input', event => {
   fundingFilters.set('search', event.target.value);
-  load();
+  refilter();
 });
 Overseer.poll(load, 300);
 
@@ -926,7 +943,7 @@ function ewma(points, alpha = 0.35) {
 // sticks until they pick a different window.
 const DEFAULT_BUCKET = { 24: 5, 48: 5, 168: 60, 720: 240 };
 
-async function loadHistory({ forceRefresh = true } = {}) {
+async function loadHistory({ forceRefresh = false } = {}) {
   const asset = document.getElementById('hcoin').value;
   const hours = document.getElementById('hhours').value;
   const bucket = document.getElementById('hbucket').value;

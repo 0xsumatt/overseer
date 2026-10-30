@@ -155,6 +155,13 @@ class ReadStorage:
         trader-facing value. Settled funding remains available in explicit
         columns and continues to anchor cadence/history consumers.
 
+        Only markets reporting within the last day are listed: snapshots arrive
+        every five minutes and settlements at least every eight hours, so a
+        quieter market is no longer collected. The bounds keep each scan to the
+        newest chunks; unbounded, every request read (and decompressed) every
+        row ever stored. The 24h OI change compares with the newest snapshot in
+        the hour before that mark, and is unknown without one.
+
         apr_pct = rate * (8760 / interval_hours) * 100
         oi_notional = open_interest (base units) * mark_price
         """
@@ -164,6 +171,7 @@ class ReadStorage:
                 SELECT DISTINCT ON (exchange, symbol)
                        exchange, symbol, ts, rate, interval_hours
                 FROM funding_rates
+                WHERE ts > now() - interval '1 day'
                 ORDER BY exchange, symbol, ts DESC
             ),
             latest_liq AS (
@@ -172,6 +180,7 @@ class ReadStorage:
                        index_price, current_funding_rate, funding_interval_hours,
                        next_funding_at, funding_premium
                 FROM liquidity
+                WHERE ts > now() - interval '1 day'
                 ORDER BY exchange, symbol, ts DESC
             ),
             liq_24h_ago AS (
@@ -179,6 +188,7 @@ class ReadStorage:
                        exchange, symbol, open_interest AS oi_24h_ago
                 FROM liquidity
                 WHERE ts <= now() - interval '24 hours'
+                  AND ts > now() - interval '25 hours'
                 ORDER BY exchange, symbol, ts DESC
             )
             SELECT
