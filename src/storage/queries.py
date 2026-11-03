@@ -98,8 +98,7 @@ class ReadStorage:
               AND symbol = ANY(%s)
               AND exchange = ANY(%s)
               AND ts >= %s
-            GROUP BY exchange, market_type, symbol,
-                     date_bin(%s::interval, ts, TIMESTAMPTZ '1970-01-01')
+            GROUP BY exchange, market_type, symbol, 4
             ORDER BY ts ASC, exchange ASC
             """,
             (
@@ -108,7 +107,6 @@ class ReadStorage:
                 symbols,
                 exchanges,
                 since,
-                f"{bucket_minutes} minutes",
             ),
         )
 
