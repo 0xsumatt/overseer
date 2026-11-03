@@ -27,7 +27,6 @@ def test_analytics_are_public_but_health_remains_internal(client) -> None:
         assert b'href="/health"' not in response.data
         assert b"internal" not in response.data.lower()
 
-    assert client.get("/api/series").status_code == 200
     health = client.get("/health")
     assert health.status_code == 302
     assert health.headers["Location"].startswith("/login?next=")

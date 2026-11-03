@@ -11,8 +11,9 @@ from core.depth import depth_snapshots
 from core.enums import MarketType, QuoteCurrency
 from core.execution_fees import execution_listings
 from core.execution_history import history_samples
+from core.funding_units import resting_rates
 from core.models import OrderBookSnapshot, TopOfBook
-from core.symbols import SymbolRegistry
+from core.symbols import VENUE_NAMES, SymbolRegistry
 from data_collection.base import BaseExchangeScraper, Capability
 from scheduler.notify import DiscordNotifier, trade_link
 from scheduler.targets import (
@@ -601,18 +602,16 @@ async def check_dislocations(
     confirmation: DislocationConfirmation,
 ) -> None:
     """Alert only after current funding stays wide across fresh snapshots."""
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(minutes=30)
     try:
-        rows = await storage.latest_current_funding_rows()
+        rows = await storage.latest_current_funding_rows(cutoff)
     except Exception:
         log.exception("current funding dislocation check failed")
         return
 
-    now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(minutes=30)
     legs: dict[str, list[FundingLeg]] = {}
     for row in rows:
-        if row["ts"] < cutoff:
-            continue
         asset = registry.asset_for(row["symbol"]) or row["symbol"]
         apr = float(row["rate"]) * (8760 / row["interval_hours"]) * 100
         venue = _venue_for_leg(
@@ -668,6 +667,45 @@ async def check_dislocations(
                     f"{spread:.1f}% APR"
                 )
     confirmation.retain(pending_assets)
+
+
+async def check_funding_units(
+    storage: Storage, notifier: DiscordNotifier, state: dict[str, str], registry: SymbolRegistry
+) -> None:
+    """Alert once when a venue's resting crypto funding rate sits a whole factor
+    from the other venues', as a unit error would, and once when it agrees
+    again. Current and settled rates reach storage by different paths, so each
+    is checked on its own."""
+    now = datetime.now(timezone.utc)
+    try:
+        kinds = {
+            "current": await storage.latest_current_funding_rows(now - timedelta(minutes=30)),
+            "settled": await storage.latest_funding_rows(now - timedelta(days=1)),
+        }
+    except Exception:
+        log.exception("funding units check failed")
+        return
+    for kind, rows in kinds.items():
+        markets = (
+            (row["exchange"], row["rate"], row["interval_hours"])
+            for row in rows
+            if registry.metadata(registry.asset_for(row["symbol"]) or row["symbol"]).family == "crypto"
+        )
+        for resting in resting_rates(markets):
+            key = f"units:{kind}:{resting.exchange}"
+            venue = VENUE_NAMES.get(resting.exchange, resting.exchange)
+            if resting.suspect and state.get(key) != "suspect":
+                state[key] = "suspect"
+                times = max(resting.factor, 1 / resting.factor)
+                direction = "above" if resting.factor > 1 else "below"
+                await notifier.digest(
+                    f"⚠️ **{venue}** {kind} funding rests at {resting.apr_pct:.2f}% APR on "
+                    f"{resting.markets} markets, {times:.1f}× {direction} the other venues' "
+                    f"{resting.reference_pct:.2f}%: check its units"
+                )
+            elif not resting.suspect and state.get(key) == "suspect":
+                state[key] = "ok"
+                await notifier.digest(f"↩️ **{venue}** {kind} funding agrees with the other venues again")
 
 
 async def post_digest(storage: Storage, notifier: DiscordNotifier) -> None:

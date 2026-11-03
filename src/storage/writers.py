@@ -335,25 +335,31 @@ class Storage:
             exchange.value, symbol, interval.value,
         )
 
-    async def latest_funding_rows(self) -> list[asyncpg.Record]:
-        """Newest settled funding per market; anchors settlement capture."""
+    async def latest_funding_rows(self, since: datetime) -> list[asyncpg.Record]:
+        """Newest settled funding per market since `since`; anchors settlement
+        capture. Bounded so it reads recent chunks, not every row ever stored."""
         return await self.pool.fetch(
             "SELECT DISTINCT ON (exchange, symbol) "
             "exchange, symbol, ts, rate, interval_hours "
-            "FROM funding_rates ORDER BY exchange, symbol, ts DESC"
+            "FROM funding_rates WHERE ts >= $1 "
+            "ORDER BY exchange, symbol, ts DESC",
+            since,
         )
 
-    async def latest_current_funding_rows(self) -> list[asyncpg.Record]:
-        """Newest venue-published funding rate per market for live alerts."""
+    async def latest_current_funding_rows(self, since: datetime) -> list[asyncpg.Record]:
+        """Newest venue-published funding rate per market since `since`, for
+        live alerts."""
         return await self.pool.fetch(
             "SELECT DISTINCT ON (exchange, symbol) "
             "exchange, symbol, ts, current_funding_rate AS rate, "
             "funding_interval_hours AS interval_hours, next_funding_at "
             "FROM liquidity "
-            "WHERE current_funding_rate IS NOT NULL "
+            "WHERE ts >= $1 "
+            "AND current_funding_rate IS NOT NULL "
             "AND funding_interval_hours IS NOT NULL "
             "AND funding_interval_hours > 0 "
-            "ORDER BY exchange, symbol, ts DESC"
+            "ORDER BY exchange, symbol, ts DESC",
+            since,
         )
 
     async def latest_funding_ts(self, exchange: Exchange, symbol: str) -> datetime | None:

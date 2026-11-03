@@ -188,8 +188,8 @@ class AlertStorage:
     def __init__(self, rows: list[dict[str, Any]]) -> None:
         self.rows = rows
 
-    async def latest_current_funding_rows(self) -> list[dict[str, Any]]:
-        return self.rows
+    async def latest_current_funding_rows(self, since: datetime) -> list[dict[str, Any]]:
+        return [row for row in self.rows if row["ts"] >= since]
 
 
 class AlertNotifier:

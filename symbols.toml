@@ -70,6 +70,12 @@ orderbook = true
 funding = "all"
 liquidity = "all"
 
+[venues.qfex]
+intervals = ["1m"]
+orderbook = true
+funding = "all"
+liquidity = "all"
+
 # -- assets --------------------------------------------------------------------
 
 [assets.BTC]
@@ -160,6 +166,7 @@ lighter = "XAU"
 extended = "XAU-USD"
 rise = "XAU/USDC"
 bullet = "GOLD-USD"
+qfex = "GOLD-USD"
 
 [asset_metadata.XAU]
 family = "traditional"
@@ -175,6 +182,7 @@ lighter = "XAG"
 extended = "XAG-USD"
 rise = "XAG/USDC"
 bullet = "SILVER-USD"
+qfex = "SILVER-USD"
 
 [asset_metadata.XAG]
 family = "traditional"
@@ -189,6 +197,7 @@ lighter = "WTI"
 extended = "WTI-USD"
 rise = "CL/USDC"
 bullet = "WTIOIL-USD"
+qfex = "CL-USD"
 
 [asset_metadata.WTI]
 family = "traditional"
@@ -202,6 +211,7 @@ bybit_perp = "BZ/USDT"
 lighter = "BRENTOIL"
 extended = "XBR-USD"
 rise = "BZ/USDC"
+qfex = "BRENT-USD"
 
 [asset_metadata.BRENT]
 family = "traditional"
@@ -214,6 +224,7 @@ hyperliquid_xyz = "xyz:SP500"
 lighter = "US500"
 extended = "SPX500m-USD"
 bullet = "US500-USD"
+qfex = "US500-USD"
 
 [asset_metadata.SP500]
 family = "traditional"
@@ -223,6 +234,7 @@ label = "S&P 500"
 
 [assets.NDX]
 extended = "TECH100m-USD"
+qfex = "US100-USD"
 
 [asset_metadata.NDX]
 family = "traditional"
@@ -237,6 +249,8 @@ bybit_perp = "NVDA/USDT"
 lighter = "NVDA"
 extended = "NVDA_24_5-USD"
 rise = "NVDA/USDC"
+qfex = "NVDA-USD"
+bulk = "NVDA-USD"
 
 [asset_metadata.NVDA]
 family = "traditional"
@@ -250,6 +264,7 @@ hyperliquid_xyz = "xyz:AMD"
 bybit_perp = "AMDSTOCK/USDT"
 lighter = "AMD"
 extended = "AMD_24_5-USD"
+qfex = "AMD-USD"
 
 [asset_metadata.AMD]
 family = "traditional"
@@ -263,6 +278,7 @@ hyperliquid_xyz = "xyz:META"
 bybit_perp = "META/USDT"
 lighter = "META"
 extended = "META_24_5-USD"
+qfex = "META-USD"
 
 [asset_metadata.META]
 family = "traditional"
@@ -276,6 +292,7 @@ hyperliquid_xyz = "xyz:GOOGL"
 bybit_perp = "GOOGL/USDT"
 lighter = "GOOGL"
 extended = "GOOGL-USD"
+qfex = "GOOGL-USD"
 
 [asset_metadata.GOOGL]
 family = "traditional"
@@ -289,6 +306,7 @@ hyperliquid_xyz = "xyz:MSFT"
 bybit_perp = "MSFT/USDT"
 lighter = "MSFT"
 extended = "MSFT_24_5-USD"
+qfex = "MSFT-USD"
 
 [asset_metadata.MSFT]
 family = "traditional"
@@ -302,6 +320,7 @@ hyperliquid_xyz = "xyz:AAPL"
 bybit_perp = "AAPL/USDT"
 lighter = "AAPL"
 extended = "AAPL_24_5-USD"
+qfex = "AAPL-USD"
 
 [asset_metadata.AAPL]
 family = "traditional"

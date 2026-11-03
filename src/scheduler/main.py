@@ -21,6 +21,7 @@ from scheduler.jobs import (
     DislocationConfirmation,
     UsdcUsdtQuoteCache,
     check_dislocations,
+    check_funding_units,
     post_digest,
     run_execution_history,
     run_fills,
@@ -106,6 +107,16 @@ def build_scheduler(
                 confirmation,
             ],
             id="alert:dislocations", name="alert:dislocations",
+            replace_existing=True,
+        )
+    # A venue whose resting crypto funding rate sits a whole factor from the
+    # other venues' has a unit error, not a market (core/funding_units.py).
+    if funding_targets and registry is not None:
+        sched.add_job(
+            check_funding_units,
+            trigger=IntervalTrigger(seconds=300),
+            args=[storage, notifier, state, registry],
+            id="alert:funding-units", name="alert:funding-units",
             replace_existing=True,
         )
     # Cheapest-venue history: a fixed clock, so "cheapest X% of the time" is
@@ -197,7 +208,7 @@ async def main() -> None:
         capture = SettlementCapture()
         # Seed before any stream starts, so a settlement in the first few
         # minutes is not missed while waiting on the first refresh tick.
-        capture.refresh(await storage.latest_funding_rows())
+        await capture.reload(storage)
         log.info("settlement capture: %d symbol(s) scheduled, window -%.0fs/+%.0fs",
                  capture.tracked, capture.pre_seconds, capture.post_seconds)
         stream_tasks.append(

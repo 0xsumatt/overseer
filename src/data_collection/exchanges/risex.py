@@ -1,15 +1,22 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import ClassVar
+
+import orjson
+from picows import WSFrame, WSListener, WSMsgType, WSTransport, ws_connect
 
 from core.enums import Exchange, MarketType, QuoteCurrency, Timeframe
 from core.models import FundingRate, LiquiditySnapshot, OHLCV, TopOfBook
 from data_collection.base import BaseExchangeScraper, Capability
 from data_collection.http import HttpClient
 from data_collection.ratelimit import RateLimiter
+
+log = logging.getLogger("overseer.rise")
 
 _NS = 1_000_000_000
 
@@ -26,6 +33,32 @@ def _to_ns(dt: datetime) -> int:
 
 def _from_ns(ns: int | str) -> datetime:
     return datetime.fromtimestamp(int(ns) / _NS, tz=timezone.utc)
+
+
+_SUBSCRIBE_ESTIMATES = orjson.dumps(
+    {"method": "subscribe", "params": {"channel": "expected_funding_rate", "market_ids": []}}
+)
+
+
+class _EstimateListener(WSListener):
+    """Resolves `done` with market_id -> estimate from the first update."""
+
+    def __init__(self, done: asyncio.Future) -> None:
+        self.done = done
+
+    def on_ws_connected(self, transport: WSTransport) -> None:
+        transport.send(WSMsgType.TEXT, _SUBSCRIBE_ESTIMATES)
+
+    def on_ws_frame(self, transport: WSTransport, frame: WSFrame) -> None:
+        if frame.msg_type != WSMsgType.TEXT or self.done.done():
+            return
+        message = orjson.loads(frame.get_payload_as_bytes())
+        if message.get("channel") == "expected_funding_rate" and message.get("type") == "update":
+            self.done.set_result({str(row["market_id"]): row for row in message.get("data") or []})
+
+    def on_ws_disconnected(self, transport: WSTransport) -> None:
+        if not self.done.done():
+            self.done.set_result({})
 
 
 class RiseScraper(BaseExchangeScraper):
@@ -45,6 +78,11 @@ class RiseScraper(BaseExchangeScraper):
     )
 
     _MARKET_MAP_TTL: ClassVar[float] = 1800.0
+    # The REST current_funding_rate repeats the last settlement and
+    # predicted_funding_rate reads 0; the trading page's "Next Funding" estimate
+    # comes from this public channel, which updates every few seconds.
+    ESTIMATES_URL: ClassVar[str] = "wss://api.rise.trade/ws/"
+    ESTIMATE_TIMEOUT: ClassVar[float] = 15.0
 
     def __init__(self, http: HttpClient | None = None) -> None:
         super().__init__(http)
@@ -189,10 +227,30 @@ class RiseScraper(BaseExchangeScraper):
 
    
 
+    async def _expected_funding(self) -> dict[str, dict]:
+        """market_id -> the estimate for the next settlement, from the first
+        update on the expected_funding_rate channel; empty if none arrives, so a
+        settled rate is never passed off as the current one."""
+        done = asyncio.get_running_loop().create_future()
+        transport: WSTransport | None = None
+        try:
+            transport, _ = await asyncio.wait_for(
+                ws_connect(lambda: _EstimateListener(done), self.ESTIMATES_URL),
+                self.ESTIMATE_TIMEOUT,
+            )
+            return await asyncio.wait_for(done, self.ESTIMATE_TIMEOUT)
+        except Exception as exc:
+            log.warning("rise: no expected funding estimate (%r)", exc)
+            return {}
+        finally:
+            if transport is not None:
+                transport.disconnect()
+
     async def fetch_liquidity(
         self, symbols: Sequence[str]
     ) -> Sequence[LiquiditySnapshot]:
         markets = await self._market_map(refresh=True)
+        estimates = await self._expected_funding()
         now = datetime.now(timezone.utc)
         wanted = list(symbols) if symbols else [
             name for name, m in markets.items() if self._is_live(m)
@@ -204,8 +262,9 @@ class RiseScraper(BaseExchangeScraper):
                 continue
             interval_ns = int(m.get("funding_interval", 0) or 0)
             interval_hours = max(1, interval_ns // (3600 * _NS)) if interval_ns else 1
-            current_rate = m.get("current_funding_rate")
-            next_funding = m.get("next_funding_time")
+            estimate = estimates.get(str(m.get("market_id")))
+            current_rate = estimate.get("estimated_rate") if estimate else None
+            next_funding = (estimate or m).get("next_funding_time")
             out.append(
                 LiquiditySnapshot(
                     exchange=self.exchange,

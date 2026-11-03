@@ -92,6 +92,19 @@ _WIDE_FUNDING.extend([
     ("bybit", "AAPL/USDT", 4, 4.0, 13_000_000),
     ("lighter", "AAPL", 1, 3.4, 10_000_000),
     ("extended", "AAPL_24_5-USD", 1, 3.8, 8_000_000),
+    # QFEX charges no interest component, so its rates sit near zero.
+    ("qfex", "GOLD-USD", 1, 8.8, 6_100_000),
+    ("qfex", "SILVER-USD", 1, 2.1, 3_500_000),
+    ("qfex", "CL-USD", 1, 1.4, 2_700_000),
+    ("qfex", "BRENT-USD", 1, 0.9, 13_200_000),
+    ("qfex", "US500-USD", 1, -0.6, 6_100_000),
+    ("qfex", "US100-USD", 1, 1.8, 8_400_000),
+    ("qfex", "NVDA-USD", 1, 3.2, 1_800_000),
+    ("qfex", "AMD-USD", 1, -1.1, 2_000_000),
+    ("qfex", "META-USD", 1, 0.7, 1_800_000),
+    ("qfex", "GOOGL-USD", 1, 1.5, 3_900_000),
+    ("qfex", "MSFT-USD", 1, -0.4, 1_500_000),
+    ("qfex", "AAPL-USD", 1, -2.6, 3_900_000),
 ])
 
 MOCK_FILLS = {
@@ -212,15 +225,11 @@ class MockStorage:
                     continue
                 yield venue, exchange, mt, pat.format(a=asset), asset, base, fh
 
-    def series_list(self) -> list[Row]:
-        now = datetime.now(UTC).replace(second=0, microsecond=0)
-        out = []
-        for _, exchange, mt, symbol, _a, _b, _f in self._series():
-            out.append({
-                "exchange": exchange, "market_type": mt, "symbol": symbol,
-                "interval": "1m", "bars": 4320,
-                "first_ts": now - timedelta(days=3), "last_ts": now,
-            })
+    def chart_series(self) -> list[Row]:
+        out = [
+            {"exchange": exchange, "market_type": mt, "symbol": symbol, "interval": "1m"}
+            for _, exchange, mt, symbol, _a, _b, _f in self._series()
+        ]
         out.sort(key=lambda r: (r["exchange"], r["market_type"], r["symbol"]))
         return out
 
@@ -456,7 +465,7 @@ class MockStorage:
         now = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
         vols = {"binance": (14.2e9, 21.5e9), "bybit": (4.1e9, 8.9e9),
                 "hyperliquid": (0.4e9, 9.8e9), "lighter": (0.15e9, 6.4e9),
-                "extended": (None, 1.9e9)}
+                "extended": (None, 1.9e9), "qfex": (None, 0.45e9)}
         latest = []
         for ex, (sp, pp) in vols.items():
             latest.append({"exchange": ex, "ts": now,
@@ -594,6 +603,7 @@ class MockStorage:
             "extended": (0.7e9, 1.2),
             "rise": (0.35e9, 0.9),
             "bullet": (0.18e9, 1.1),
+            "qfex": (0.38e9, 1.2),
         }
         points_per_venue = min(limit // len(baselines), (hours * 60) // bucket_min)
         out: list[Row] = []
@@ -723,10 +733,6 @@ class MockStorage:
         now = datetime.now(UTC)
         return {"last_ts": now - timedelta(seconds=70), "age_seconds": 70.0}
 
-    def wallet_symbols(self, addresses: list[str]) -> list[Row]:
-        return [{"symbol": s, "fills": f}
-                for s, f in [("BTC", 8200), ("ETH", 5100), ("SOL", 2400)]]
-
     def wallet_flows(self, symbol: str, addresses: list[str], since) -> list[Row]:
         base = _BASES.get(symbol, 100.0)
         start = int(since.timestamp() // 300) * 300
@@ -754,20 +760,20 @@ class MockStorage:
         # same numbers as venue_volume()'s mock latest, keyed the way the real
         # query returns them
         vols = {"binance": 35.7e9, "bybit": 13.0e9,
-                "hyperliquid": 10.2e9, "lighter": 6.55e9, "extended": 1.9e9}
+                "hyperliquid": 10.2e9, "lighter": 6.55e9, "extended": 1.9e9, "qfex": 0.45e9}
         return {ex: Decimal(str(vols[ex])) for ex in exchanges if ex in vols}
 
-    def fills_summary(self, wallet_address: str) -> list[Row]:
-        now = datetime.now(UTC)
+    def wallet_fills(self, addresses: list[str], since: datetime) -> list[Row]:
         out = []
-        for i, (sym, mt) in enumerate([("BTC", "perp"), ("ETH", "perp"), ("SOL", "perp")]):
-            for side in ("buy", "sell"):
-                out.append({
-                    "symbol": sym, "market_type": mt, "side": side,
-                    "fills": 400 - i * 90 + (25 if side == "buy" else 0),
-                    "total_amount": Decimal(f"{120.5 - i * 30:.2f}"),
-                    "first_ts": now - timedelta(days=2), "last_ts": now,
-                })
+        for address in addresses:
+            for i, (sym, mt) in enumerate([("BTC", "perp"), ("ETH", "perp"), ("SOL", "perp")]):
+                for side in ("buy", "sell"):
+                    out.append({
+                        "wallet_address": address, "symbol": sym, "market_type": mt, "side": side,
+                        "fills": 400 - i * 90 + (25 if side == "buy" else 0),
+                        "total_amount": Decimal(f"{120.5 - i * 30:.2f}"),
+                    })
+        out.sort(key=lambda r: r["fills"], reverse=True)
         return out
 
     def execution_samples(self, asset: str, sides: list[str], since: datetime) -> list[Row]:

@@ -21,6 +21,7 @@ VENUE_NAMES = {
     "bulk": "BULK",
     "rise": "RISEx",
     "bullet": "Bullet",
+    "qfex": "QFEX",
 }
 
 

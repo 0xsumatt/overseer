@@ -17,7 +17,10 @@ graceful_timeout = 30
 forwarded_allow_ips = "127.0.0.1"
 
 # stdout/stderr are captured by systemd and available through journalctl.
+# Each access line ends with the request's duration, so slow endpoints show up
+# in real traffic: journalctl -u overseer-web | grep -E ' [0-9]{4,}ms$'
 accesslog = "-"
+access_log_format = '%(h)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s" %(M)sms'
 errorlog = "-"
 capture_output = True
 proc_name = "overseer-web"

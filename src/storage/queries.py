@@ -57,15 +57,15 @@ class ReadStorage:
             (exchange, market_type, symbol, interval, since, until, limit),
         )
 
-    def series_list(self) -> list[Row]:
-        """Every (exchange, market_type, symbol, interval) we hold, with bar
-        counts and coverage — drives dropdowns and the health page."""
+    def chart_series(self) -> list[Row]:
+        """Every (exchange, market_type, symbol, interval) with a bar in the
+        last day: the dashboard and basis pickers. Bounded like funding_table();
+        unbounded, every page load counted every bar ever stored."""
         return self._fetch(
             """
-            SELECT exchange, market_type, symbol, interval,
-                   count(*) AS bars, min(ts) AS first_ts, max(ts) AS last_ts
+            SELECT DISTINCT exchange, market_type, symbol, interval
             FROM ohlcv
-            GROUP BY 1, 2, 3, 4
+            WHERE ts > now() - interval '1 day'
             ORDER BY 1, 2, 3, 4
             """
         )
@@ -522,13 +522,20 @@ class ReadStorage:
             """
         )
 
-    def wallet_symbols(self, addresses: list[str]) -> list[Row]:
-        """Symbols any tracked wallet has traded, most active first — drives
-        the wallets page coin selector."""
+    def wallet_fills(self, addresses: list[str], since: datetime) -> list[Row]:
+        """Fills and base-unit totals per tracked wallet, market and side since
+        `since`, most active first: the wallets page coin selector and fill
+        history. Bounded because an all-time rollup reads every fill ever stored."""
         return self._fetch(
-            "SELECT symbol, count(*) AS fills FROM trades "
-            "WHERE wallet_address = ANY(%s) GROUP BY 1 ORDER BY fills DESC",
-            (addresses,),
+            """
+            SELECT wallet_address, symbol, market_type, side,
+                   count(*) AS fills, sum(amount) AS total_amount
+            FROM trades
+            WHERE wallet_address = ANY(%s) AND ts >= %s
+            GROUP BY 1, 2, 3, 4
+            ORDER BY fills DESC
+            """,
+            (addresses, since),
         )
 
     def wallet_flows(
@@ -569,21 +576,6 @@ class ReadStorage:
             (exchanges,),
         )
         return {r["exchange"]: r["volume_total"] for r in rows}
-
-    def fills_summary(self, wallet_address: str) -> list[Row]:
-        """Per-symbol/side rollup of a tracked address's fills (e.g. HLP)."""
-        return self._fetch(
-            """
-            SELECT symbol, market_type, side,
-                   count(*) AS fills, sum(amount) AS total_amount,
-                   min(ts) AS first_ts, max(ts) AS last_ts
-            FROM trades
-            WHERE wallet_address = %s
-            GROUP BY 1, 2, 3
-            ORDER BY fills DESC
-            """,
-            (wallet_address,),
-        )
 
     def execution_samples(self, asset: str, sides: list[str], since: datetime) -> list[Row]:
         """Pre-fee cheapest-venue samples for one coin and the given sides since

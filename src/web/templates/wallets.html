@@ -11,7 +11,7 @@
     <span class="select-shell">
       <select id="wsym" class="select select-polished">
         {% for s in symbols %}
-        <option value="{{ s.symbol }}">{{ s.symbol }} · {{ s.fills }} fills</option>
+        <option value="{{ s.symbol }}">{{ s.symbol }} · {{ s.fills }} fills in {{ fill_days }}d</option>
         {% endfor %}
       </select>
     </span>
@@ -34,7 +34,7 @@
 <div class="space-y-6">
 {% if not symbols %}
   <div class="summary-card empty-state">
-    <p class="empty-state-title">No wallet fills recorded yet.</p>
+    <p class="empty-state-title">No wallet fills in the last {{ fill_days }} days.</p>
     <p class="empty-state-hint">Tracked wallets are checked every 30 seconds; fills appear here as they arrive.</p>
   </div>
 {% else %}
@@ -58,7 +58,7 @@
 {% endif %}
 
   <section aria-labelledby="fills-title">
-    <h2 id="fills-title" class="section-label">Fill history <span class="section-count">All assets · base units</span></h2>
+    <h2 id="fills-title" class="section-label">Fill history <span class="section-count">Last {{ fill_days }} days · all assets · base units</span></h2>
     <div class="grid items-start gap-4 lg:grid-cols-2">
       {% for label, venue, rows in summaries %}
       <section class="table-card flex max-h-[21rem] flex-col" aria-label="{{ label }} fills">
@@ -82,7 +82,7 @@
                 <td class="num text-dim">{{ '{:,.4f}'.format(r.total_amount | float) }}</td>
               </tr>
               {% else %}
-              <tr><td colspan="4" class="empty-cell">No fills recorded for this wallet yet.</td></tr>
+              <tr><td colspan="4" class="empty-cell">No fills for this wallet in the last {{ fill_days }} days.</td></tr>
               {% endfor %}
             </tbody>
           </table>
@@ -100,7 +100,8 @@
       <p>Line colour follows each wallet's venue; two wallets on the same venue are told apart by line style.</p>
       <p>Wallet share compares a wallet's 24h filled notional with its venue's 24h volume, taken from the daily
         venue-wide sweep. The fills feed is best-effort and may miss fills, so wallet share may be understated.</p>
-      <p>Fill history totals every recorded fill for each wallet across all assets; sizes are in base units.</p>
+      <p>Fill history and the asset list's fill counts cover the last {{ fill_days }} days, across all assets;
+        sizes are in base units.</p>
     </div>
   </details>
 </div>
@@ -109,7 +110,7 @@
 {% block scripts %}
 {% if symbols %}
 <script src="{{ url_for('static', filename='js/lightweight-charts.standalone.js') }}"></script>
-<script src="{{ url_for('static', filename='js/venues.js', v='ui-consistency') }}"></script>
+<script src="{{ url_for('static', filename='js/venues.js', v='qfex') }}"></script>
 <script id="wallets-config" type="application/json">{{ {'wallets': wallets} | tojson }}</script>
 {% endif %}
 <script src="{{ url_for('static', filename='js/wallets.js', v='ui-consistency') }}"></script>

@@ -18,6 +18,7 @@ const TRADE_URLS = {
   rise:        s => `https://www.rise.trade/en/trade/${s.split('/')[0]}`,  // base asset only, not the full pair
   bullet:      s => `https://app.bullet.xyz/trade/${s}`,
   bulk:        s => `https://app.bulk.trade/trade/${s}`,
+  qfex:        s => `https://www.qfex.com/trade/${s}`,
 };
 const JOIN_URLS = {
   binance:     c => `https://accounts.binance.com/register?ref=${c}`,

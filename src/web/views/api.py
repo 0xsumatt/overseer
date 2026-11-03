@@ -88,20 +88,6 @@ def _maybe_csv(rows: list[dict], filename: str) -> Response | None:
     )
 
 
-@bp.get("/series")
-def series():
-    rows = _store().series_list()
-    return jsonify([
-        {
-            "exchange": r["exchange"], "market_type": r["market_type"],
-            "symbol": r["symbol"], "interval": r["interval"],
-            "bars": r["bars"],
-            "first_ts": r["first_ts"].isoformat(), "last_ts": r["last_ts"].isoformat(),
-        }
-        for r in rows
-    ])
-
-
 @bp.get("/candles")
 def candles():
     q = request.args

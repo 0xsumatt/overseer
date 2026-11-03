@@ -12,6 +12,7 @@ class Exchange(StrEnum):
     BULK = "bulk"
     RISE = "rise"
     BULLET = "bullet"
+    QFEX = "qfex"
     HYLO = "hylo"
 
 

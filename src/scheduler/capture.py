@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 log = logging.getLogger("overseer.capture")
 
@@ -76,6 +76,11 @@ class SettlementCapture:
         self._venue_cache.clear()
         return len(cadence)
 
+    async def reload(self, storage) -> int:
+        """Rebuild from the newest settlement per market recent enough to anchor."""
+        since = datetime.now(timezone.utc) - timedelta(seconds=_STALE_AFTER_SECONDS)
+        return self.refresh(await storage.latest_funding_rows(since))
+
     async def run(self, storage, stop: asyncio.Event, *, every: float = 300.0) -> None:
         """Keep the schedule current until stopped.
 
@@ -85,7 +90,7 @@ class SettlementCapture:
         """
         while not stop.is_set():
             try:
-                count = self.refresh(await storage.latest_funding_rows())
+                count = await self.reload(storage)
                 log.info("capture schedule: %d symbol(s) across %d venue(s)",
                          count, len(self._by_venue))
             except Exception:

@@ -258,33 +258,6 @@ async def test_dex_market_payloads_publish_current_funding() -> None:
     [row] = await extended.fetch_liquidity(["BTC-USD"])
     assert_current(row, rate="0.0003", index="100.0", hours=1)
 
-    rise = RiseScraper(
-        RoutingHTTP(
-            {
-                "/v1/markets": {
-                    "data": {
-                        "markets": [
-                            {
-                                "market_id": "1",
-                                "config": {"name": "BTC/USDC", "unlocked": True},
-                                "active": True,
-                                "open_interest": "10",
-                                "quote_volume_24h": "1000",
-                                "mark_price": "100.5",
-                                "index_price": "100.0",
-                                "current_funding_rate": "-0.0004",
-                                "funding_interval": str(3_600_000_000_000),
-                                "next_funding_time": str(1_700_000_000_000_000_000),
-                            }
-                        ]
-                    }
-                }
-            }
-        )
-    )
-    [row] = await rise.fetch_liquidity(["BTC/USDC"])
-    assert_current(row, rate="-0.0004", index="100.0", hours=1)
-
     bulk = BulkScraper(
         RoutingHTTP(
             {
@@ -301,6 +274,32 @@ async def test_dex_market_payloads_publish_current_funding() -> None:
     [row] = await bulk.fetch_liquidity(["BTC-USD"])
     assert_current(row, rate="0.0005", index="100.0", hours=1, has_next=False)
 
+
+@pytest.mark.asyncio
+async def test_risex_current_funding_is_the_live_estimate_not_the_last_settlement(monkeypatch) -> None:
+    # RISEx's REST current_funding_rate repeats the last settlement.
+    rise = RiseScraper(RoutingHTTP({"/v1/markets": {"data": {"markets": [{
+        "market_id": "1", "config": {"name": "BTC/USDC", "unlocked": True}, "active": True,
+        "open_interest": "10", "quote_volume_24h": "1000", "mark_price": "100.5",
+        "index_price": "100.0", "current_funding_rate": "-0.0004",
+        "funding_interval": str(3_600_000_000_000),
+        "next_funding_time": str(1_700_000_000_000_000_000),
+    }]}}}))
+
+    async def estimate() -> dict:
+        return {"1": {"market_id": "1", "estimated_rate": "0.00002",
+                      "next_funding_time": str(1_700_000_000_000_000_000)}}
+
+    monkeypatch.setattr(rise, "_expected_funding", estimate)
+    [row] = await rise.fetch_liquidity(["BTC/USDC"])
+    assert_current(row, rate="0.00002", index="100.0", hours=1)
+
+    async def no_estimate() -> dict:
+        return {}
+
+    monkeypatch.setattr(rise, "_expected_funding", no_estimate)
+    [row] = await rise.fetch_liquidity(["BTC/USDC"])
+    assert row.current_funding_rate is None
 
 @pytest.mark.asyncio
 async def test_lighter_settled_funding_converts_percent_to_fraction() -> None:

@@ -31,6 +31,7 @@ const VENUE_COLORS = {
   extended:    '#008B76',   // branded deep green
   lighter:     '#BCAABA',   // silver-lilac
   bulk:        '#B4E04A',   // lime: clear of Lighter's silver and Binance's gold
+  qfex:        '#3D5AFE',   // indigo: cool like the rest, clear of Bybit's blue and Bullet's violet
 };
 
 /* Fixed iteration order. Never sort by value, count, or API key order — that

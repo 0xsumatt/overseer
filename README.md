@@ -1,7 +1,8 @@
 # overseer
 
 Market-data collection + dashboard for crypto venues (Binance, Bybit,
-Hyperliquid, Lighter, Extended). Two independent processes sharing one
+Hyperliquid, Lighter, Extended, BULK, RISEx, Bullet) and QFEX, which lists
+traditional assets only. Two independent processes sharing one
 TimescaleDB:
 
 * **scheduler** — async ingest: OHLCV bars, settled funding, OI/volume and
@@ -48,7 +49,7 @@ registry; historical chart series become available as collection writes data.
 labels. `[hyperliquid_deployers.*]` labels HIP-3 namespaces such as TradeXYZ
 without treating them as separate physical exchanges. Every venue has one
 display name, used on every page: `VENUE_NAMES` in `src/core/symbols.py`
-(Binance, Bybit, Hyperliquid, Lighter, Extended, BULK, RISEx, Bullet), plus
+(Binance, Bybit, Hyperliquid, Lighter, Extended, BULK, RISEx, Bullet, QFEX), plus
 the `hip3:` prefix and configured deployer name for HIP-3 markets, e.g.
 `hip3:tradexyz` and `hip3:entropy`. Pages receive the map as `VENUE_LABELS`
 (`labelFor()` in `venues.js`). A fee schedule's product name, such as
@@ -77,13 +78,44 @@ collected Bullet before that conversion needs
 `migrations/014_bullet_funding_basis.sql` once, applied with the scheduler
 stopped, before it restarts; applying it again changes nothing.
 
+A current rate is the venue's estimate for its next settlement. RISEx's REST
+`current_funding_rate` repeats the last settlement, which its trading page shows
+only until live data arrives, so RISEx's comes from the `expected_funding_rate`
+channel of its public WebSocket (`wss://api.rise.trade/ws/`), read once per
+liquidity poll. Without an update within 15 seconds no current rate is stored,
+and RISEx shows its settled rate, labelled as such.
+
+QFEX (`qfex`, <https://docs.qfex.com/api-reference/rest/market-data>) lists
+only equities, indices, commodities and FX, so it is mapped to the twelve
+traditional assets above; its other markets need an `[assets.*]` entry each.
+Funding settles hourly with no interest component and is exactly zero outside
+each market's trading hours (<https://docs.qfex.com/qfex/funding>). Rates are
+fractions per hour, stored as published. The current rate is the predicted
+`next_funding_rate` from `/md/contracts`, the live rate QFEX's trading page shows
+for the settlement at the end of the hour; its own annualised figure counts only
+funding hours (120 a week), so it reads about 1.4× below our APR, which assumes
+the rate holds all 8,760 hours as for every venue. Open interest is valued at the
+index, as QFEX values it, because the REST API publishes no mark price. Despite
+its name, the funding history's `windowStart` is when each rate was paid, and a
+settlement is stored once five minutes old because the history forward-fills
+gaps and stored settlements are never rewritten. Every request pins
+`api_version=2026-10-30`: read
+<https://docs.qfex.com/websocket/changelog> before raising it in
+`data_collection/exchanges/qfex.py`. Each top-of-book poll downloads the whole
+order book (60–100 KB), about 1.4 GB a day for twelve markets at the default 60
+seconds; `orderbook_poll_seconds` cuts that. Venue volume is the last complete
+UTC day from its DefiLlama metrics endpoint.
+
 The Funding page fetches rates when it opens and every five minutes. Its asset
 filters, search, watchlist and rate mode re-render those rates without asking
 the server again, and the history controls use the 30-second response cache
 like the other public analytics. The table lists markets that reported within
 the last day; the 24h open-interest change compares with the newest snapshot
 from the hour before the 24-hour mark, and is unknown without one. Both bounds
-keep its query to the newest data rather than every snapshot ever stored.
+keep its query to the newest data rather than every snapshot ever stored. For
+the same reason the dashboard and Basis pickers list series with a bar in the
+last day, and the Wallets page's asset list and fill history count the last
+seven days of fills, its longest chart window.
 
 ## Run
 
@@ -922,7 +954,10 @@ Gunicorn listens only on `127.0.0.1:8000`.
 
    Nginx serves `/static/` directly and proxies every other request to
    Gunicorn. Port 8000 stays private; only ports 80 and 443 belong in the
-   public firewall.
+   public firewall. It gzips JSON, CSS, JavaScript and SVG (`/api/funding`
+   shrinks from 86 KB to 11 KB) and lets browsers keep versioned static files
+   (`?v=…`) for a year and unversioned ones for an hour: change a file's `v=`
+   tag in its template whenever the file changes.
 
 5. Before exposing login, replace `server_name _;` in the installed Nginx file
    with the real hostname and install TLS:
@@ -942,7 +977,7 @@ Gunicorn listens only on `127.0.0.1:8000`.
    ```sh
    sudo systemctl status overseer-web nginx
    sudo systemctl reload overseer-web     # graceful Gunicorn worker replacement
-   journalctl -u overseer-web -f
+   journalctl -u overseer-web -f          # each request line ends in its duration, e.g. 42ms
    sudo nginx -t                          # always run before reloading Nginx
    ```
 
@@ -987,6 +1022,15 @@ Notes:
   for the configured confirmation window. Both legs must have known next
   settlements within one minute of each other; only then are live BBOs fetched
   and an alert sent. A daily digest posts at 08:00 UTC.
+* Funding units: every five minutes each venue's resting crypto funding rate,
+  the exact rate at least three of its quiet markets share (10.95% a year at
+  0.01% per eight hours; Extended rests at 11.39% and Lighter at 10.51%), is
+  compared with the other venues'. One a whole factor away (2× or more, either
+  way) posts a Discord alert naming the venue and whether its current or
+  settled rates are affected, the way Bullet's eight-hour rates stored as
+  hourly would have; another posts when it agrees again. Traditional markets
+  rest on lower, venue-specific rates and venues without a shared resting rate
+  (RISEx) are not judged (`core/funding_units.py`).
 * `job_runs` table: per-job heartbeat (`last_status`, `last_error`,
   `last_success_at`) — `SELECT * FROM job_runs WHERE last_status='fail'`.
 * Freshness (catches jobs that "succeed" while a venue quietly returns

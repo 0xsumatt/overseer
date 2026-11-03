@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from datetime import UTC, datetime, timedelta
 
 from flask import (Blueprint, current_app, flash, redirect, render_template,
@@ -18,6 +19,9 @@ from data_collection.exchanges.registry import REGISTRY
 from web.views.execution import execution_assets
 
 bp = Blueprint("pages", __name__)
+
+# Wallet fill counts and history cover the longest flow-chart window.
+FILL_HISTORY_DAYS = 7
 
 
 def _store():
@@ -84,13 +88,13 @@ def dashboard():
     # under one entry; unmapped symbols fall back to their raw name.
     registry = current_app.extensions["symbols"]
     series = [dict(s, asset=registry.asset_for(s["symbol"]) or s["symbol"])
-              for s in _store().series_list()]
+              for s in _store().chart_series()]
     return render_template("dashboard.html", series=series)
 
 
 @bp.get("/basis")
 def basis():
-    return render_template("basis.html", series=_store().series_list())
+    return render_template("basis.html", series=_store().chart_series())
 
 
 @bp.get("/funding")
@@ -109,12 +113,16 @@ def flow():
 @bp.get("/wallets")
 def wallets():
     tracked = current_app.extensions.get("tracked_wallets", [])
-    store = _store()
-    symbols = store.wallet_symbols([w["address"] for w in tracked]) if tracked else []
-    summaries = [(w["label"], w["venue"], store.fills_summary(w["address"]))
+    since = datetime.now(UTC) - timedelta(days=FILL_HISTORY_DAYS)
+    rows = _store().wallet_fills([w["address"] for w in tracked], since) if tracked else []
+    fills = Counter()
+    for row in rows:
+        fills[row["symbol"]] += row["fills"]
+    symbols = [{"symbol": symbol, "fills": count} for symbol, count in fills.most_common()]
+    summaries = [(w["label"], w["venue"], [r for r in rows if r["wallet_address"] == w["address"]])
                  for w in tracked]
-    return render_template("wallets.html", wallets=tracked,
-                           symbols=symbols, summaries=summaries)
+    return render_template("wallets.html", wallets=tracked, symbols=symbols,
+                           summaries=summaries, fill_days=FILL_HISTORY_DAYS)
 
 
 @bp.get("/positions")
