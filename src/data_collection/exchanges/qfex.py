@@ -50,7 +50,9 @@ class QfexScraper(BaseExchangeScraper):
     def _build_http(self) -> HttpClient:
         return HttpClient(
             limiter=RateLimiter.per_minute(120, burst=10),
-            default_headers={"User-Agent": "overseer/0.1"},
+            # Each top-of-book poll downloads the whole book; gzip makes it about
+            # 5× smaller, and aiosonic decompresses responses but never asks.
+            default_headers={"User-Agent": "overseer/0.1", "Accept-Encoding": "gzip"},
         )
 
     def to_symbol(self, native: str) -> str:

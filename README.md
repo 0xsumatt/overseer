@@ -86,8 +86,8 @@ liquidity poll. Without an update within 15 seconds no current rate is stored,
 and RISEx shows its settled rate, labelled as such.
 
 QFEX (`qfex`, <https://docs.qfex.com/api-reference/rest/market-data>) lists
-only equities, indices, commodities and FX, so it is mapped to the twelve
-traditional assets above; its other markets need an `[assets.*]` entry each.
+only equities, indices, commodities and FX, so it is mapped only to the
+traditional assets in `symbols.toml`; its other markets need an `[assets.*]` entry each.
 Funding settles hourly with no interest component and is exactly zero outside
 each market's trading hours (<https://docs.qfex.com/qfex/funding>). Rates are
 fractions per hour, stored as published. The current rate is the predicted
@@ -101,9 +101,12 @@ settlement is stored once five minutes old because the history forward-fills
 gaps and stored settlements are never rewritten. Every request pins
 `api_version=2026-10-30`: read
 <https://docs.qfex.com/websocket/changelog> before raising it in
-`data_collection/exchanges/qfex.py`. Each top-of-book poll downloads the whole
-order book (60–100 KB), about 1.4 GB a day for twelve markets at the default 60
-seconds; `orderbook_poll_seconds` cuts that. Venue volume is the last complete
+`data_collection/exchanges/qfex.py`. QFEX's REST API has no top-of-book
+endpoint, so each poll downloads the whole order book, requested gzipped (about
+5× smaller). The fifteen markets measured about 90 MB a day at the default 60
+seconds, nearly two-thirds of it CRCL's deep book (40 KB a poll gzipped), and
+only the best bid and ask are stored; `orderbook_poll_seconds` cuts the traffic.
+Venue volume is the last complete
 UTC day from its DefiLlama metrics endpoint.
 
 The Funding page fetches rates when it opens and every five minutes. Its asset

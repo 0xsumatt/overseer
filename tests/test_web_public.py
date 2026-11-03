@@ -98,10 +98,11 @@ def test_funding_api_exposes_rwa_taxonomy_and_deployer_identity(client) -> None:
 
     assert response.status_code == 200
     payload = response.get_json()
+    registry = client.application.extensions["symbols"]
     assert {asset for asset, rows in payload.items()
             if rows[0]["asset_family"] == "traditional"} == {
-        "XAU", "XAG", "WTI", "BRENT", "SP500", "NDX",
-        "NVDA", "AMD", "META", "GOOGL", "MSFT", "AAPL",
+        asset for asset in registry.assets()
+        if registry.metadata(asset).family == "traditional"
     }
     xau = payload["XAU"]
     assert {row["asset_class"] for row in xau} == {"commodity"}

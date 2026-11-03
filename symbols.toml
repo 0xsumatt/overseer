@@ -249,6 +249,7 @@ bybit_perp = "NVDA/USDT"
 lighter = "NVDA"
 extended = "NVDA_24_5-USD"
 rise = "NVDA/USDC"
+bullet = "NVDA-USD"
 qfex = "NVDA-USD"
 bulk = "NVDA-USD"
 
@@ -327,6 +328,55 @@ family = "traditional"
 asset_class = "equity"
 group = "mega_cap_technology"
 label = "Apple"
+
+[assets.MSTR]
+binance_perp = "MSTR/USDT"
+hyperliquid_xyz = "xyz:MSTR"
+bybit_perp = "MSTR/USDT"
+lighter = "MSTR"
+extended = "MSTR_24_5-USD"
+rise = "MSTR/USDC"
+qfex = "MSTR-USD"
+bulk = "MSTR-USD"
+
+[asset_metadata.MSTR]
+family = "traditional"
+asset_class = "equity"
+group = "crypto_equities"
+label = "Strategy"
+
+[assets.MU]
+binance_perp = "MU/USDT"
+hyperliquid_xyz = "xyz:MU"
+bybit_perp = "MU/USDT"
+lighter = "MU"
+extended = "MU_24_5-USD"
+rise = "MU/USDC"
+bullet = "MU-USD"
+qfex = "MU-USD"
+bulk = "MU-USD"
+
+[asset_metadata.MU]
+family = "traditional"
+asset_class = "equity"
+group = "mega_cap_technology"
+label = "Micron"
+
+[assets.CRCL]
+binance_perp = "CRCL/USDT"
+hyperliquid_xyz = "xyz:CRCL"
+bybit_perp = "CRCL/USDT"
+lighter = "CRCL"
+extended = "CRCL_24_5-USD"
+rise = "CRCL/USDC"
+qfex = "CRCL-USD"
+bulk = "CRCL-USD"
+
+[asset_metadata.CRCL]
+family = "traditional"
+asset_class = "equity"
+group = "crypto_equities"
+label = "Circle"
 
 
 
