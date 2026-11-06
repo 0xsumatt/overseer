@@ -18,8 +18,13 @@
   .watchlist-toggle[aria-pressed="true"] .star-outline { display: none; }
   .watchlist-toggle[aria-pressed="true"] .star-filled { display: block; }
 
-  /* ---- markets venue selector: chips wrap; swatches full until a choice -- */
-  .funding-venues { @apply mb-6; }
+  /* ---- markets venue selector and layout: one row, layout right-aligned;
+     venue swatches stay full until a choice is made ------------------------ */
+  .funding-table-controls { @apply mb-6 flex flex-wrap items-end gap-x-6 gap-y-3; }
+  /* A real basis, so on narrow screens the layout wraps below the venues
+     rather than squeezing them into one chip per line. */
+  .funding-venues { flex: 1 1 24rem; @apply min-w-0; }
+  .funding-layout { @apply ml-auto shrink-0; }
   .funding-venue-chips { @apply flex flex-wrap items-center gap-1.5; }
   .funding-venue-chips:not([data-selecting]) .chip .chip-swatch { @apply opacity-100; }
 

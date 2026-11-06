@@ -261,7 +261,7 @@ const storedFundingFilters = Overseer.filterState('funding');
 const fundingUrl = new URLSearchParams(window.location.search);
 const fundingFilterKeys = new Set([
   'search', 'view', 'family', 'assetClass', 'asset', 'hhours', 'hbucket',
-  'smoothing', 'venues', 'rate', 'compare',
+  'smoothing', 'venues', 'rate', 'compare', 'layout',
 ]);
 const hasFundingUrlState = [...fundingUrl.keys()].some(key => fundingFilterKeys.has(key));
 const fundingFilters = Object.freeze({
@@ -578,17 +578,33 @@ function marketsEmptyCopy() {
     : 'No assets match these filters. Clear the search or choose another asset group.';
 }
 
-// Chosen venues, up to MATRIX_MAX_VENUES, show as columns: the full table,
-// then a compact one. Otherwise, or when even the compact table is wider than
-// the card, each asset is a summary row whose width does not depend on the
-// number of venues. Measured rather than estimated, so it holds for any label
-// length.
-const MATRIX_MAX_VENUES = 6;
+// Columns: a column per (chosen) venue, to read rates across venues at a
+// glance. Summary: one row per asset with every venue on one scale, the same
+// width for any number of venues. Columns that cannot fit even when compact
+// become summary rows, so the table never scrolls sideways. Measured rather
+// than estimated, so it holds for any number of venues and label length.
+let marketsLayout = fundingFilters.get('layout') === 'summary' ? 'summary' : 'columns';
+const layoutButtons = [...document.querySelectorAll('[data-layout]')];
+const layoutNote = document.getElementById('layout-note');
+
+function syncLayoutButtons() {
+  layoutButtons.forEach(button =>
+    button.setAttribute('aria-pressed', String(button.dataset.layout === marketsLayout)));
+}
+layoutButtons.forEach(button => button.addEventListener('click', () => {
+  marketsLayout = button.dataset.layout;
+  fundingFilters.set('layout', marketsLayout === 'columns' ? null : marketsLayout);
+  syncLayoutButtons();
+  renderMarkets();
+}));
+syncLayoutButtons();
+
 function renderMarkets() {
   if (!marketsModel) return;
   marketsWidth = marketsScroll.clientWidth;
   const { coins, venues } = marketsModel;
   marketsEmpty.hidden = coins.length > 0;
+  layoutNote.hidden = true;
   if (!coins.length) {
     marketsTable.hidden = true;
     marketsSummary.hidden = true;
@@ -598,7 +614,7 @@ function renderMarkets() {
   }
   const body = document.getElementById('fbody');
   let fits = false;
-  if (marketsModel.comparing && venues.length <= MATRIX_MAX_VENUES) {
+  if (marketsLayout === 'columns') {
     document.getElementById('fhead').innerHTML = marketTableHead(venues);
     marketsTable.hidden = false;
     marketsSummary.hidden = true;
@@ -615,6 +631,7 @@ function renderMarkets() {
   if (fits) {
     marketsSummary.replaceChildren();
   } else {
+    layoutNote.hidden = marketsLayout !== 'columns';
     marketsTable.hidden = true;
     body.replaceChildren();
     marketsSummary.innerHTML = marketSummary(marketsModel);

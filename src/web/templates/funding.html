@@ -88,9 +88,18 @@
 {{ ui.page_status() }}
 
 <div id="view-table" role="tabpanel" aria-labelledby="tab-table">
-  <div id="venue-compare-field" class="field funding-venues hidden">
-    <span id="venue-compare-label" class="field-label">Venues</span>
-    <div id="venue-compare" class="funding-venue-chips" role="group" aria-labelledby="venue-compare-label"></div>
+  <div class="funding-table-controls">
+    <div id="venue-compare-field" class="field funding-venues hidden">
+      <span id="venue-compare-label" class="field-label">Venues</span>
+      <div id="venue-compare" class="funding-venue-chips" role="group" aria-labelledby="venue-compare-label"></div>
+    </div>
+    <div class="field funding-layout">
+      <span id="layout-label" class="field-label">Layout</span>
+      <div class="segmented" role="group" aria-labelledby="layout-label">
+        <button type="button" data-layout="columns" aria-pressed="true">Columns</button>
+        <button type="button" data-layout="summary" aria-pressed="false">Summary</button>
+      </div>
+    </div>
   </div>
   <section id="market-pulse" class="mb-6" aria-labelledby="market-pulse-title">
     <h2 id="market-pulse-title" class="section-label">Market pulse</h2>
@@ -99,10 +108,11 @@
   <section aria-labelledby="markets-title">
     <h2 id="markets-title" class="section-label">Markets
       <span id="market-count" class="section-count tabular-nums">0</span></h2>
-    {# Never scrolls sideways: up to six chosen venues show as columns when they
-       fit; otherwise each asset is one summary row whose width does not depend
-       on the number of venues. Rows scroll inside the card, whose height is
-       fitted to the screen. #}
+    {# Never scrolls sideways: in the Columns layout each venue is a column,
+       compacting when tight and falling back to summary rows when even that
+       cannot fit; the Summary layout is one row per asset whatever the number
+       of venues. Rows scroll inside the card, whose height is fitted to the
+       screen. #}
     <div id="fcard" class="table-card funding-markets">
       <div class="meta-line border-b border-line-soft mx-3 py-2">
         <span id="refresh-status" class="inline-flex items-center gap-1.5">
@@ -112,15 +122,16 @@
         <span><span class="text-gain">+</span> long pays short</span>
         <span><span class="text-loss">−</span> short pays long</span>
         <span id="table-help">Sorted by widest APR spread</span>
+        <span id="layout-note" class="text-phosphor" hidden>Too narrow for columns · showing summary</span>
       </div>
       <div id="fmarkets" class="funding-markets-scroll scroll-thin scroll-fade">
-        <table class="data-table" id="ftable" hidden>
+        <table class="data-table" id="ftable">
           <thead>
             <tr id="fhead"><th scope="col" class="coin-col">Asset</th></tr>
           </thead>
           <tbody id="fbody"></tbody>
         </table>
-        <div id="fsummary" class="funding-summary" role="list" aria-label="Funding rates by asset"></div>
+        <div id="fsummary" class="funding-summary" role="list" aria-label="Funding rates by asset" hidden></div>
         <p id="fempty" class="empty-cell" hidden></p>
       </div>
     </div>
@@ -205,16 +216,17 @@
       its own interval, so the table compares annualised rates by default.</p>
     <p>Annualised rates assume the current rate holds for a year. Funding changes every period, so they are
       not a promised return.</p>
-    <p>Markets are sorted by the widest APR spread between venues, so dislocations surface first. Each row's
-      strip puts every venue's annualised rate on one scale from −20% to +60% and highlights the spread between
-      the highest and lowest; a venue beyond the scale sits at its end as a square. Short at and Long at name the
-      highest and lowest venue, and selecting an asset lists every venue.</p>
-    <p>Choose up to six venues above the table to compare them as columns instead. Cell shading deepens with the
-      size of the annualised rate, and the strongest and weakest venue in each row are set in bold. Switching to
-      rate per period keeps each venue's own interval; the strip and the sort order still follow APR.</p>
-    <p>Hover or focus a rate or a dot for liquidity and settlement details; select it to open that market on the
-      venue. The table never scrolls sideways: chosen columns drop to one decimal when tight, and become summary
-      rows when even that cannot fit.</p>
+    <p>Markets are sorted by the widest APR spread between venues, so dislocations surface first. The Columns
+      layout gives every venue a column: cell shading deepens with the size of the annualised rate, and the
+      strongest and weakest venue in each row are set in bold. When the columns cannot fit, even at one decimal,
+      the table shows summary rows instead, so it never scrolls sideways.</p>
+    <p>The Summary layout gives each asset one row: a strip puts every venue's annualised rate on one scale from
+      −20% to +60% and highlights the spread between the highest and lowest (a venue beyond the scale sits at its
+      end as a square), Short at and Long at name the highest and lowest venue, and selecting the asset lists
+      every venue.</p>
+    <p>Choose venues above the table to compare only those, in either layout. Switching to rate per period keeps
+      each venue's own interval; the strip and the sort order still follow APR. Hover or focus a rate or a dot for
+      liquidity and settlement details; select it to open that market on the venue.</p>
     <p>History lines are smoothed per venue with an EWMA (α = 0.35) unless raw is selected. The legend shows each
       venue's latest raw settlement and total open interest, or their values at the hovered time (UTC). Stacked
       bars show open interest by venue. Select a venue in the legend to hide or show it.</p>
