@@ -18,6 +18,11 @@
   .watchlist-toggle[aria-pressed="true"] .star-outline { display: none; }
   .watchlist-toggle[aria-pressed="true"] .star-filled { display: block; }
 
+  /* ---- markets venue selector: chips wrap; swatches full until a choice -- */
+  .funding-venues { @apply mb-6; }
+  .funding-venue-chips { @apply flex flex-wrap items-center gap-1.5; }
+  .funding-venue-chips:not([data-selecting]) .chip .chip-swatch { @apply opacity-100; }
+
   /* ---- market pulse: compact tiles on phones ---------------------------- */
   .funding-pulse > .kpi { @apply px-3 py-2 sm:px-4 sm:py-3; }
 

@@ -13,6 +13,7 @@ class Exchange(StrEnum):
     RISE = "rise"
     BULLET = "bullet"
     QFEX = "qfex"
+    PHOENIX = "phoenix"
     HYLO = "hylo"
 
 

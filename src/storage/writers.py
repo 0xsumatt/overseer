@@ -10,7 +10,7 @@ from core.depth import DepthSnapshot
 from core.enums import Exchange, MarketType, Timeframe
 from core.execution_history import ExecutionSample
 from core.models import (OHLCV, FundingRate, LeverageStats, LiquiditySnapshot,
-                         OrderBookSnapshot, Trade, TradeFlow, VenueVolume)
+                         OrderBookSnapshot, Trade, TradeFlow, VenueTvl, VenueVolume)
 
 # (db column, postgres array cast, value extractor)
 _Col = tuple[str, str, Callable[[Any], Any]]
@@ -91,6 +91,13 @@ _VENUE_VOL_COLS: tuple[_Col, ...] = (
     ("volume_perp",  "numeric",     lambda r: r.volume_perp),
 )
 _VENUE_VOL_CONFLICT = ("exchange", "ts")
+
+_VENUE_TVL_COLS: tuple[_Col, ...] = (
+    ("exchange", "text",        lambda r: r.exchange.value),
+    ("ts",       "timestamptz", lambda r: r.ts),
+    ("tvl_usd",  "numeric",     lambda r: r.tvl_usd),
+)
+_VENUE_TVL_CONFLICT = ("exchange", "ts")
 
 _LEV_STATS_COLS: tuple[_Col, ...] = (
     ("exchange",    "text",        lambda r: r.exchange.value),
@@ -284,6 +291,19 @@ class Storage:
             "venue_volume", _VENUE_VOL_COLS, _VENUE_VOL_CONFLICT, records
         )
 
+    async def write_venue_tvl(self, records: Sequence[VenueTvl]) -> int:
+        return await self._bulk_upsert(
+            "venue_tvl", _VENUE_TVL_COLS, _VENUE_TVL_CONFLICT, records
+        )
+
+    async def venue_tvl_since(self, since: datetime) -> list[asyncpg.Record]:
+        """Every venue TVL reading since `since`, oldest first per exchange."""
+        return await self.pool.fetch(
+            "SELECT exchange, ts, tvl_usd FROM venue_tvl WHERE ts >= $1 "
+            "ORDER BY exchange, ts",
+            since,
+        )
+
     async def write_execution_samples(self, records: Sequence[ExecutionSample]) -> int:
         return await self._bulk_upsert(
             "execution_samples", _EXEC_SAMPLE_COLS, _EXEC_SAMPLE_CONFLICT, records
@@ -347,12 +367,13 @@ class Storage:
         )
 
     async def latest_current_funding_rows(self, since: datetime) -> list[asyncpg.Record]:
-        """Newest venue-published funding rate per market since `since`, for
-        live alerts."""
+        """Newest venue-published funding rate per market since `since`, with
+        its open interest in USD, for live alerts."""
         return await self.pool.fetch(
             "SELECT DISTINCT ON (exchange, symbol) "
             "exchange, symbol, ts, current_funding_rate AS rate, "
-            "funding_interval_hours AS interval_hours, next_funding_at "
+            "funding_interval_hours AS interval_hours, next_funding_at, "
+            "open_interest * mark_price AS oi_notional "
             "FROM liquidity "
             "WHERE ts >= $1 "
             "AND current_funding_rate IS NOT NULL "

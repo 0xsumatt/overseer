@@ -8,13 +8,14 @@ from decimal import Decimal
 from itertools import combinations
 
 from core.depth import depth_snapshots
-from core.enums import MarketType, QuoteCurrency
+from core.enums import Exchange, MarketType, QuoteCurrency
 from core.execution_fees import execution_listings
 from core.execution_history import history_samples
 from core.funding_units import resting_rates
-from core.models import OrderBookSnapshot, TopOfBook
+from core.models import OrderBookSnapshot, TopOfBook, VenueTvl
 from core.symbols import VENUE_NAMES, SymbolRegistry
 from data_collection.base import BaseExchangeScraper, Capability
+from data_collection.defillama import DEFILLAMA_TVL, DefiLlamaTvl
 from scheduler.notify import DiscordNotifier, trade_link
 from scheduler.targets import (
     FillsTarget,
@@ -184,19 +185,18 @@ async def run_liquidity(scraper, storage, notifier, state, target: LiquidityTarg
     await _record_and_alert(outcome, storage, notifier, state)
 
 
-async def _alert_venue_volume_errors(
-    scrapers: dict, errors: dict[str, str],
+async def _alert_venue_errors(
+    prefix: str, venues: list[str], errors: dict[str, str],
     notifier: DiscordNotifier, state: dict[str, str],
 ) -> None:
-    """Per-venue edge-triggered alerts for the sweep, independent of the
+    """Per-venue edge-triggered alerts for a sweep, independent of the
     aggregate job status. Without this, one venue erroring inside an otherwise-
     successful sweep only ever shows up as a 'partial:' note buried in
     job_runs — never a Discord ping — so a broken venue could go unnoticed
     indefinitely. Reuses notifier.failure/recovery (same shape as the polling
     job alerts) with a synthetic job_id so it reads consistently in Discord."""
-    candidates = [v for v, s in scrapers.items() if Capability.VENUE_VOLUME in s.capabilities]
-    for venue in candidates:
-        key = f"venue_volume:{venue}"
+    for venue in venues:
+        key = f"{prefix}:{venue}"
         prev = state.get(key, "ok")
         if venue in errors and prev != "fail":
             state[key] = "fail"
@@ -233,7 +233,11 @@ async def scrape_venue_volume(
             if v is not None:
                 agg[side] = (agg[side] or 0) + v
 
-    await _alert_venue_volume_errors(scrapers, errors, notifier, state)
+    await _alert_venue_errors(
+        "venue_volume",
+        [v for v, s in scrapers.items() if Capability.VENUE_VOLUME in s.capabilities],
+        errors, notifier, state,
+    )
 
     records = [
         VenueVolume(
@@ -260,6 +264,85 @@ async def scrape_venue_volume(
 async def run_venue_volume(scrapers: dict, storage, notifier, state) -> None:
     outcome = await scrape_venue_volume(scrapers, storage, notifier, state)
     await _record_and_alert(outcome, storage, notifier, state)
+
+
+async def scrape_tvl(
+    client: DefiLlamaTvl, exchanges: list[Exchange], storage: Storage,
+    notifier: DiscordNotifier, state: dict[str, str],
+) -> JobOutcome:
+    """One DefiLlama reading per venue. An empty or zero reading means
+    DefiLlama has no value, not that a venue emptied, so it is not stored."""
+    ran_at = datetime.now(timezone.utc)
+    records: list[VenueTvl] = []
+    errors: dict[str, str] = {}
+    for exchange in exchanges:
+        try:
+            tvl = await client.fetch(DEFILLAMA_TVL[exchange])
+        except Exception as exc:
+            errors[exchange.value] = repr(exc)
+            continue
+        if tvl is None or tvl <= 0:
+            errors[exchange.value] = f"DefiLlama published no TVL ({tvl})"
+            continue
+        records.append(VenueTvl(exchange, ran_at, tvl))
+    # Every venue failing together is DefiLlama itself: the job's alert covers it.
+    if records:
+        await _alert_venue_errors("tvl", [e.value for e in exchanges], errors, notifier, state)
+    try:
+        new_rows = await storage.write_venue_tvl(records) if records else 0
+    except Exception as exc:
+        return JobOutcome("tvl:defillama", "fail", len(records), 0, repr(exc), ran_at)
+    detail = "; ".join(f"{venue}: {error}" for venue, error in errors.items())
+    if errors and not records:
+        return JobOutcome("tvl:defillama", "fail", 0, 0, detail, ran_at)
+    return JobOutcome("tvl:defillama", "ok", len(records), new_rows,
+                      f"partial: {detail}" if detail else None, ran_at)
+
+
+async def check_tvl_drops(
+    storage: Storage, notifier: DiscordNotifier, state: dict[str, str],
+    drop_pct: float, window_hours: float,
+) -> None:
+    """Alert once when a venue's TVL falls `drop_pct` below its high of the
+    trailing `window_hours`: a fast fall can mean an exploit or a run. The
+    alert clears once TVL is within half that of the window's high again."""
+    now = datetime.now(timezone.utc)
+    try:
+        rows = await storage.venue_tvl_since(now - timedelta(hours=window_hours))
+    except Exception:
+        log.exception("TVL drop check failed")
+        return
+    readings: dict[str, list] = {}
+    for row in rows:
+        readings.setdefault(row["exchange"], []).append(row)
+    for exchange, series in sorted(readings.items()):
+        high, latest = max(series, key=lambda row: row["tvl_usd"]), series[-1]
+        drop = float(1 - latest["tvl_usd"] / high["tvl_usd"]) * 100
+        key = f"tvl-drop:{exchange}"
+        name = VENUE_NAMES.get(exchange, exchange)
+        if drop >= drop_pct and state.get(key) != "falling":
+            state[key] = "falling"
+            slug = DEFILLAMA_TVL.get(Exchange(exchange))
+            await notifier.digest(
+                f"🚨 **{name}** TVL down {drop:.1f}% from its {window_hours:g}h high: "
+                f"{_fmt_usd(float(high['tvl_usd']))} at {high['ts']:%H:%M} → "
+                f"{_fmt_usd(float(latest['tvl_usd']))} at {latest['ts']:%H:%M} UTC"
+                + (f" · <https://defillama.com/protocol/{slug}>" if slug else "")
+            )
+        elif drop < drop_pct / 2 and state.get(key) == "falling":
+            state[key] = "ok"
+            await notifier.digest(
+                f"↩️ **{name}** TVL steady again: {drop:.1f}% below its {window_hours:g}h high"
+            )
+
+
+async def run_tvl(
+    client: DefiLlamaTvl, exchanges: list[Exchange], storage, notifier, state,
+    drop_pct: float, window_hours: float,
+) -> None:
+    outcome = await scrape_tvl(client, exchanges, storage, notifier, state)
+    await _record_and_alert(outcome, storage, notifier, state)
+    await check_tvl_drops(storage, notifier, state, drop_pct, window_hours)
 
 
 async def capture_execution_history(
@@ -314,6 +397,15 @@ def _fmt_size(value: Decimal) -> str:
     return f"{value:.6f}"
 
 
+def _fmt_usd(value: float) -> str:
+    """$129.34B, $580.1M, $500k: two, one and no decimals, trailing zeros dropped."""
+    for unit, scale, places in (("B", 1e9, 2), ("M", 1e6, 1), ("k", 1e3, 0)):
+        if value >= scale:
+            text = f"{value / scale:.{places}f}"
+            return f"${text.rstrip('0').rstrip('.') if '.' in text else text}{unit}"
+    return f"${value:.0f}"
+
+
 @dataclass(frozen=True)
 class FundingLeg:
     exchange: str
@@ -322,6 +414,7 @@ class FundingLeg:
     apr: float
     ts: datetime
     next_funding_at: datetime | None
+    oi_notional: float
 
 
 @dataclass(frozen=True)
@@ -597,11 +690,14 @@ async def check_dislocations(
     state: dict[str, str],
     registry: SymbolRegistry,
     threshold_apr: float,
+    min_oi_usd: float,
     scrapers: dict[str, BaseExchangeScraper],
     fx_cache: UsdcUsdtQuoteCache,
     confirmation: DislocationConfirmation,
 ) -> None:
-    """Alert only after current funding stays wide across fresh snapshots."""
+    """Alert only after current funding stays wide across fresh snapshots,
+    between markets holding at least `min_oi_usd` of open interest: a wide
+    rate on a thin book cannot take size."""
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(minutes=30)
     try:
@@ -625,20 +721,26 @@ async def check_dislocations(
                 apr,
                 row["ts"],
                 row["next_funding_at"],
+                float(row["oi_notional"]),
             )
         )
 
     pending_assets: set[str] = set()
     for asset, venues in sorted(legs.items()):
         key = f"dislocation:{asset}"
-        aligned = _best_aligned_dislocation(venues, now)
+        liquid = [leg for leg in venues if leg.oi_notional >= min_oi_usd]
+        aligned = _best_aligned_dislocation(liquid, now)
         if aligned is None:
             confirmation.reset(asset)
             if state.get(key) == "wide":
                 state[key] = "ok"
+                reason = (
+                    f"a leg's open interest fell below {_fmt_usd(min_oi_usd)}"
+                    if _best_aligned_dislocation(venues, now) is not None
+                    else "next settlements no longer align"
+                )
                 await notifier.digest(
-                    f"↩️ **{asset}** funding opportunity ended: "
-                    "next settlements no longer align"
+                    f"↩️ **{asset}** funding opportunity ended: {reason}"
                 )
             continue
         hi, lo, spread = aligned

@@ -13,6 +13,7 @@ from data_collection.exchanges.extended import ExtendedScraper
 from data_collection.exchanges.hylo import HyloScraper
 from data_collection.exchanges.hyperliquid import HyperliquidDeployerScraper, HyperliquidScraper
 from data_collection.exchanges.lighter import LighterScraper
+from data_collection.exchanges.phoenix import PhoenixScraper
 from data_collection.exchanges.qfex import QfexScraper
 from data_collection.exchanges.risex import RiseScraper
 
@@ -30,6 +31,7 @@ REGISTRY: dict[str, type[BaseExchangeScraper]] = {
     "rise": RiseScraper,          
     "bullet": BulletScraper,      
     "qfex": QfexScraper,
+    "phoenix": PhoenixScraper,
     "hylo": HyloScraper,
 }
 

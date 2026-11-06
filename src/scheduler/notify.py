@@ -20,6 +20,7 @@ _TRADE_URLS: dict[str, Callable[[str], str]] = {
     "rise":        lambda s: f"https://www.rise.trade/en/trade/{s.split('/')[0]}",
     "bullet":      lambda s: f"https://app.bullet.xyz/trade/{s}",
     "qfex":        lambda s: f"https://www.qfex.com/trade/{s}",
+    "phoenix":     lambda s: f"https://www.phoenix.trade/markets/{s}",
 }
 
 

@@ -30,14 +30,21 @@ file; export the vars or use `uv run --env-file .env`):
 | var | purpose |
 |---|---|
 | `DATABASE_URL` | Timescale DSN, both processes |
-| `DISCORD_WEBHOOK_URL` | job health, current-funding dislocations with executable BBOs, and daily digest (optional) |
+| `DISCORD_WEBHOOK_URL` | job health, current-funding dislocations with executable BBOs, venue TVL drops, and daily digest (optional) |
 | `FLASK_SECRET_KEY` | web session signing; set for any non-dev deploy |
 | `OVERSEER_SYMBOLS_FILE` | path to symbols.toml (default: ./symbols.toml, cwd-relative) |
 | `OVERSEER_SPREAD_ALERT_APR` | APR spread threshold that starts confirmation (default: 25) |
+| `OVERSEER_SPREAD_ALERT_MIN_OI` | open interest in USD each market in a spread alert must hold (default: 1000000) |
 | `OVERSEER_SPREAD_CONFIRM_MINUTES` | minutes a spread must remain wide across fresh snapshots before alerting (default: 10) |
+| `OVERSEER_TVL_DROP_PCT` | how far (%) a venue's TVL must fall below its trailing high to alert (default: 10) |
+| `OVERSEER_TVL_DROP_HOURS` | hours of TVL history that high covers (default: 6) |
 
 What gets scraped lives in `symbols.toml` (venues × assets); it is validated
-at startup and the scheduler refuses to launch on a bad config.
+at startup and the scheduler refuses to launch on a bad config. Every venue
+request asks for gzip, which aiosonic decodes but never requests itself: bulk
+endpoints come back 3–16× smaller (Binance's spot tickers 1.9 MB → 275 KB,
+Extended's markets 1 MB → 78 KB). Hyperliquid and Lighter send uncompressed
+JSON whatever is asked.
 
 Zcash (`ZEC`) is configured for Binance spot and perpetuals, Bybit perpetuals,
 Hyperliquid, Lighter, Extended, RISEx, BULK and Bullet. Bybit's public spot
@@ -109,6 +116,23 @@ only the best bid and ask are stored; `orderbook_poll_seconds` cuts the traffic.
 Venue volume is the last complete
 UTC day from its DefiLlama metrics endpoint.
 
+Phoenix (`phoenix`, <https://docs.phoenix.trade/api>) lists crypto, equities,
+ETFs, commodities and pre-IPO names, and is mapped to the nineteen assets above
+that it lists (gold, silver and WTI as `GOLD`, `SILVER` and `WTIOIL`). Its SPY
+and QQQ are ETFs priced at about a tenth of the index, so they are not the S&P
+500 and Nasdaq 100 rows. Phoenix quotes an 8-hour rate and pays an eighth of it
+each hour (<https://docs.phoenix.trade/phoenix/margin-and-risk/funding-rate>);
+its history and live stream give that hourly payment as a percentage, stored as
+the fraction charged, so crypto rests at 10.95% APR and equities and
+commodities, charged half the interest, at 5.475%. Open interest, mark, oracle
+price, 24-hour volume and the current rate come from one read of the WebSocket
+`market` channel per liquidity poll, as Phoenix recommends for live state; the
+live rate just before a settlement matched the payment it recorded (NVDA
+0.003483% against 0.003476%), and markets silent for 15 seconds are skipped
+that poll. Candles (paged, 2,500 a
+request), settled funding and books come from REST. Phoenix has no fee
+schedule here, so it is not on the Execution or Margin pages.
+
 The Funding page fetches rates when it opens and every five minutes. Its asset
 filters, search, watchlist and rate mode re-render those rates without asking
 the server again, and the history controls use the 30-second response cache
@@ -119,6 +143,12 @@ keep its query to the newest data rather than every snapshot ever stored. For
 the same reason the dashboard and Basis pickers list series with a bar in the
 last day, and the Wallets page's asset list and fill history count the last
 seven days of fills, its longest chart window.
+
+Above the market pulse, the Venues chips narrow the Markets view: a click shows
+one venue, Ctrl-click (⌘-click on a Mac) adds or removes another, and All
+resets. With a selection, spreads, ranking, sort order, highlights and counts
+compare only the chosen venues, and with two or more an asset must be listed on
+at least two of them; the selection is kept in the URL like the other filters.
 
 ## Run
 
@@ -1024,7 +1054,23 @@ Notes:
   spread must remain above the threshold across at least three fresh snapshots
   for the configured confirmation window. Both legs must have known next
   settlements within one minute of each other; only then are live BBOs fetched
-  and an alert sent. A daily digest posts at 08:00 UTC.
+  and an alert sent. Both markets must also hold at least
+  `OVERSEER_SPREAD_ALERT_MIN_OI` of open interest ($1M by default), so a wide
+  rate on a thin book never alerts; if one falls below it while an alert
+  stands, the closing message says so. A daily digest posts at 08:00 UTC.
+* TVL: every 15 minutes the scheduler stores each venue's DefiLlama TVL
+  (`data_collection/defillama.py`: Hyperliquid's and Lighter's bridges,
+  Extended, BULK, RISEx and Phoenix collateral, Binance's and Bybit's reserves; Bullet
+  and QFEX have none) and posts a Discord alert when it falls
+  `OVERSEER_TVL_DROP_PCT` (10%) below its high of the last
+  `OVERSEER_TVL_DROP_HOURS` (6), which can mean an exploit or a run, then
+  another once it is steady again. DefiLlama's adapters update TVL about once a
+  day, so a drain can take up to a day to show; faster warning needs on-chain
+  or venue sources. Exchange reserves move with token prices, so a crash
+  alone can trip them. Empty or zero readings are outages, not drains, and are
+  not stored; a venue whose reading fails alerts on its own, unless every venue
+  fails, which alerts once as DefiLlama. A database created before this needs
+  `migrations/015_venue_tvl.sql` once, before the scheduler restarts.
 * Funding units: every five minutes each venue's resting crypto funding rate,
   the exact rate at least three of its quiet markets share (10.95% a year at
   0.01% per eight hours; Extended rests at 11.39% and Lighter at 10.51%), is

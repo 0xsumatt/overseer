@@ -53,7 +53,8 @@ class HttpClient:
 
     The exchange's :class:`RateLimiter` is passed in and applied to every
     request, so the per-exchange scrapers just call :meth:`get_json` and never
-    have to remember to throttle.
+    have to remember to throttle. Every request asks for gzip: aiosonic
+    decodes compressed responses but never asks for them.
     """
 
     def __init__(
@@ -68,7 +69,7 @@ class HttpClient:
         read_timeout: float = 20.0,
     ) -> None:
         self._limiter = limiter
-        self._headers = default_headers or {}
+        self._headers = {"Accept-Encoding": "gzip", **(default_headers or {})}
         self._max_retries = max_retries
         self._backoff_base = backoff_base
         self._backoff_max = backoff_max

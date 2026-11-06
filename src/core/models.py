@@ -235,3 +235,13 @@ class VenueVolume:
     @property
     def key(self) -> tuple[str, datetime]:
         return (self.exchange, self.ts)
+
+
+@dataclass(frozen=True, slots=True)
+class VenueTvl:
+    """Venue TVL in USD from DefiLlama, polled every 15 minutes for the TVL
+    drop alert: a sharp fall can mean an exploit or a run."""
+
+    exchange: Exchange
+    ts: datetime
+    tvl_usd: Decimal

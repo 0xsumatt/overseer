@@ -110,7 +110,7 @@
 {% block scripts %}
 {% if symbols %}
 <script src="{{ url_for('static', filename='js/lightweight-charts.standalone.js') }}"></script>
-<script src="{{ url_for('static', filename='js/venues.js', v='qfex') }}"></script>
+<script src="{{ url_for('static', filename='js/venues.js', v='phoenix') }}"></script>
 <script id="wallets-config" type="application/json">{{ {'wallets': wallets} | tojson }}</script>
 {% endif %}
 <script src="{{ url_for('static', filename='js/wallets.js', v='ui-consistency') }}"></script>

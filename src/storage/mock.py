@@ -128,6 +128,19 @@ _WIDE_FUNDING.extend([
     ("qfex", "MSTR-USD", 1, -0.9, 2_300_000),
     ("qfex", "MU-USD", 1, 6.1, 6_500_000),
     ("qfex", "CRCL-USD", 1, 1.7, 1_800_000),
+    # Phoenix charges half the crypto interest rate on equities and commodities.
+    ("phoenix", "GOLD", 1, 5.6, 70_000),
+    ("phoenix", "SILVER", 1, 5.5, 120_000),
+    ("phoenix", "WTIOIL", 1, 7.9, 40_000),
+    ("phoenix", "NVDA", 1, 31.6, 70_000),
+    ("phoenix", "AMD", 1, 9.8, 50_000),
+    ("phoenix", "META", 1, 6.4, 180_000),
+    ("phoenix", "GOOGL", 1, 5.5, 300_000),
+    ("phoenix", "MSFT", 1, 5.5, 90_000),
+    ("phoenix", "AAPL", 1, 5.5, 130_000),
+    ("phoenix", "MSTR", 1, 14.2, 90_000),
+    ("phoenix", "MU", 1, 22.0, 400_000),
+    ("phoenix", "CRCL", 1, 18.5, 100_000),
 ])
 
 MOCK_FILLS = {
@@ -145,6 +158,7 @@ _VENUES = [
     ("extended",      "extended",    "perp", "{a}-USD",  1),
     ("rise",          "rise",        "perp", "{a}/USDC", 1),
     ("bullet",        "bullet",      "perp", "{a}-USD",  1),
+    ("phoenix",       "phoenix",     "perp", "{a}",      1),
 ]
 
 

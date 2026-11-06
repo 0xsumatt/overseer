@@ -76,6 +76,12 @@ orderbook = true
 funding = "all"
 liquidity = "all"
 
+[venues.phoenix]
+intervals = ["1m"]
+orderbook = true
+funding = "all"
+liquidity = "all"
+
 # -- assets --------------------------------------------------------------------
 
 [assets.BTC]
@@ -89,6 +95,7 @@ extended = "BTC-USD"
 bullet = "BTC-USD"
 rise ="BTC/USDC"
 bulk         = "BTC-USD"
+phoenix = "BTC"
 
 [assets.ETH]
 binance_spot = "ETH/USDT"
@@ -101,6 +108,7 @@ extended = "ETH-USD"
 bullet = "ETH-USD"
 rise ="ETH/USDC"
 bulk         = "ETH-USD"
+phoenix = "ETH"
 
 [assets.SOL]
 binance_spot = "SOL/USDT"
@@ -113,6 +121,7 @@ extended = "SOL-USD"
 bullet = "SOL-USD"
 rise ="SOL/USDC"
 bulk         = "SOL-USD"
+phoenix = "SOL"
 
 [assets.AAVE]
 binance_spot = "AAVE/USDT"
@@ -124,6 +133,7 @@ lighter = "AAVE"
 extended = "AAVE-USD"
 rise ="AAVE/USDC"
 bulk         = "AAVE-USD"
+phoenix = "AAVE"
 
 [assets.HYPE]
 binance_perp = "HYPE/USDT"
@@ -135,6 +145,7 @@ extended = "HYPE-USD"
 bullet = "HYPE-USD"
 rise ="HYPE/USDC"
 bulk         = "HYPE-USD"
+phoenix = "HYPE"
 
 [assets.LIT]
 binance_perp = "LIT/USDT"
@@ -146,6 +157,7 @@ extended = "LIT-USD"
 bulk = "LIT-USD"
 rise = "LIT/USDC"
 bullet = "LIT-USD"
+phoenix = "LIT"
 
 [assets.ZEC]
 binance_spot = "ZEC/USDT"
@@ -157,6 +169,7 @@ extended = "ZEC-USD"
 bullet = "ZEC-USD"
 rise = "ZEC/USDC"
 bulk = "ZEC-USD"
+phoenix = "ZEC"
 
 [assets.XAU]
 binance_perp = "XAU/USDT"
@@ -167,6 +180,7 @@ extended = "XAU-USD"
 rise = "XAU/USDC"
 bullet = "GOLD-USD"
 qfex = "GOLD-USD"
+phoenix = "GOLD"
 
 [asset_metadata.XAU]
 family = "traditional"
@@ -183,6 +197,7 @@ extended = "XAG-USD"
 rise = "XAG/USDC"
 bullet = "SILVER-USD"
 qfex = "SILVER-USD"
+phoenix = "SILVER"
 
 [asset_metadata.XAG]
 family = "traditional"
@@ -198,6 +213,7 @@ extended = "WTI-USD"
 rise = "CL/USDC"
 bullet = "WTIOIL-USD"
 qfex = "CL-USD"
+phoenix = "WTIOIL"
 
 [asset_metadata.WTI]
 family = "traditional"
@@ -252,6 +268,7 @@ rise = "NVDA/USDC"
 bullet = "NVDA-USD"
 qfex = "NVDA-USD"
 bulk = "NVDA-USD"
+phoenix = "NVDA"
 
 [asset_metadata.NVDA]
 family = "traditional"
@@ -266,6 +283,7 @@ bybit_perp = "AMDSTOCK/USDT"
 lighter = "AMD"
 extended = "AMD_24_5-USD"
 qfex = "AMD-USD"
+phoenix = "AMD"
 
 [asset_metadata.AMD]
 family = "traditional"
@@ -280,6 +298,7 @@ bybit_perp = "META/USDT"
 lighter = "META"
 extended = "META_24_5-USD"
 qfex = "META-USD"
+phoenix = "META"
 
 [asset_metadata.META]
 family = "traditional"
@@ -294,6 +313,7 @@ bybit_perp = "GOOGL/USDT"
 lighter = "GOOGL"
 extended = "GOOGL-USD"
 qfex = "GOOGL-USD"
+phoenix = "GOOGL"
 
 [asset_metadata.GOOGL]
 family = "traditional"
@@ -308,6 +328,7 @@ bybit_perp = "MSFT/USDT"
 lighter = "MSFT"
 extended = "MSFT_24_5-USD"
 qfex = "MSFT-USD"
+phoenix = "MSFT"
 
 [asset_metadata.MSFT]
 family = "traditional"
@@ -322,6 +343,7 @@ bybit_perp = "AAPL/USDT"
 lighter = "AAPL"
 extended = "AAPL_24_5-USD"
 qfex = "AAPL-USD"
+phoenix = "AAPL"
 
 [asset_metadata.AAPL]
 family = "traditional"
@@ -338,6 +360,7 @@ extended = "MSTR_24_5-USD"
 rise = "MSTR/USDC"
 qfex = "MSTR-USD"
 bulk = "MSTR-USD"
+phoenix = "MSTR"
 
 [asset_metadata.MSTR]
 family = "traditional"
@@ -355,6 +378,7 @@ rise = "MU/USDC"
 bullet = "MU-USD"
 qfex = "MU-USD"
 bulk = "MU-USD"
+phoenix = "MU"
 
 [asset_metadata.MU]
 family = "traditional"
@@ -371,6 +395,7 @@ extended = "CRCL_24_5-USD"
 rise = "CRCL/USDC"
 qfex = "CRCL-USD"
 bulk = "CRCL-USD"
+phoenix = "CRCL"
 
 [asset_metadata.CRCL]
 family = "traditional"

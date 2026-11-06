@@ -32,6 +32,7 @@ const VENUE_COLORS = {
   lighter:     '#BCAABA',   // silver-lilac
   bulk:        '#B4E04A',   // lime: clear of Lighter's silver and Binance's gold
   qfex:        '#3D5AFE',   // indigo: cool like the rest, clear of Bybit's blue and Bullet's violet
+  phoenix:     '#D9480F',   // ember: darker than TradeXYZ's orange, clear of the loss red
 };
 
 /* Fixed iteration order. Never sort by value, count, or API key order — that

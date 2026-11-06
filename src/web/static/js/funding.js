@@ -19,6 +19,7 @@ const TRADE_URLS = {
   bullet:      s => `https://app.bullet.xyz/trade/${s}`,
   bulk:        s => `https://app.bulk.trade/trade/${s}`,
   qfex:        s => `https://www.qfex.com/trade/${s}`,
+  phoenix:     s => `https://www.phoenix.trade/markets/${s}`,
 };
 const JOIN_URLS = {
   binance:     c => `https://accounts.binance.com/register?ref=${c}`,
@@ -196,7 +197,7 @@ const storedFundingFilters = Overseer.filterState('funding');
 const fundingUrl = new URLSearchParams(window.location.search);
 const fundingFilterKeys = new Set([
   'search', 'view', 'family', 'assetClass', 'asset', 'hhours', 'hbucket',
-  'smoothing', 'venues', 'rate',
+  'smoothing', 'venues', 'rate', 'compare',
 ]);
 const hasFundingUrlState = [...fundingUrl.keys()].some(key => fundingFilterKeys.has(key));
 const fundingFilters = Object.freeze({
@@ -238,6 +239,9 @@ let activeAssetClass = ['commodity', 'index', 'equity'].includes(fundingFilters.
 let watchedAssets = new Set(storedFundingFilters.getList('watchlist'));
 let watchlistOnly = storedFundingFilters.get('watchlistOnly') === 'true';
 let rateMode = fundingFilters.get('rate') === 'period' ? 'period' : 'apr';
+// Markets venue selection (venue keys); empty shows every venue. Distinct
+// from `venues`, the history legend's hidden set.
+let comparedVenues = new Set(fundingFilters.getList('compare'));
 let lastFundingData = null;   // reused by the history tab's asset selector
 const fundingState = Overseer.pageState();
 let historyRequest = 0;
@@ -402,6 +406,95 @@ function renderAssetFilters(data) {
   document.getElementById('watchlist-filter').setAttribute('aria-pressed', String(watchlistOnly));
 }
 
+// ---- markets venue selector -------------------------------------------------
+// Click shows one venue; Ctrl/⌘-click adds or removes one. The selection
+// narrows every asset's rows before anything else is computed, so spreads,
+// ranking, sort order, highlights and counts compare only the chosen venues.
+const venueCompareField = document.getElementById('venue-compare-field');
+const venueCompareHost = document.getElementById('venue-compare');
+
+const rowVenueKey = row => row.venue_key || row.exchange;
+
+function venueSort(a, b) {
+  const ai = VENUE_ORDER.indexOf(a.key);
+  const bi = VENUE_ORDER.indexOf(b.key);
+  if (ai !== -1 || bi !== -1) return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+  return a.label.localeCompare(b.label);
+}
+
+function venuesIn(entries) {
+  const venuesByKey = new Map();
+  entries.forEach(([, rows]) => rows.forEach(row => {
+    const key = rowVenueKey(row);
+    if (!venuesByKey.has(key)) venuesByKey.set(key, {
+      key,
+      label: row.venue_label || row.exchange,
+      exchange: row.exchange,
+    });
+  }));
+  return [...venuesByKey.values()].sort(venueSort);
+}
+
+// Selected venues still present in the data; a venue that drops out is
+// ignored rather than forgotten, so it returns if it reports again.
+function activeComparedVenues(venues) {
+  return new Set(venues.map(venue => venue.key).filter(key => comparedVenues.has(key)));
+}
+
+// One venue: assets listed on it. Several: assets listed on at least two,
+// so every row has a spread to compare.
+function venueScopedData(data, selected) {
+  if (!selected.size) return data;
+  const minimum = Math.min(selected.size, 2);
+  return Object.fromEntries(Object.entries(data)
+    .map(([asset, rows]) => [asset, rows.filter(row => selected.has(rowVenueKey(row)))])
+    .filter(([, rows]) => rows.length >= minimum));
+}
+
+function renderVenueCompare(venues, selected) {
+  const focused = venueCompareHost.contains(document.activeElement)
+    ? document.activeElement.dataset.compare : null;
+  const hint = 'Ctrl-click (⌘-click) to compare several';
+  venueCompareField.classList.toggle('hidden', venues.length < 2);
+  venueCompareHost.toggleAttribute('data-selecting', selected.size > 0);
+  venueCompareHost.innerHTML = `<button type="button" class="chip" data-compare=""
+      aria-pressed="${!selected.size}" title="Show every venue">All</button>` + venues.map(venue => `
+    <button type="button" class="chip" data-compare="${venue.key}" aria-pressed="${selected.has(venue.key)}"
+            style="--swatch:${colorFor(venue.key)}" title="${hint}"><span class="chip-swatch"></span>${venue.label}</button>`
+  ).join('');
+  if (focused !== null) {
+    [...venueCompareHost.querySelectorAll('[data-compare]')]
+      .find(button => button.dataset.compare === focused)?.focus({ preventScroll: true });
+  }
+}
+
+function chooseVenue(key, additive) {
+  const venues = venuesIn(Object.entries(lastFundingData || {}));
+  const selected = activeComparedVenues(venues);
+  if (!key) selected.clear();
+  else if (additive) selected.has(key) ? selected.delete(key) : selected.add(key);
+  else if (selected.size === 1 && selected.has(key)) selected.clear();
+  else {
+    selected.clear();
+    selected.add(key);
+  }
+  comparedVenues = selected;
+  fundingFilters.set('compare', selected.size ? JSON.stringify([...selected]) : null);
+  refilter();
+}
+
+venueCompareHost.addEventListener('click', event => {
+  const button = event.target.closest('[data-compare]');
+  if (button) chooseVenue(button.dataset.compare, event.ctrlKey || event.metaKey);
+});
+// On macOS, Ctrl-click opens the context menu instead of clicking.
+venueCompareHost.addEventListener('contextmenu', event => {
+  const button = event.target.closest('[data-compare]');
+  if (!button || !event.ctrlKey) return;
+  event.preventDefault();
+  chooseVenue(button.dataset.compare, true);
+});
+
 // ---- markets: never scrolls sideways; height fitted to the screen -----------
 const marketsCard = document.getElementById('fcard');
 const marketsScroll = document.getElementById('fmarkets');
@@ -413,6 +506,9 @@ let marketsWidth = 0;      // scroller width the current layout was chosen for
 
 function marketsEmptyCopy() {
   if (!marketsModel.hasFunding) return 'No funding rates yet. Settlements usually arrive within the hour.';
+  if (marketsModel.comparing) {
+    return 'No assets match these venues and filters. Choose other venues or select All.';
+  }
   return watchlistOnly && watchedAssets.size === 0
     ? 'Your watchlist is empty. Use the star beside an asset to add it.'
     : 'No assets match these filters. Clear the search or choose another asset group.';
@@ -557,6 +653,12 @@ function refilter() {
   renderFunding(lastFundingData);
 }
 
+// One venue's assets have no spread, so they sort by APR size alone.
+function tableHelpText(singleVenue) {
+  if (rateMode !== 'apr') return "Each venue's own interval · sorted by APR";
+  return singleVenue ? 'Sorted by largest APR, either sign' : 'Sorted by widest APR spread';
+}
+
 function renderFunding(data) {
   // dislocation-first: sort by max-min APR spread so memecoin/new-listing
   // outliers surface at the top of a wide-universe table
@@ -564,26 +666,19 @@ function renderFunding(data) {
     const a = rows.map(r => r.apr_pct);
     return a.length > 1 ? Math.max(...a) - Math.min(...a) : Math.abs(a[0] ?? 0);
   };
-  renderAssetFilters(data);
-  const coins = fundingEntries(data)
+  const allVenues = venuesIn(Object.entries(data));
+  const selected = activeComparedVenues(allVenues);
+  renderVenueCompare(allVenues, selected);
+  document.getElementById('table-help').textContent = tableHelpText(selected.size === 1);
+  const scoped = venueScopedData(data, selected);
+  renderAssetFilters(scoped);
+  const coins = fundingEntries(scoped)
     .sort(([, ra], [, rb]) => spread(rb) - spread(ra));
   document.getElementById('market-count').textContent = coins.length;
-  const venuesByKey = new Map();
-  coins.forEach(([, rows]) => rows.forEach(row => {
-    const key = row.venue_key || row.exchange;
-    if (!venuesByKey.has(key)) venuesByKey.set(key, {
-      key,
-      label: row.venue_label || row.exchange,
-      exchange: row.exchange,
-    });
-  }));
-  const venues = [...venuesByKey.values()].sort((a, b) => {
-    const ai = VENUE_ORDER.indexOf(a.key);
-    const bi = VENUE_ORDER.indexOf(b.key);
-    if (ai !== -1 || bi !== -1) return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
-    return a.label.localeCompare(b.label);
-  });
-  marketsModel = { coins, venues, hasFunding: Object.keys(data).length > 0 };
+  const venues = venuesIn(coins);
+  marketsModel = {
+    coins, venues, hasFunding: Object.keys(data).length > 0, comparing: selected.size > 0,
+  };
   renderMarkets();
   if (!coins.length) {
     document.getElementById('highlights').innerHTML = '';
@@ -777,9 +872,7 @@ function setRateMode(mode, redraw = true) {
   rateMode = mode === 'period' ? 'period' : 'apr';
   fundingFilters.set('rate', rateMode === 'apr' ? null : rateMode);
   syncRateModeMenus();
-  document.getElementById('table-help').textContent = rateMode === 'apr'
-    ? 'Sorted by widest APR spread'
-    : "Each venue's own interval · sorted by APR";
+  document.getElementById('table-help').textContent = tableHelpText(comparedVenues.size === 1);
   updateHistoryHelp();
   if (redraw) {
     if (lastFundingData) renderFunding(lastFundingData);

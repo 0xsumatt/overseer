@@ -14,6 +14,7 @@ from core.config import settings
 from core.execution_fees import execution_listings
 from core.execution_history import HISTORY_ASSETS, HISTORY_INTERVAL_SECONDS
 from core.symbols import SymbolRegistry
+from data_collection.defillama import DEFILLAMA_TVL, DefiLlamaTvl
 from data_collection.exchanges.registry import REGISTRY, STREAM_REGISTRY
 from data_collection.execution_reader import ExecutionReader
 from scheduler.capture import SettlementCapture
@@ -29,6 +30,7 @@ from scheduler.jobs import (
     run_liquidity,
     run_ohlcv,
     run_orderbook,
+    run_tvl,
     run_venue_volume,
 )
 from scheduler.notify import DiscordNotifier
@@ -47,6 +49,7 @@ def build_scheduler(
     ohlcv_targets, fills_targets, funding_targets, liquidity_targets,
     orderbook_targets, registry: SymbolRegistry | None = None,
     execution_reader: ExecutionReader | None = None,
+    tvl: DefiLlamaTvl | None = None,
 ) -> AsyncIOScheduler:
     sched = AsyncIOScheduler(
         job_defaults={
@@ -86,6 +89,17 @@ def build_scheduler(
         args=[scrapers, storage, notifier, state],
         id="venue_volume:daily", name="venue_volume:daily", replace_existing=True,
     )
+    # Venue TVL from DefiLlama every 15 minutes, so each daily update is seen
+    # within 15 minutes and checked against the trailing high: a sharp fall can
+    # mean an exploit or a run.
+    tvl_exchanges = sorted({s.exchange for s in scrapers.values()} & DEFILLAMA_TVL.keys())
+    if tvl is not None and tvl_exchanges:
+        sched.add_job(
+            run_tvl, trigger=IntervalTrigger(seconds=900, jitter=30),
+            args=[tvl, tvl_exchanges, storage, notifier, state,
+                  settings.tvl_drop_pct, settings.tvl_drop_hours],
+            id="tvl:defillama", name="tvl:defillama", replace_existing=True,
+        )
     # Current-funding dislocations must persist across fresh 5-minute snapshots
     # before an alert fetches live books. This rejects one-tick funding spikes.
     if funding_targets and registry is not None:
@@ -102,6 +116,7 @@ def build_scheduler(
                 state,
                 registry,
                 settings.spread_alert_apr,
+                settings.spread_alert_min_oi_usd,
                 scrapers,
                 fx_cache,
                 confirmation,
@@ -183,10 +198,12 @@ async def main() -> None:
     state: dict[str, str] = {}      # job_id -> last status, for edge-triggered alerts
     registry = SymbolRegistry.load(settings.symbols_file)
     execution_reader = ExecutionReader()
+    tvl = DefiLlamaTvl()
     sched = build_scheduler(
         scrapers, storage, notifier, state,
         ohlcv_targets, fills_targets, funding_targets, liquidity_targets,
         orderbook_targets, registry=registry, execution_reader=execution_reader,
+        tvl=tvl,
     )
     sched.start()
     log.info("scheduler started with %d job(s)", len(sched.get_jobs()))
@@ -248,6 +265,7 @@ async def main() -> None:
             await s.aclose()
         # Blocks while an in-flight capture finishes, so keep it off the loop.
         await asyncio.to_thread(execution_reader.close)
+        await tvl.aclose()
         await notifier.aclose()
         await storage.close()
 

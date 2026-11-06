@@ -250,6 +250,7 @@ async def test_dislocation_requires_sustained_rates_before_fetching_books() -> N
             "rate": Decimal("0.0005"),
             "interval_hours": 8,
             "next_funding_at": settlement,
+            "oi_notional": Decimal("5000000"),
         },
         {
             "exchange": "hyperliquid",
@@ -258,6 +259,7 @@ async def test_dislocation_requires_sustained_rates_before_fetching_books() -> N
             "rate": Decimal("-0.0001"),
             "interval_hours": 1,
             "next_funding_at": settlement,
+            "oi_notional": Decimal("5000000"),
         },
     ]
     storage = AlertStorage(rows)
@@ -292,6 +294,7 @@ async def test_dislocation_requires_sustained_rates_before_fetching_books() -> N
             state,
             registry,
             25,
+            1_000_000,
             scrapers,  # type: ignore[arg-type]
             FixedFxCache(fx_book),  # type: ignore[arg-type]
             confirmation,
@@ -347,6 +350,61 @@ async def test_dislocation_requires_sustained_rates_before_fetching_books() -> N
     await run_check()
     assert len(notifier.messages) == 2
     assert "current funding spread narrowed" in notifier.messages[1]
+    assert state == {"dislocation:BTC": "ok"}
+
+
+@pytest.mark.asyncio
+async def test_spread_alerts_ignore_markets_below_the_open_interest_floor() -> None:
+    now = datetime.now(timezone.utc)
+    settlement = now + timedelta(hours=1)
+
+    def book(exchange: Exchange, symbol: str, quote: QuoteCurrency, bid: str, ask: str) -> TopOfBook:
+        return TopOfBook(exchange, symbol, quote, now, Decimal(bid), Decimal("1"), Decimal(ask), Decimal("1"))
+
+    rows = [
+        {"exchange": "binance", "symbol": "BTC/USDT", "ts": now, "rate": Decimal("0.0005"),
+         "interval_hours": 8, "next_funding_at": settlement, "oi_notional": Decimal("5000000")},
+        {"exchange": "hyperliquid", "symbol": "BTC", "ts": now, "rate": Decimal("-0.0001"),
+         "interval_hours": 1, "next_funding_at": settlement, "oi_notional": Decimal("400000")},
+    ]
+    notifier = AlertNotifier()
+    state: dict[str, str] = {}
+    registry = SymbolRegistry.from_config(
+        {"assets": {"BTC": {"binance_perp": "BTC/USDT", "hyperliquid": "BTC"}}}
+    )
+    binance = FakeBookScraper(Exchange.BINANCE, QuoteCurrency.USDT,
+                              book(Exchange.BINANCE, "BTC/USDT", QuoteCurrency.USDT, "100", "101"))
+    hyperliquid = FakeBookScraper(Exchange.HYPERLIQUID, QuoteCurrency.USDC,
+                                  book(Exchange.HYPERLIQUID, "BTC", QuoteCurrency.USDC, "99", "99.5"))
+    fx = FixedFxCache(book(Exchange.BINANCE, "USDC/USDT", QuoteCurrency.USDT, "1.001", "1.002"))
+    confirmation = DislocationConfirmation(timedelta(minutes=10))
+
+    async def snapshots(*minutes: int) -> None:
+        for offset in minutes:
+            for row in rows:
+                row["ts"] = now + timedelta(minutes=offset)
+            await check_dislocations(
+                AlertStorage(rows), notifier, state, registry, 25, 1_000_000,  # type: ignore[arg-type]
+                {"binance_perp": binance, "hyperliquid": hyperliquid},  # type: ignore[arg-type]
+                fx, confirmation,  # type: ignore[arg-type]
+            )
+
+    # A sustained 142% APR spread against a $400k market never alerts or fetches books.
+    await snapshots(0, 5, 10, 15)
+    assert notifier.messages == []
+    assert binance.calls == hyperliquid.calls == 0
+
+    # The same spread confirms once both markets clear the floor...
+    rows[1]["oi_notional"] = Decimal("2000000")
+    await snapshots(40, 45, 50)
+    assert len(notifier.messages) == 1
+    assert "current funding spread 142.3% APR confirmed for 10m" in notifier.messages[0]
+
+    # ...and ends, saying why, when one falls back below it.
+    rows[1]["oi_notional"] = Decimal("600000")
+    await snapshots(55)
+    assert len(notifier.messages) == 2
+    assert "open interest fell below $1M" in notifier.messages[1]
     assert state == {"dislocation:BTC": "ok"}
 
 
