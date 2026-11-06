@@ -93,12 +93,26 @@
       <span id="venue-compare-label" class="field-label">Venues</span>
       <div id="venue-compare" class="funding-venue-chips" role="group" aria-labelledby="venue-compare-label"></div>
     </div>
-    <div class="field funding-layout">
-      <span id="layout-label" class="field-label">Layout</span>
-      <div class="segmented" role="group" aria-labelledby="layout-label">
-        <button type="button" data-layout="columns" aria-pressed="true">Columns</button>
-        <button type="button" data-layout="summary" aria-pressed="false">Summary</button>
-      </div>
+    <div class="layout-switch" role="group" aria-label="Layout">
+      <button type="button" data-layout="columns" aria-pressed="true" aria-label="Columns"
+              title="Columns: a column for each venue">
+        <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5"
+             stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M6.25 3v10M9.75 3v10"/>
+        </svg>
+      </button>
+      <button type="button" data-layout="summary" aria-pressed="false" aria-label="Summary"
+              title="Summary: one row per asset, every venue on one scale">
+        {# Two summary rows: an asset, then its venues as dots along a scale. #}
+        <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-linecap="round">
+          <path d="M1.5 4.5h2.5M1.5 11.5h2.5" stroke-width="1.5"/>
+          <path d="M6 4.5h8.5M6 11.5h8.5" stroke-width="1" opacity="0.45"/>
+          <g fill="currentColor" stroke="none">
+            <circle cx="7.75" cy="4.5" r="1.4"/><circle cx="10.5" cy="4.5" r="1.4"/><circle cx="13.5" cy="4.5" r="1.4"/>
+            <circle cx="6.75" cy="11.5" r="1.4"/><circle cx="12" cy="11.5" r="1.4"/>
+          </g>
+        </svg>
+      </button>
     </div>
   </div>
   <section id="market-pulse" class="mb-6" aria-labelledby="market-pulse-title">
@@ -216,7 +230,8 @@
       its own interval, so the table compares annualised rates by default.</p>
     <p>Annualised rates assume the current rate holds for a year. Funding changes every period, so they are
       not a promised return.</p>
-    <p>Markets are sorted by the widest APR spread between venues, so dislocations surface first. The Columns
+    <p>Markets are sorted by the widest APR spread between venues, so dislocations surface first. The two icons
+      beside the venues switch layouts. The Columns
       layout gives every venue a column: cell shading deepens with the size of the annualised rate, and the
       strongest and weakest venue in each row are set in bold. When the columns cannot fit, even at one decimal,
       the table shows summary rows instead, so it never scrolls sideways.</p>

@@ -24,7 +24,15 @@
   /* A real basis, so on narrow screens the layout wraps below the venues
      rather than squeezing them into one chip per line. */
   .funding-venues { flex: 1 1 24rem; @apply min-w-0; }
-  .funding-layout { @apply ml-auto shrink-0; }
+  /* Layout: two joined icon toggles, as tall as a venue chip (34px buttons
+     inside a 1px border make the chip's 36px). */
+  .layout-switch { @apply ml-auto inline-flex shrink-0 overflow-hidden rounded-md border border-line; }
+  .layout-switch > button {
+    @apply inline-flex h-[2.125rem] w-10 items-center justify-center text-faint transition-colors hover:bg-panel2/60 hover:text-body;
+  }
+  .layout-switch > button + button { @apply border-l border-line; }
+  .layout-switch > button[aria-pressed="true"] { @apply bg-panel2 text-body; }
+  .layout-switch svg { @apply h-4 w-4; }
   .funding-venue-chips { @apply flex flex-wrap items-center gap-1.5; }
   .funding-venue-chips:not([data-selecting]) .chip .chip-swatch { @apply opacity-100; }
 

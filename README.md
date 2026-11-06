@@ -63,7 +63,8 @@ the `hip3:` prefix and configured deployer name for HIP-3 markets, e.g.
 "Binance USD-M (USDT)", appears only as a tooltip and in fee settings. Names
 do not change venue identifiers, data lookups, or saved exchange selections.
 The Funding markets table never scrolls sideways, however many venues are
-configured, and offers two layouts, remembered like the other filters. Columns
+configured, and offers two layouts, switched by the two icons beside the venues
+and remembered like the other filters. Columns
 (the default) gives each venue a column; columns size to their content, drop to
 one decimal when tight, and fall back to summary rows, with a note, when even
 that cannot fit. Summary gives each asset one row of the same width whatever the
