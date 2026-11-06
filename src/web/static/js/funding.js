@@ -81,6 +81,20 @@ function rateTint(v, rank) {
   return `data-sign="${sign}"${rank ? ` data-rank="${rank}"` : ''} style="--heat:${heat}"`;
 }
 
+// The hover card's payload: rate cells and strip dots carry the same one.
+function tipAttr(v) {
+  return `data-tip='${JSON.stringify({
+    symbol: v.symbol, exchange: v.exchange,
+    venueLabel: v.venue_label,
+    rate: v.rate, apr: v.apr_pct, hours: v.interval_hours,
+    kind: v.rate_kind, rateTs: v.rate_ts,
+    settledRate: v.settled_rate, settledHours: v.settled_interval_hours,
+    settledTs: v.funding_ts, nextFunding: v.next_funding_at,
+    premium: v.funding_premium, index: v.index_price,
+    oi: v.oi_notional, oiDelta: v.oi_delta_pct,
+    vol: v.volume_24h, mark: v.mark_price })}'`;
+}
+
 function rateLink(v, { compact = false, venue = false } = {}) {
   const cls = v.apr_pct > 0 ? 'text-gain' : v.apr_pct < 0 ? 'text-loss' : 'text-dim';
   const href = tradeUrl(v.exchange, v.symbol);
@@ -89,16 +103,7 @@ function rateLink(v, { compact = false, venue = false } = {}) {
   const metadata = [shown.interval, freshness.visibleLabel].filter(Boolean).join(' · ');
   return `<a ${href ? `href="${href}" target="_blank" rel="noopener"` : ''}
        class="rate-link ${cls}"
-       data-tip='${JSON.stringify({
-            symbol: v.symbol, exchange: v.exchange,
-            venueLabel: v.venue_label,
-            rate: v.rate, apr: v.apr_pct, hours: v.interval_hours,
-            kind: v.rate_kind, rateTs: v.rate_ts,
-            settledRate: v.settled_rate, settledHours: v.settled_interval_hours,
-            settledTs: v.funding_ts, nextFunding: v.next_funding_at,
-            premium: v.funding_premium, index: v.index_price,
-            oi: v.oi_notional, oiDelta: v.oi_delta_pct,
-            vol: v.volume_24h, mark: v.mark_price })}'>
+       ${tipAttr(v)}>
       ${venue ? `<span class="rate-venue" title="${v.venue_label}">${v.venue_label}</span>` : ''}
       <span class="rate-value">${shown.value}</span>
       ${metadata ? `<span class="rate-meta ${freshness.stale ? 'text-phosphor' : 'text-faint'}">${metadata}</span>` : ''}
@@ -173,24 +178,83 @@ function marketTableBody({ coins, venues }, compact) {
   }).join('');
 }
 
-// Narrow layout: one block per asset, its venues in a wrapping grid.
-function marketStack({ coins, venues }) {
-  return coins.map(([coin, rows]) => {
-    const byVenue = venueRows(rows);
-    const rank = rankingFor(rows);
-    const aprs = rows.map(row => row.apr_pct);
-    const spread = rows.length > 1 ? Math.max(...aprs) - Math.min(...aprs) : null;
-    return `<article class="funding-stack-coin" role="listitem">
-      <div class="funding-stack-head">
-        <div class="min-w-0 flex-1">${coinName(coin, rows)}</div>
-        ${spread === null ? '' : `<span class="funding-stack-spread">Spread ${Fmt.percent(spread, 2)}</span>`}
-        ${watchButton(coin, rows)}
-      </div>
-      <div class="funding-stack-rates">${venues.map(venue => byVenue[venue.key]).filter(Boolean)
-        .map(row => `<div class="rate-cell" ${rateTint(row, rank(row))}>${rateLink(row, { venue: true })}</div>`)
-        .join('')}</div>
-    </article>`;
+// ---- summary rows: one per asset, the same width for any number of venues --
+// Every venue is a dot on one APR scale, so agreement and outliers show at a
+// glance; the highest and lowest venue are named, and a row expands to list
+// every venue. Dots sit by APR whichever rate mode is shown, as tints do.
+const STRIP_MIN = -20;
+const STRIP_MAX = 60;
+const STRIP_TICKS = [['−20%', -20], ['0', 0], ['+20', 20], ['+40', 40], ['+60% APR', 60]];
+const stripLeft = apr =>
+  (Math.min(Math.max(apr, STRIP_MIN), STRIP_MAX) - STRIP_MIN) / (STRIP_MAX - STRIP_MIN) * 100;
+const expandedAssets = new Set();   // open rows stay open across refreshes
+
+function rateStrip(coin, rows, rank) {
+  const aprs = rows.map(row => row.apr_pct);
+  const low = Math.min(...aprs);
+  const high = Math.max(...aprs);
+  // The highest and lowest are drawn last, on top of any cluster.
+  const dots = [...rows].sort((a, b) => Boolean(rank(a)) - Boolean(rank(b))).map(row => {
+    const href = tradeUrl(row.exchange, row.symbol);
+    const off = row.apr_pct > STRIP_MAX ? 'high' : row.apr_pct < STRIP_MIN ? 'low' : '';
+    const rowRank = rank(row);
+    return `<a class="rate-dot" tabindex="-1"${href ? ` href="${href}" target="_blank" rel="noopener"` : ''}
+      style="left:${stripLeft(row.apr_pct).toFixed(2)}%;--swatch:${colorFor(row.venue_key || row.exchange)}"
+      ${rowRank ? `data-rank="${rowRank}"` : ''}${off ? ` data-off="${off}"` : ''} ${tipAttr(row)}></a>`;
   }).join('');
+  const range = rows.length > 1
+    ? `<span class="rate-strip-range" style="left:${stripLeft(low).toFixed(2)}%;width:${
+      (stripLeft(high) - stripLeft(low)).toFixed(2)}%"></span>`
+    : '';
+  const label = rows.length > 1
+    ? `${rows.length} venues from ${Fmt.signedPercent(low, 1)} to ${Fmt.signedPercent(high, 1)} APR`
+    : `${rows[0].venue_label} ${Fmt.signedPercent(low, 1)} APR`;
+  return `<div class="rate-strip" role="img" aria-label="${coin}: ${label}">
+    <span class="rate-strip-zero" style="left:${stripLeft(0).toFixed(2)}%"></span>${range}${dots}</div>`;
+}
+
+function summaryPair(row, rank, label) {
+  const name = `<span class="funding-summary-label">${label}</span>`;
+  return row
+    ? `<div class="funding-summary-pair rate-cell" ${rateTint(row, rank(row))}>${name}${rateLink(row, { venue: true })}</div>`
+    : `<div class="funding-summary-pair">${name}<span class="text-faint">—</span></div>`;
+}
+
+function summaryRow(coin, rows) {
+  const rank = rankingFor(rows);
+  const ordered = [...rows].sort((a, b) => b.apr_pct - a.apr_pct);
+  const high = ordered[0];
+  const low = ordered.length > 1 ? ordered[ordered.length - 1] : null;
+  const open = expandedAssets.has(coin);
+  const detail = `fx-${coin.replace(/[^\w-]/g, '_')}`;
+  return `<article class="funding-summary-row" role="listitem">
+    <div class="funding-summary-main">
+      <div class="funding-summary-coin">
+        <button type="button" class="funding-expand" data-expand="${coin}" aria-expanded="${open}"
+                aria-controls="${detail}" title="Every venue for ${coin}">
+          <svg class="funding-expand-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="m6 4 4 4-4 4"
+            fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span class="min-w-0 truncate">${coinName(coin, rows)}</span>
+        </button>${watchButton(coin, rows)}
+      </div>
+      ${rateStrip(coin, rows, rank)}
+      ${summaryPair(high, rank, 'Short at')}
+      ${summaryPair(low, rank, 'Long at')}
+      <div class="funding-summary-spread"><span class="funding-summary-label">Spread</span>${
+        low ? Fmt.percent(high.apr_pct - low.apr_pct, 1) : '—'}</div>
+    </div>
+    <div id="${detail}" class="funding-summary-detail"${open ? '' : ' hidden'}>${ordered
+      .map(row => `<div class="rate-cell" ${rateTint(row, rank(row))}>${rateLink(row, { venue: true })}</div>`)
+      .join('')}</div>
+  </article>`;
+}
+
+function marketSummary({ coins }) {
+  const ticks = STRIP_TICKS.map(([text, apr]) => `<span style="left:${stripLeft(apr)}%">${text}</span>`).join('');
+  return `<div class="funding-summary-head" aria-hidden="true">
+      <span>Asset</span><span class="rate-strip-scale">${ticks}</span>
+      <span>Short at</span><span>Long at</span><span class="text-right">Spread</span>
+    </div>` + coins.map(([coin, rows]) => summaryRow(coin, rows)).join('');
 }
 
 const storedFundingFilters = Overseer.filterState('funding');
@@ -499,9 +563,9 @@ venueCompareHost.addEventListener('contextmenu', event => {
 const marketsCard = document.getElementById('fcard');
 const marketsScroll = document.getElementById('fmarkets');
 const marketsTable = document.getElementById('ftable');
-const marketsStack = document.getElementById('fstack');
+const marketsSummary = document.getElementById('fsummary');
 const marketsEmpty = document.getElementById('fempty');
-let marketsModel = null;   // { coins, venues, hasFunding } from the latest load
+let marketsModel = null;   // { coins, venues, hasFunding, comparing } from the latest load
 let marketsWidth = 0;      // scroller width the current layout was chosen for
 
 function marketsEmptyCopy() {
@@ -514,9 +578,12 @@ function marketsEmptyCopy() {
     : 'No assets match these filters. Clear the search or choose another asset group.';
 }
 
-// Tries the full table, then a compact one; when even that is wider than the
-// card, switches to the stacked list. Measured rather than estimated, so it
-// holds for any number of venues and any label length.
+// Chosen venues, up to MATRIX_MAX_VENUES, show as columns: the full table,
+// then a compact one. Otherwise, or when even the compact table is wider than
+// the card, each asset is a summary row whose width does not depend on the
+// number of venues. Measured rather than estimated, so it holds for any label
+// length.
+const MATRIX_MAX_VENUES = 6;
 function renderMarkets() {
   if (!marketsModel) return;
   marketsWidth = marketsScroll.clientWidth;
@@ -524,47 +591,50 @@ function renderMarkets() {
   marketsEmpty.hidden = coins.length > 0;
   if (!coins.length) {
     marketsTable.hidden = true;
-    marketsStack.hidden = true;
+    marketsSummary.hidden = true;
     marketsEmpty.textContent = marketsEmptyCopy();
     fitMarketsHeight();
     return;
   }
   const body = document.getElementById('fbody');
-  document.getElementById('fhead').innerHTML = marketTableHead(venues);
-  marketsTable.hidden = false;
-  marketsStack.hidden = true;
   let fits = false;
-  for (const density of ['comfortable', 'compact']) {
-    marketsTable.dataset.density = density;
-    body.innerHTML = marketTableBody(marketsModel, density === 'compact');
-    // A hidden tab measures zero; the layout is chosen again once it is shown.
-    if (!marketsWidth || marketsTable.offsetWidth <= marketsScroll.clientWidth) {
-      fits = true;
-      break;
+  if (marketsModel.comparing && venues.length <= MATRIX_MAX_VENUES) {
+    document.getElementById('fhead').innerHTML = marketTableHead(venues);
+    marketsTable.hidden = false;
+    marketsSummary.hidden = true;
+    for (const density of ['comfortable', 'compact']) {
+      marketsTable.dataset.density = density;
+      body.innerHTML = marketTableBody(marketsModel, density === 'compact');
+      // A hidden tab measures zero; the layout is chosen again once it is shown.
+      if (!marketsWidth || marketsTable.offsetWidth <= marketsScroll.clientWidth) {
+        fits = true;
+        break;
+      }
     }
   }
   if (fits) {
-    marketsStack.replaceChildren();
+    marketsSummary.replaceChildren();
   } else {
     marketsTable.hidden = true;
     body.replaceChildren();
-    marketsStack.innerHTML = marketStack(marketsModel);
-    marketsStack.hidden = false;
+    marketsSummary.innerHTML = marketSummary(marketsModel);
+    marketsSummary.hidden = false;
   }
   fitMarketsHeight();
 }
 
 const MARKETS_GAP = 16;            // px kept between the card and the fold
-const MARKETS_MIN_ROWS = 8;        // table rows the card always has room for
-const MARKETS_STACK_HEIGHT = 640;  // stacked blocks are tall; show several at once
+const MARKETS_MIN_ROWS = 8;        // rows the card always has room for
 
-// Room for the card's header, the table head and MARKETS_MIN_ROWS rows,
-// measured so touch-sized rows get the same row count.
+// Room for the card's header, the column head and MARKETS_MIN_ROWS rows of
+// whichever layout shows, measured so touch-sized rows get the same count.
 function marketsMinHeight() {
-  const row = marketsTable.hidden ? null : marketsTable.querySelector('tbody tr');
-  if (!row) return MARKETS_STACK_HEIGHT;
   const chrome = marketsCard.offsetHeight - marketsScroll.clientHeight;
-  return chrome + marketsTable.tHead.offsetHeight + MARKETS_MIN_ROWS * row.offsetHeight;
+  const tableRow = marketsTable.hidden ? null : marketsTable.querySelector('tbody tr');
+  if (tableRow) return chrome + marketsTable.tHead.offsetHeight + MARKETS_MIN_ROWS * tableRow.offsetHeight;
+  const head = marketsSummary.querySelector('.funding-summary-head');
+  const row = marketsSummary.querySelector('.funding-summary-main');
+  return chrome + (head?.offsetHeight ?? 0) + MARKETS_MIN_ROWS * (row?.offsetHeight ?? 0);
 }
 
 // The card ends just above the fold when that leaves room for at least
@@ -941,6 +1011,16 @@ document.getElementById('watchlist-filter').addEventListener('click', () => {
   refilter();
 });
 marketsScroll.addEventListener('click', event => {
+  const expand = event.target.closest('[data-expand]');
+  if (expand) {
+    const open = expand.getAttribute('aria-expanded') !== 'true';
+    if (open) expandedAssets.add(expand.dataset.expand);
+    else expandedAssets.delete(expand.dataset.expand);
+    expand.setAttribute('aria-expanded', String(open));
+    document.getElementById(expand.getAttribute('aria-controls')).hidden = !open;
+    updateMarketsFade();
+    return;
+  }
   const button = event.target.closest('[data-watch]');
   if (!button) return;
   const asset = button.dataset.watch;

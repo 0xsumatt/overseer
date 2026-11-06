@@ -27,9 +27,9 @@
   .funding-pulse > .kpi { @apply px-3 py-2 sm:px-4 sm:py-3; }
 
   /* ---- markets ---------------------------------------------------------- */
-  /* Never scrolls sideways: JS measures the table, compacts it when columns
-     are tight and switches to the stacked list when even that cannot fit.
-     Rows scroll vertically inside the card, whose height JS fits to the
+  /* Never scrolls sideways: chosen venues show as columns when JS measures
+     that they fit, compacting when tight; otherwise each asset is a summary
+     row. Rows scroll vertically inside the card, whose height JS fits to the
      screen through --markets-max. */
   .funding-markets {
     max-height: var(--markets-max, 32.5rem);
@@ -66,7 +66,7 @@
   .funding-markets .rate-cell[data-rank] .rate-value { @apply font-semibold; }
 
   /* Table layout. Columns size to their content, so an overflow is
-     measurable: that is what triggers the compact density or the stack. */
+     measurable: that is what triggers the compact density or summary rows. */
   #ftable .coin-col { @apply w-40; }
   #ftable td.coin-col { @apply py-1.5; }
   #ftable .coin-cell { @apply flex w-[8.5rem] items-center gap-2 font-mono; }
@@ -82,18 +82,90 @@
      the shared table default to stay visible through them. */
   #ftable tbody tr:hover { background-color: theme('colors.panel2 / 75%'); }
 
-  /* Stacked layout: one block per asset, its venues in a wrapping grid. */
-  .funding-stack { @apply divide-y divide-line-soft; }
-  .funding-stack-coin { @apply px-3 py-2.5; }
-  .funding-stack-head { @apply mb-2 flex items-center gap-2 font-mono text-data; }
-  .funding-stack-spread { @apply shrink-0 text-label tabular-nums text-faint; }
-  .funding-stack-rates {
-    grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr));
-    @apply grid gap-1;
+  /* Summary layout: one row per asset whatever the number of venues. The
+     strip puts every venue on one APR scale (JS places each dot with left:%),
+     with the highest and lowest venue named beside it. Below lg the strip
+     takes its own line and each figure carries its label. */
+  .funding-summary { @apply divide-y divide-line-soft; }
+  .funding-summary-head,
+  .funding-summary-main {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "coin spread" "strip strip" "short long";
+    @apply grid items-center gap-x-3 gap-y-1.5 px-3;
   }
-  .funding-stack .rate-cell { @apply min-w-0 rounded; }
-  .funding-stack .rate-link { @apply rounded px-2 py-1.5 font-mono text-data; }
-  .funding-stack .rate-venue { @apply block truncate text-label text-faint; }
+  :is(.funding-summary-head, .funding-summary-main) > :nth-child(1) { grid-area: coin; }
+  :is(.funding-summary-head, .funding-summary-main) > :nth-child(2) { grid-area: strip; }
+  :is(.funding-summary-head, .funding-summary-main) > :nth-child(3) { grid-area: short; }
+  :is(.funding-summary-head, .funding-summary-main) > :nth-child(4) { grid-area: long; }
+  :is(.funding-summary-head, .funding-summary-main) > :nth-child(5) { grid-area: spread; }
+  .funding-summary-head { @apply hidden; }
+  .funding-summary-main { @apply py-2; }
+  .funding-summary-main:hover { background-color: theme('colors.panel2 / 75%'); }
+  .funding-summary-coin { @apply flex min-w-0 items-center gap-1; }
+  .funding-expand {
+    @apply flex min-w-0 flex-1 items-center gap-1.5 rounded py-0.5 text-left font-mono text-data;
+  }
+  .funding-expand-icon { @apply h-3.5 w-3.5 shrink-0 text-faint transition-transform; }
+  .funding-expand[aria-expanded="true"] .funding-expand-icon { @apply rotate-90 text-body; }
+  .funding-summary-label { @apply shrink-0 text-label uppercase tracking-label text-faint; }
+
+  .rate-strip { @apply relative h-5; }
+  .rate-strip::before { content: ''; @apply absolute inset-x-0 top-1/2 h-px bg-line-soft; }
+  .rate-strip-zero { @apply absolute bottom-0.5 top-0.5 w-px -translate-x-1/2 bg-line-strong; }
+  .rate-strip-range { @apply absolute top-1/2 h-1 -translate-y-1/2 rounded-full bg-phosphor/30; }
+  .rate-dot {
+    background-color: var(--swatch);
+    @apply absolute top-1/2 z-[1] h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-panel;
+  }
+  .rate-dot[data-rank] { @apply z-[2] h-2.5 w-2.5; }
+  /* Beyond the scale: pinned to its end, square. */
+  .rate-dot[data-off] { @apply rounded-none; }
+  .rate-dot:hover { @apply z-[3] ring-body; }
+  .rate-strip-scale { @apply relative block h-4; }
+  .rate-strip-scale > span { @apply absolute top-0 -translate-x-1/2 whitespace-nowrap; }
+  .rate-strip-scale > span:first-child { @apply translate-x-0; }
+  .rate-strip-scale > span:last-child { @apply -translate-x-full; }
+
+  /* The label sits above the venue and rate below lg (and is screen-reader
+     only from lg), so a narrow cell still names the venue. */
+  .funding-summary-pair { @apply flex min-w-0 flex-col overflow-hidden rounded; }
+  .funding-summary-pair > .funding-summary-label { @apply px-2 pt-1; }
+  .funding-summary-pair > .text-faint { @apply px-2 py-1; }
+  .funding-summary .rate-link {
+    @apply flex min-w-0 flex-1 items-baseline gap-2 rounded px-2 py-1 font-mono text-data;
+  }
+  .funding-summary .rate-venue { @apply min-w-0 truncate text-faint; }
+  .funding-summary .rate-value { @apply ml-auto shrink-0; }
+  .funding-summary .rate-meta { @apply inline whitespace-nowrap; }
+  .funding-summary-spread {
+    @apply flex items-center justify-end gap-2 whitespace-nowrap font-mono text-data tabular-nums text-dim;
+  }
+
+  /* Every venue, highest first, when a row is expanded. */
+  .funding-summary-detail {
+    grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+    @apply grid gap-1 px-3 pb-3;
+  }
+  /* display: grid above outranks the base [hidden] rule. */
+  .funding-summary-detail[hidden] { @apply hidden; }
+  .funding-summary-detail .rate-link { @apply block px-2 py-1.5; }
+  .funding-summary-detail .rate-venue { @apply block text-label; }
+  .funding-summary-detail .rate-value { @apply ml-0; }
+  .funding-summary-detail .rate-meta { @apply block text-label; }
+
+  @screen lg {
+    .funding-summary-head,
+    .funding-summary-main {
+      grid-template-columns: 9rem minmax(10rem, 1fr) 12rem 12rem 5rem;
+      grid-template-areas: "coin strip short long spread";
+      @apply gap-x-4;
+    }
+    .funding-summary-head {
+      box-shadow: inset 0 -1px 0 theme('colors.line');
+      @apply sticky top-0 z-10 grid bg-panel py-2 font-mono text-label font-normal uppercase tracking-label text-faint;
+    }
+    .funding-summary-label { @apply sr-only; }
+  }
 
   /* ---- history ---------------------------------------------------------- */
   .history-controls {

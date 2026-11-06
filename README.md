@@ -63,15 +63,18 @@ the `hip3:` prefix and configured deployer name for HIP-3 markets, e.g.
 "Binance USD-M (USDT)", appears only as a tooltip and in fee settings. Names
 do not change venue identifiers, data lookups, or saved exchange selections.
 The Funding markets table never scrolls sideways, however many venues are
-configured. Columns size to their content; when they get tight the table
-switches to a compact density (one-decimal APR), and when even that cannot fit,
-each asset becomes a block listing its venues in a wrapping grid with its APR
-spread. Long deployer names break only after `hip3:`, never inside a word.
-Rows scroll vertically inside the card, which always has room for at least
-eight table rows (`MARKETS_MIN_ROWS` in `funding.html`). Where the screen
-allows, the card ends just above the fold and shows more; on shorter screens it
-keeps eight rows and runs past the fold. The stacked list gets about 640px of
-blocks. A fade marks the bottom edge while more rows remain.
+configured. By default each asset is one summary row of the same width whatever
+the number of venues: a strip puts every venue's APR on one scale from −20% to
++60% (beyond it, pinned to the end as a square), Short at and Long at name the
+highest and lowest venue, then the spread; selecting the asset lists every
+venue. Choosing one to six venues in the selector shows them as columns
+instead; columns size to their content, drop to one decimal when tight, and fall
+back to summary rows when even that cannot fit. Long deployer names break only
+after `hip3:`, never inside a word. Rows scroll vertically inside the card,
+which always has room for at least eight rows (`MARKETS_MIN_ROWS` in
+`funding.js`). Where the screen allows, the card ends just above the fold and
+shows more; on shorter screens it keeps eight rows and runs past the fold. A
+fade marks the bottom edge while more rows remain.
 Set `orderbook = true` on a venue to retain one best-bid/ask snapshot per
 configured market every 60 seconds. Override that cadence with
 `orderbook_poll_seconds`.

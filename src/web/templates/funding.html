@@ -99,9 +99,10 @@
   <section aria-labelledby="markets-title">
     <h2 id="markets-title" class="section-label">Markets
       <span id="market-count" class="section-count tabular-nums">0</span></h2>
-    {# Never scrolls sideways: the table compacts, then becomes a stacked list
-       when its columns cannot fit. Rows scroll inside the card, whose height
-       is fitted to the screen. #}
+    {# Never scrolls sideways: up to six chosen venues show as columns when they
+       fit; otherwise each asset is one summary row whose width does not depend
+       on the number of venues. Rows scroll inside the card, whose height is
+       fitted to the screen. #}
     <div id="fcard" class="table-card funding-markets">
       <div class="meta-line border-b border-line-soft mx-3 py-2">
         <span id="refresh-status" class="inline-flex items-center gap-1.5">
@@ -113,13 +114,13 @@
         <span id="table-help">Sorted by widest APR spread</span>
       </div>
       <div id="fmarkets" class="funding-markets-scroll scroll-thin scroll-fade">
-        <table class="data-table" id="ftable">
+        <table class="data-table" id="ftable" hidden>
           <thead>
             <tr id="fhead"><th scope="col" class="coin-col">Asset</th></tr>
           </thead>
           <tbody id="fbody"></tbody>
         </table>
-        <div id="fstack" class="funding-stack" role="list" aria-label="Funding rates by asset" hidden></div>
+        <div id="fsummary" class="funding-summary" role="list" aria-label="Funding rates by asset"></div>
         <p id="fempty" class="empty-cell" hidden></p>
       </div>
     </div>
@@ -204,12 +205,16 @@
       its own interval, so the table compares annualised rates by default.</p>
     <p>Annualised rates assume the current rate holds for a year. Funding changes every period, so they are
       not a promised return.</p>
-    <p>Markets are sorted by the widest APR spread between venues, so dislocations surface first. Cell shading
-      deepens with the size of the annualised rate; the strongest and weakest venue in each row are set in bold.
-      Switching to rate per period keeps each venue's own interval and leaves the sort order unchanged.</p>
-    <p>Hover or focus a rate for liquidity and settlement details; select it to open that market on the venue.
-      The table never scrolls sideways: when its columns get tight it shows one decimal, and on narrow screens
-      each asset lists its venues in a grid with the spread beside the asset.</p>
+    <p>Markets are sorted by the widest APR spread between venues, so dislocations surface first. Each row's
+      strip puts every venue's annualised rate on one scale from −20% to +60% and highlights the spread between
+      the highest and lowest; a venue beyond the scale sits at its end as a square. Short at and Long at name the
+      highest and lowest venue, and selecting an asset lists every venue.</p>
+    <p>Choose up to six venues above the table to compare them as columns instead. Cell shading deepens with the
+      size of the annualised rate, and the strongest and weakest venue in each row are set in bold. Switching to
+      rate per period keeps each venue's own interval; the strip and the sort order still follow APR.</p>
+    <p>Hover or focus a rate or a dot for liquidity and settlement details; select it to open that market on the
+      venue. The table never scrolls sideways: chosen columns drop to one decimal when tight, and become summary
+      rows when even that cannot fit.</p>
     <p>History lines are smoothed per venue with an EWMA (α = 0.35) unless raw is selected. The legend shows each
       venue's latest raw settlement and total open interest, or their values at the hovered time (UTC). Stacked
       bars show open interest by venue. Select a venue in the legend to hide or show it.</p>
@@ -222,5 +227,5 @@
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/lightweight-charts.standalone.js') }}"></script>
 <script src="{{ url_for('static', filename='js/venues.js', v='phoenix') }}"></script>
-<script src="{{ url_for('static', filename='js/funding.js', v='venue-compare') }}"></script>
+<script src="{{ url_for('static', filename='js/funding.js', v='funding-summary') }}"></script>
 {% endblock %}
