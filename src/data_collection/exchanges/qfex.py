@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, ClassVar
 
 from core.enums import Exchange, MarketType, QuoteCurrency, Timeframe
-from core.models import OHLCV, FundingRate, LiquiditySnapshot, TopOfBook
+from core.models import OHLCV, FundingRate, Listing, LiquiditySnapshot, TopOfBook
 from data_collection.base import BaseExchangeScraper, Capability, UnsupportedCapability
 from data_collection.http import HttpClient
 from data_collection.ratelimit import RateLimiter
@@ -37,7 +37,7 @@ class QfexScraper(BaseExchangeScraper):
     quote_currency: ClassVar[QuoteCurrency] = QuoteCurrency.USDC
     capabilities: ClassVar[frozenset[Capability]] = frozenset({
         Capability.OHLCV, Capability.FUNDING, Capability.LIQUIDITY,
-        Capability.BBO, Capability.VENUE_VOLUME,
+        Capability.BBO, Capability.VENUE_VOLUME, Capability.MARKETS,
     })
 
     # Every request pins a published contract, so a format change waits for a
@@ -179,3 +179,14 @@ class QfexScraper(BaseExchangeScraper):
             raise RuntimeError("qfex returned no complete day of volume")
         _, latest = max(days, key=lambda day: day[0])
         return {"spot": None, "perp": self._dec(latest["dailyVolumeUSD"])}
+
+    async def fetch_markets(self) -> Sequence[Listing]:
+        """USD-quoted markets QFEX has active. INACTIVE (suspended, in
+        practice untraded for months and absent from /md/contracts) and
+        DELISTED symbols are left out; QFEX has no pre-launch status."""
+        payload = await self._get("/refdata")
+        return [
+            Listing(symbol=row["symbol"], base=row["base_asset"].upper())
+            for row in payload.get("data") or []
+            if row["status"] == "ACTIVE" and row["quote_asset"] == "USD"
+        ]

@@ -11,7 +11,7 @@ import orjson
 from picows import WSFrame, WSListener, WSMsgType, WSTransport, ws_connect
 
 from core.enums import Exchange, MarketType, QuoteCurrency, Timeframe
-from core.models import FundingRate, LiquiditySnapshot, OHLCV, TopOfBook
+from core.models import FundingRate, Listing, LiquiditySnapshot, OHLCV, TopOfBook
 from data_collection.base import BaseExchangeScraper, Capability
 from data_collection.http import HttpClient
 from data_collection.ratelimit import RateLimiter
@@ -74,6 +74,7 @@ class RiseScraper(BaseExchangeScraper):
             Capability.LIQUIDITY,
             Capability.VENUE_VOLUME,
             Capability.BBO,
+            Capability.MARKETS,
         }
     )
 
@@ -131,6 +132,18 @@ class RiseScraper(BaseExchangeScraper):
 
     def _is_live(self, m: dict) -> bool:
         return bool(m.get("active", True)) and bool((m.get("config") or {}).get("unlocked", True))
+
+    async def fetch_markets(self) -> Sequence[Listing]:
+        # Retired markets read active=false and/or config.unlocked=false (a
+        # deprecated one is also renamed "X/USDC [deprecated-<ts>]").
+        markets = await self._market_map(refresh=True)
+        return [
+            Listing(symbol=name, base=name.split("/", 1)[0].upper())
+            for name, m in markets.items()
+            if self._is_live(m)
+            and not m.get("reduce_only")
+            and name.endswith("/USDC")
+        ]
 
     async def fetch_bbo(self, symbol: str) -> TopOfBook:
         market_id = await self._market_id(symbol)

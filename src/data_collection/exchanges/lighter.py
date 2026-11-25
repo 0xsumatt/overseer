@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import ClassVar
 
 from core.enums import Exchange, MarketType, QuoteCurrency, Side, Timeframe
-from core.models import FundingRate, LiquiditySnapshot, OHLCV, TopOfBook, Trade
+from core.models import FundingRate, Listing, LiquiditySnapshot, OHLCV, TopOfBook, Trade
 from data_collection.base import BaseExchangeScraper, Capability
 from data_collection.http import HttpClient
 from data_collection.ratelimit import RateLimiter
@@ -37,6 +37,7 @@ class LighterScraper(BaseExchangeScraper):
             Capability.FILLS,
             Capability.VENUE_VOLUME,
             Capability.BBO,
+            Capability.MARKETS,
         }
     )
 
@@ -87,6 +88,22 @@ class LighterScraper(BaseExchangeScraper):
         if symbol not in markets:
             raise KeyError(f"lighter has no market {symbol!r}")
         return markets[symbol][0]
+
+    async def fetch_markets(self) -> Sequence[Listing]:
+        # One orderBookDetails call (the rate limit is 60 a minute). Read the
+        # raw rows: _market_map keys by symbol, and a retired market can share
+        # its symbol with a live one. Retired markets read status "inactive";
+        # winding-down ones keep "active" with market_config.force_reduce_only.
+        payload = await self.http.get_json(f"{self.base_url}/api/v1/orderBookDetails")
+        symbols: dict[str, None] = {}
+        for m in payload.get("order_book_details", []) or []:
+            if (
+                m.get("market_type", "perp") == "perp"
+                and m.get("status") == "active"
+                and not (m.get("market_config") or {}).get("force_reduce_only")
+            ):
+                symbols[self.to_symbol(m["symbol"])] = None
+        return [Listing(symbol=symbol, base=symbol.upper()) for symbol in symbols]
 
     async def fetch_bbo(self, symbol: str) -> TopOfBook:
         market_id = await self._market_id(symbol)

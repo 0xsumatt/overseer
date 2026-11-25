@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import ClassVar
 
 from core.enums import Exchange, MarketType, QuoteCurrency, Timeframe
-from core.models import FundingRate, LiquiditySnapshot, OHLCV, TopOfBook
+from core.models import FundingRate, LiquiditySnapshot, Listing, OHLCV, TopOfBook
 from data_collection.base import BaseExchangeScraper, Capability
 from data_collection.http import HttpClient
 from data_collection.ratelimit import RateLimiter
@@ -30,12 +30,20 @@ class BinanceSpotScraper(BaseExchangeScraper):
     market_type: ClassVar[MarketType] = MarketType.SPOT
     quote_currency: ClassVar[QuoteCurrency] = QuoteCurrency.USDT
     capabilities: ClassVar[frozenset[Capability]] = frozenset(
-        {Capability.OHLCV, Capability.VENUE_VOLUME, Capability.BBO}
+        {Capability.OHLCV, Capability.VENUE_VOLUME, Capability.BBO, Capability.MARKETS}
     )
     _klines_path: ClassVar[str] = "/api/v3/klines"
     _ticker24h_path: ClassVar[str] = "/api/v3/ticker/24hr"
     _ticker24h_weight: ClassVar[int] = 80       
     _book_ticker_path: ClassVar[str] = "/api/v3/ticker/bookTicker"
+    _exchange_info_path: ClassVar[str] = "/api/v3/exchangeInfo"
+    _exchange_info_weight: ClassVar[int] = 20
+    # PRE_TRADING is a pair announced but not yet open; HALT a temporary
+    # suspension. BREAK is how Binance keeps delisted pairs in exchangeInfo
+    # (hundreds of long-gone USDT pairs sit there), so it does not count.
+    _listed_statuses: ClassVar[frozenset[str]] = frozenset(
+        {"TRADING", "PRE_TRADING", "HALT"}
+    )
 
     def _build_http(self) -> HttpClient:
         return HttpClient(
@@ -49,6 +57,23 @@ class BinanceSpotScraper(BaseExchangeScraper):
 
     def to_native(self, symbol: str) -> str:
         return symbol.replace("/", "").upper()
+
+    def _is_listed_market(self, info: dict) -> bool:
+        return (
+            info.get("quoteAsset") == self.quote_currency.value
+            and info.get("status") in self._listed_statuses
+        )
+
+    async def fetch_markets(self) -> Sequence[Listing]:
+        info = await self.http.get_json(
+            f"{self.base_url}{self._exchange_info_path}",
+            weight=self._exchange_info_weight,
+        )
+        return [
+            Listing(symbol=self.to_symbol(s["symbol"]), base=s["baseAsset"].upper())
+            for s in info["symbols"]
+            if self._is_listed_market(s)
+        ]
 
     async def fetch_bbo(self, symbol: str) -> TopOfBook:
         native = self.to_native(symbol)
@@ -121,6 +146,18 @@ class BinanceFuturesScraper(BinanceSpotScraper):
     _ticker24h_path: ClassVar[str] = "/fapi/v1/ticker/24hr"
     _ticker24h_weight: ClassVar[int] = 40         
     _book_ticker_path: ClassVar[str] = "/fapi/v1/ticker/bookTicker"
+    _exchange_info_path: ClassVar[str] = "/fapi/v1/exchangeInfo"
+    _exchange_info_weight: ClassVar[int] = 1
+    # Stock/commodity perps are their own contract type; dated futures
+    # (CURRENT_QUARTER, NEXT_QUARTER) are not perps.
+    _perp_contract_types: ClassVar[frozenset[str]] = frozenset(
+        {"PERPETUAL", "TRADIFI_PERPETUAL"}
+    )
+    # PENDING_TRADING is pre-launch; SETTLING, CLOSE and the delivery
+    # statuses are delisted or winding down.
+    _listed_statuses: ClassVar[frozenset[str]] = frozenset(
+        {"TRADING", "PENDING_TRADING"}
+    )
 
     def _build_http(self) -> HttpClient:
         return HttpClient(
@@ -141,8 +178,15 @@ class BinanceFuturesScraper(BinanceSpotScraper):
             Capability.LIQUIDITY,
             Capability.VENUE_VOLUME,
             Capability.BBO,
+            Capability.MARKETS,
         }
     )
+
+    def _is_listed_market(self, info: dict) -> bool:
+        return (
+            info.get("contractType") in self._perp_contract_types
+            and super()._is_listed_market(info)
+        )
 
     _funding_intervals: dict[str, int] | None = None 
 

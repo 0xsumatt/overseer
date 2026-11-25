@@ -17,7 +17,7 @@ import orjson
 from picows import WSFrame, WSListener, WSMsgType, WSTransport, ws_connect
 
 from core.enums import Exchange, MarketType, QuoteCurrency, Timeframe
-from core.models import OHLCV, FundingRate, LiquiditySnapshot, TopOfBook
+from core.models import OHLCV, FundingRate, Listing, LiquiditySnapshot, TopOfBook
 from data_collection.base import BaseExchangeScraper, Capability, UnsupportedCapability
 from data_collection.http import HttpClient
 from data_collection.ratelimit import RateLimiter
@@ -31,6 +31,11 @@ _BAR_SECONDS: dict[Timeframe, int] = {
     Timeframe.H1: 3600, Timeframe.H4: 4 * 3600, Timeframe.D1: 86_400,
 }
 _MAX_CANDLES = 2500
+# Market states that end or halt a market (https://docs.phoenix.trade, exchange
+# channel deltas); anything else, pre-launch states included, is listed.
+_UNLISTED_STATUSES = frozenset(
+    {"closed", "tombstoned", "paused", "reduceonly", "reduce_only", "delisted"}
+)
 
 
 def _ms(dt: datetime) -> str:
@@ -73,7 +78,7 @@ class PhoenixScraper(BaseExchangeScraper):
     quote_currency: ClassVar[QuoteCurrency] = QuoteCurrency.USDC
     capabilities: ClassVar[frozenset[Capability]] = frozenset({
         Capability.OHLCV, Capability.FUNDING, Capability.LIQUIDITY,
-        Capability.BBO, Capability.VENUE_VOLUME,
+        Capability.BBO, Capability.VENUE_VOLUME, Capability.MARKETS,
     })
 
     WS_URL: ClassVar[str] = "wss://perp-api.phoenix.trade/v1/ws"
@@ -216,3 +221,13 @@ class PhoenixScraper(BaseExchangeScraper):
             raise RuntimeError("phoenix sent no market stats")
         volume = sum((self._dec(row["dayNtlVlm"]) for row in stats.values()), Decimal(0))
         return {"spot": None, "perp": volume}
+
+    async def fetch_markets(self) -> Sequence[Listing]:
+        """Every market not closed, tombstoned or paused. A Phoenix symbol is the
+        underlying itself (all markets are quoted in USD, margined in USDC)."""
+        markets = await self._get("/v1/view/exchange/markets")
+        return [
+            Listing(symbol=m["symbol"], base=m["symbol"].upper())
+            for m in markets
+            if str(m.get("marketStatus", "")).lower() not in _UNLISTED_STATUSES
+        ]

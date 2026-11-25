@@ -38,6 +38,16 @@ class BulletScraper(BinanceFuturesScraper):
     def to_native(self, symbol: str) -> str:
         return symbol
 
+    def _is_listed_market(self, info: dict) -> bool:
+        # Bullet's exchangeInfo mirrors Binance's but names its own contract
+        # types (CryptoPerp, RwaPerpUsEquity, RwaPerpCommodities, ...) and
+        # quotes every market in "USD".
+        return (
+            "Perp" in info.get("contractType", "")
+            and info.get("quoteAsset") == "USD"
+            and info.get("status") in self._listed_statuses
+        )
+
     @staticmethod
     def _to_ms(dt: datetime) -> int:
         if dt.tzinfo is None:
@@ -54,6 +64,7 @@ class BulletScraper(BinanceFuturesScraper):
             Capability.LIQUIDITY,
             Capability.VENUE_VOLUME,
             Capability.BBO,
+            Capability.MARKETS,
         }
     )
 

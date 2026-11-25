@@ -11,6 +11,7 @@ from core.enums import Exchange, MarketType, QuoteCurrency, Timeframe
 from core.models import (
     FundingRate,
     LeverageStats,
+    Listing,
     LiquiditySnapshot,
     OHLCV,
     TopOfBook,
@@ -28,6 +29,7 @@ class Capability(StrEnum):
     TRADES = "trades"     
     FILLS = "fills"       
     BBO = "bbo"          
+    MARKETS = "markets"
 
 
 class UnsupportedCapability(NotImplementedError):
@@ -98,6 +100,13 @@ class BaseExchangeScraper(ABC):
     async def fetch_bbo(self, symbol: str) -> TopOfBook:
         """Current best bid/ask. Called on demand for alerting, never polled."""
         raise UnsupportedCapability(self.exchange, "fetch_bbo")
+
+    async def fetch_markets(self) -> Sequence[Listing]:
+        """Every market of this scraper's kind and quote that the venue lists
+        now, pre-launch included. Delisted, closed, settled, expired and
+        reduce-only (winding down) markets are left out; a market merely closed
+        for its trading session still counts as listed."""
+        raise UnsupportedCapability(self.exchange, "fetch_markets")
 
     
     supports_wide_liquidity: ClassVar[bool] = False

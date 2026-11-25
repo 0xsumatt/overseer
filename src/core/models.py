@@ -245,3 +245,17 @@ class VenueTvl:
     exchange: Exchange
     ts: datetime
     tvl_usd: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class Listing:
+    """One market a venue currently lists, for the daily listings check.
+
+    `symbol` is written exactly as symbols.toml writes it for the venue (and as
+    the scraper's other fetch methods take it): "NVDA/USDT", "xyz:GOLD",
+    "AAPL_24_5-USD", "AAPL". `base` is the underlying as the venue names it,
+    upper case, without quote currency, HIP-3 dex prefix or session suffix:
+    "NVDA", "GOLD", "AAPL"."""
+
+    symbol: str
+    base: str

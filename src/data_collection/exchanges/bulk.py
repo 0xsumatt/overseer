@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import ClassVar
 
 from core.enums import Exchange, MarketType, Timeframe
-from core.models import OHLCV, FundingRate, LiquiditySnapshot
+from core.models import OHLCV, FundingRate, Listing, LiquiditySnapshot
 from data_collection.base import BaseExchangeScraper, Capability
 from data_collection.http import HttpClient
 from data_collection.ratelimit import RateLimiter
@@ -25,7 +25,7 @@ class BulkScraper(BaseExchangeScraper):
     base_url: ClassVar[str] = "https://mainnet-api1.bulk.trade/api/v1"
     market_type: ClassVar[MarketType] = MarketType.PERP    
     capabilities: ClassVar[frozenset[Capability]] = frozenset(
-        {Capability.OHLCV, Capability.FUNDING, Capability.LIQUIDITY}
+        {Capability.OHLCV, Capability.FUNDING, Capability.LIQUIDITY, Capability.MARKETS}
     )
 
     def _build_http(self) -> HttpClient:
@@ -120,3 +120,13 @@ class BulkScraper(BaseExchangeScraper):
                 )
             )
         return out
+
+    async def fetch_markets(self) -> Sequence[Listing]:
+        """USD markets open for trading. CLOSED markets are shut for good and
+        SUSPENDED ones halted; BULK trades every market around the clock."""
+        rows = await self.http.get_json(f"{self.base_url}/exchangeInfo")
+        return [
+            Listing(symbol=m["symbol"], base=m["baseAsset"].upper())
+            for m in rows
+            if m.get("status") == "TRADING" and m.get("quoteAsset") == "USD"
+        ]

@@ -345,6 +345,32 @@ class Storage:
             since,
         )
 
+    async def venue_listings(self) -> list[asyncpg.Record]:
+        """Every market the listings check has seen or expected, with whether
+        it is listed now (scheduler/listings.py)."""
+        return await self.pool.fetch(
+            "SELECT venue, symbol, base, first_seen, last_seen, listed FROM venue_listings"
+        )
+
+    async def write_venue_listings(
+        self, rows: Sequence[tuple[str, str, str, datetime | None, datetime | None, bool]]
+    ) -> None:
+        """Upsert (venue, symbol, base, first_seen, last_seen, listed) rows; a
+        market keeps the first_seen of its first row."""
+        if not rows:
+            return
+        await self.pool.execute(
+            """
+            INSERT INTO venue_listings (venue, symbol, base, first_seen, last_seen, listed)
+            SELECT * FROM unnest($1::text[], $2::text[], $3::text[], $4::timestamptz[],
+                                 $5::timestamptz[], $6::boolean[])
+            ON CONFLICT (venue, symbol) DO UPDATE SET
+                base = EXCLUDED.base, last_seen = EXCLUDED.last_seen,
+                listed = EXCLUDED.listed
+            """,
+            *map(list, zip(*rows)),
+        )
+
     async def write_execution_samples(self, records: Sequence[ExecutionSample]) -> int:
         return await self._bulk_upsert(
             "execution_samples", _EXEC_SAMPLE_COLS, _EXEC_SAMPLE_CONFLICT, records

@@ -5,8 +5,8 @@ from datetime import datetime, timezone
 from typing import ClassVar
 
 from core.enums import Exchange, MarketType, QuoteCurrency, Side, Timeframe
-from core.models import FundingRate, LiquiditySnapshot, OHLCV, TopOfBook, Trade
-from data_collection.base import BaseExchangeScraper, Capability
+from core.models import FundingRate, Listing, LiquiditySnapshot, OHLCV, TopOfBook, Trade
+from data_collection.base import BaseExchangeScraper, Capability, UnsupportedCapability
 from data_collection.http import HttpClient
 from data_collection.ratelimit import RateLimiter
 
@@ -16,6 +16,8 @@ class HyperliquidScraper(BaseExchangeScraper):
     base_url: ClassVar[str] = "https://api.hyperliquid.xyz"
     market_type: ClassVar[MarketType] = MarketType.PERP  
     quote_currency: ClassVar[QuoteCurrency] = QuoteCurrency.USDC
+    # HIP-3 dex whose perps this venue id lists; "" is the native perp dex.
+    dex: ClassVar[str] = ""
     capabilities: ClassVar[frozenset[Capability]] = frozenset(
         {
             Capability.OHLCV,
@@ -24,6 +26,7 @@ class HyperliquidScraper(BaseExchangeScraper):
             Capability.LIQUIDITY,
             Capability.VENUE_VOLUME,
             Capability.BBO,
+            Capability.MARKETS,
         }
     )
 
@@ -245,10 +248,48 @@ class HyperliquidScraper(BaseExchangeScraper):
         )
         return {"spot": spot or None, "perp": perp or None}
 
+    async def fetch_markets(self) -> Sequence[Listing]:
+        # `meta` (weight 20) carries the universe without the per-asset
+        # contexts; delisted assets stay in it flagged `isDelisted`.
+        request = {"type": "meta"}
+        if self.dex:
+            request["dex"] = self.dex
+        meta = await self.http.post_json(f"{self.base_url}/info", json=request)
+        return [
+            Listing(
+                symbol=self.to_symbol(asset["name"]),
+                base=asset["name"].split(":", 1)[-1].upper(),
+            )
+            for asset in meta["universe"]
+            if not asset.get("isDelisted")
+        ]
+
+
 class HyperliquidDeployerScraper(HyperliquidScraper):
-    """HIP-3 market adapter; deployer volume is included by the parent venue."""
+    """HIP-3 market adapter; deployer volume is included by the parent venue.
+    Generic over dexes for prices (the dex is in each symbol); listing a dex's
+    markets needs a subclass naming that dex."""
 
     capabilities: ClassVar[frozenset[Capability]] = (
         HyperliquidScraper.capabilities
-        - frozenset({Capability.FILLS, Capability.VENUE_VOLUME})
+        - frozenset({Capability.FILLS, Capability.VENUE_VOLUME, Capability.MARKETS})
+    )
+
+    async def fetch_markets(self) -> Sequence[Listing]:
+        if not self.dex:
+            raise UnsupportedCapability(self.exchange, "fetch_markets")
+        return await super().fetch_markets()
+
+
+class HyperliquidXyzScraper(HyperliquidDeployerScraper):
+    dex: ClassVar[str] = "xyz"
+    capabilities: ClassVar[frozenset[Capability]] = (
+        HyperliquidDeployerScraper.capabilities | {Capability.MARKETS}
+    )
+
+
+class HyperliquidIoScraper(HyperliquidDeployerScraper):
+    dex: ClassVar[str] = "io"
+    capabilities: ClassVar[frozenset[Capability]] = (
+        HyperliquidDeployerScraper.capabilities | {Capability.MARKETS}
     )

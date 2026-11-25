@@ -34,6 +34,7 @@ from scheduler.jobs import (
     run_tvl,
     run_venue_volume,
 )
+from scheduler.listings import run_listings
 from scheduler.notify import DiscordNotifier
 from scheduler.streams import run_stream
 from scheduler.targets import load_stream_targets, load_targets
@@ -116,6 +117,15 @@ def build_scheduler(
         args=[scrapers, storage, notifier, state],
         id="venue_volume:daily", name="venue_volume:daily", replace_existing=True,
     )
+    # What each venue lists, once a day: tracked assets newly listed where not
+    # configured, configured markets dropped and, on Mondays, untracked assets
+    # spreading across exchanges (scheduler/listings.py). Reports only.
+    if registry is not None:
+        sched.add_job(
+            run_listings, trigger=CronTrigger(hour=6, minute=20, timezone="UTC"),
+            args=[scrapers, storage, notifier, state, registry],
+            id="listings:daily", name="listings:daily", replace_existing=True,
+        )
     # Venue TVL from DefiLlama every 15 minutes, so each daily update is seen
     # within 15 minutes and checked against the trailing high: a sharp fall can
     # mean an exploit or a run.

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from typing import Any, ClassVar
 
 from core.enums import Exchange, MarketType, QuoteCurrency, Timeframe
-from core.models import FundingRate, LiquiditySnapshot, OHLCV, TopOfBook
+from core.models import FundingRate, Listing, LiquiditySnapshot, OHLCV, TopOfBook
 from data_collection.base import BaseExchangeScraper, Capability
 from data_collection.http import HttpClient
 from data_collection.ratelimit import RateLimiter
@@ -15,6 +16,12 @@ _INTERVALS: dict[Timeframe, str] = {
     Timeframe.M30: "PT30M", Timeframe.H1: "PT1H", Timeframe.H2: "PT2H",
     Timeframe.H4: "PT4H", Timeframe.D1: "P1D",
 }
+
+# Markets still listed: trading now, or announced and not yet launched.
+# REDUCE_ONLY and DELISTED markets are on their way out or gone.
+_LISTED_STATUSES = frozenset({"ACTIVE", "PRELISTED"})
+# The trading-session suffix of equity markets, e.g. AAPL_24_5 (24h, 5 days).
+_SESSION_SUFFIX = re.compile(r"_\d+_\d+$")
 
 
 def _from_ts_flexible(ts: int | float) -> datetime:
@@ -43,6 +50,7 @@ class ExtendedScraper(BaseExchangeScraper):
             Capability.LIQUIDITY,
             Capability.VENUE_VOLUME,
             Capability.BBO,
+            Capability.MARKETS,
         }
     )
 
@@ -193,3 +201,19 @@ class ExtendedScraper(BaseExchangeScraper):
             else:
                 spot += v
         return {"spot": spot or None, "perp": perp or None}
+
+    async def fetch_markets(self) -> Sequence[Listing]:
+        """Perpetuals, USD-collateralised, active or pre-listed. The base is
+        the venue's asset name without its session suffix (AAPL_24_5 -> AAPL)."""
+        payload = await self.http.get_json(f"{self.base_url}/api/v1/info/markets")
+        out: list[Listing] = []
+        for m in _unwrap(payload):
+            if (
+                m.get("type") != "PERPETUAL"
+                or m.get("status") not in _LISTED_STATUSES
+                or m.get("collateralAssetName") != "USD"
+            ):
+                continue
+            asset = m.get("assetName") or m["name"].rsplit("-", 1)[0]
+            out.append(Listing(symbol=m["name"], base=_SESSION_SUFFIX.sub("", asset).upper()))
+        return out

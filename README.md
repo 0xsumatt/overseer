@@ -1162,6 +1162,20 @@ Notes:
   not stored; a venue whose reading fails alerts on its own, unless every venue
   fails, which alerts once as DefiLlama. A database created before this needs
   `migrations/015_venue_tvl.sql` once, before the scheduler restarts.
+* Listings: at 06:20 UTC the scheduler reads every configured venue's market
+  list (`scheduler/listings.py`, one or two requests a venue) and posts to
+  Discord, once each: a tracked asset a venue newly lists where `symbols.toml`
+  does not configure it, with the line to add; a configured market the venue
+  no longer lists (delisted, closed or reduce-only), and its return. Venues
+  name some assets differently, so an asset matches its id and every name its
+  configured markets carry (gold is XAU on some venues, GOLD on others). The
+  first check lists every such addition there is. On Mondays it also posts
+  untracked assets listed somewhere new that week and now on three or more
+  exchanges, a guide to what is becoming popular. It only reports: a ticker
+  can name a different asset elsewhere, and each market costs request budget
+  (Lighter's especially). Markets are kept in `venue_listings`; a database
+  created before this needs `migrations/016_venue_listings.sql` once, before
+  the scheduler restarts.
 * Funding units: every five minutes each venue's resting crypto funding rate,
   the exact rate at least three of its quiet markets share (10.95% a year at
   0.01% per eight hours; Extended rests at 11.39% and Lighter at 10.51%), is

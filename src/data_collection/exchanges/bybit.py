@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, ClassVar
 
 from core.enums import Exchange, MarketType, QuoteCurrency, Timeframe
-from core.models import FundingRate, LiquiditySnapshot, OHLCV, TopOfBook
+from core.models import FundingRate, LiquiditySnapshot, Listing, OHLCV, TopOfBook
 from data_collection.base import BaseExchangeScraper, Capability
 from data_collection.http import HttpClient
 from data_collection.ratelimit import RateLimiter
@@ -60,8 +60,12 @@ class BybitSpotScraper(BaseExchangeScraper):
     category: ClassVar[str] = "spot"
     quote_currency: ClassVar[QuoteCurrency] = QuoteCurrency.USDT
     capabilities: ClassVar[frozenset[Capability]] = frozenset(
-        {Capability.OHLCV, Capability.VENUE_VOLUME, Capability.BBO}
+        {Capability.OHLCV, Capability.VENUE_VOLUME, Capability.BBO, Capability.MARKETS}
     )
+    # instruments-info lists only Trading markets unless asked for one other
+    # status; spot ignores the filter, linear keeps pre-launch markets apart.
+    _market_status_queries: ClassVar[tuple[str | None, ...]] = (None,)
+    _listed_statuses: ClassVar[frozenset[str]] = frozenset({"Trading", "PreLaunch"})
 
     def _build_http(self) -> HttpClient:
         return HttpClient(
@@ -150,12 +154,42 @@ class BybitSpotScraper(BaseExchangeScraper):
         return {"spot": total, "perp": None} if self.market_type is MarketType.SPOT \
             else {"spot": None, "perp": total}
 
+    async def _instruments(self, status: str | None) -> list[dict]:
+        params = {"category": self.category, "limit": "1000"}
+        if status is not None:
+            params["status"] = status
+        rows: list[dict] = []
+        while True:
+            result = await self._get("/v5/market/instruments-info", params)
+            rows.extend(result["list"])
+            cursor = result.get("nextPageCursor")
+            if not cursor:
+                return rows
+            params = {**params, "cursor": cursor}
+
+    def _is_listed_market(self, info: dict) -> bool:
+        return (
+            info.get("quoteCoin") == self.quote_currency.value
+            and info.get("status") in self._listed_statuses
+        )
+
+    async def fetch_markets(self) -> Sequence[Listing]:
+        out: list[Listing] = []
+        for status in self._market_status_queries:
+            out.extend(
+                Listing(symbol=self.to_symbol(i["symbol"]), base=i["baseCoin"].upper())
+                for i in await self._instruments(status)
+                if self._is_listed_market(i)
+            )
+        return out
+
 
 class BybitPerpScraper(BybitSpotScraper):
    
 
     market_type: ClassVar[MarketType] = MarketType.PERP
     category: ClassVar[str] = "linear"
+    _market_status_queries: ClassVar[tuple[str | None, ...]] = (None, "PreLaunch")
     capabilities: ClassVar[frozenset[Capability]] = frozenset(
         {
             Capability.OHLCV,
@@ -163,8 +197,16 @@ class BybitPerpScraper(BybitSpotScraper):
             Capability.LIQUIDITY,
             Capability.VENUE_VOLUME,
             Capability.BBO,
+            Capability.MARKETS,
         }
     )
+
+    def _is_listed_market(self, info: dict) -> bool:
+        # LinearFutures are dated; USDC perps fail the quote check.
+        return (
+            info.get("contractType") == "LinearPerpetual"
+            and super()._is_listed_market(info)
+        )
 
     _funding_intervals: dict[str, int] | None = None   
 

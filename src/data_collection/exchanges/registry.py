@@ -11,7 +11,11 @@ from data_collection.exchanges.bullet import BulletScraper
 from data_collection.exchanges.bybit import BybitPerpScraper, BybitSpotScraper
 from data_collection.exchanges.extended import ExtendedScraper
 from data_collection.exchanges.hylo import HyloScraper
-from data_collection.exchanges.hyperliquid import HyperliquidDeployerScraper, HyperliquidScraper
+from data_collection.exchanges.hyperliquid import (
+    HyperliquidIoScraper,
+    HyperliquidScraper,
+    HyperliquidXyzScraper,
+)
 from data_collection.exchanges.lighter import LighterScraper
 from data_collection.exchanges.phoenix import PhoenixScraper
 from data_collection.exchanges.qfex import QfexScraper
@@ -23,8 +27,8 @@ REGISTRY: dict[str, type[BaseExchangeScraper]] = {
     "bybit_spot": BybitSpotScraper,
     "bybit_perp": BybitPerpScraper,
     "hyperliquid": HyperliquidScraper,
-    "hyperliquid_xyz": HyperliquidDeployerScraper,
-    "hyperliquid_io": HyperliquidDeployerScraper,
+    "hyperliquid_xyz": HyperliquidXyzScraper,
+    "hyperliquid_io": HyperliquidIoScraper,
     "lighter": LighterScraper,
     "extended": ExtendedScraper,
     "bulk": BulkScraper,          
