@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Sequence
 
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
@@ -39,22 +39,43 @@ class ReadStorage:
         since: datetime | None = None,
         until: datetime | None = None,
         limit: int = 1000,
+        bucket_seconds: int | None = None,
     ) -> list[Row]:
-
+        """The newest `limit` bars in [since, until], oldest first. With
+        `bucket_seconds` the bars are merged into buckets that long (first
+        open, highest high, lowest low, last close, summed volume), so a long
+        window fits in `limit` bars rather than losing its start."""
         since = since or datetime(1970, 1, 1, tzinfo=timezone.utc)
         until = until or datetime.now(timezone.utc)
+        if bucket_seconds is None:
+            return self._fetch(
+                """
+                SELECT ts, open, high, low, close, volume FROM (
+                    SELECT ts, open, high, low, close, volume
+                    FROM ohlcv
+                    WHERE exchange=%s AND market_type=%s AND symbol=%s
+                      AND interval=%s AND ts >= %s AND ts <= %s
+                    ORDER BY ts DESC
+                    LIMIT %s
+                ) recent ORDER BY ts ASC
+                """,
+                (exchange, market_type, symbol, interval, since, until, limit),
+            )
         return self._fetch(
             """
             SELECT ts, open, high, low, close, volume FROM (
-                SELECT ts, open, high, low, close, volume
+                SELECT time_bucket(make_interval(secs => %s), ts) AS ts,
+                       first(open, ts) AS open, max(high) AS high, min(low) AS low,
+                       last(close, ts) AS close, sum(volume) AS volume
                 FROM ohlcv
                 WHERE exchange=%s AND market_type=%s AND symbol=%s
                   AND interval=%s AND ts >= %s AND ts <= %s
-                ORDER BY ts DESC
+                GROUP BY 1
+                ORDER BY 1 DESC
                 LIMIT %s
             ) recent ORDER BY ts ASC
             """,
-            (exchange, market_type, symbol, interval, since, until, limit),
+            (bucket_seconds, exchange, market_type, symbol, interval, since, until, limit),
         )
 
     def chart_series(self) -> list[Row]:
@@ -253,14 +274,14 @@ class ReadStorage:
             (exchange, symbol, hours, limit),
         )
 
-    def funding_series_multi(
-        self, symbols: list[str], hours: int = 48, limit: int = 5000
-    ) -> list[Row]:
+    def funding_series_multi(self, symbols: list[str], hours: int = 48) -> list[Row]:
         """Settled funding history across every venue that lists any of the
         given native symbols — the historic multi-venue overlay on the
         funding page. Unscoped by exchange: the caller (api layer) already
         resolved which native symbols belong to one asset via SymbolRegistry,
-        so any (exchange, symbol) match here IS a real series for that asset."""
+        so any (exchange, symbol) match here IS a real series for that asset.
+        The window alone bounds the rows (the API allows 30 days, about 7,400
+        rows for BTC); a row limit would drop whole venues, last by name."""
         if not symbols:
             return []
         return self._fetch(
@@ -271,9 +292,8 @@ class ReadStorage:
             WHERE symbol = ANY(%s)
               AND ts >= now() - make_interval(hours => %s)
             ORDER BY exchange, symbol, ts
-            LIMIT %s
             """,
-            (symbols, hours, limit),
+            (symbols, hours),
         )
 
     def current_funding_rates(self, exchanges: list[str], symbols: list[str]) -> list[Row]:
@@ -310,16 +330,16 @@ class ReadStorage:
         )
 
     def liquidity_series_multi(
-        self, symbols: list[str], hours: int = 48,
-        bucket_minutes: int | None = None, limit: int = 20_000,
+        self, symbols: list[str], hours: int = 48, bucket_minutes: int | None = None,
     ) -> list[Row]:
         """OI-notional history across every venue that lists any of the given
         native symbols — the volume-style bar pane under the funding history
         chart. Liquidity samples every 5min, so long windows at fine bucket
         sizes get dense fast; bucket_minutes is caller-controlled (the funding
-        page exposes it directly) so a 30d view can ask for hourly/daily bars
-        instead of drowning in 5min noise. Falls back to an hours-based
-        default when the caller doesn't specify one."""
+        page exposes it directly, and the API keeps each venue to a bounded
+        number of bars) so a 30d view can ask for hourly/daily bars instead of
+        drowning in 5min noise. Falls back to an hours-based default when the
+        caller doesn't specify one."""
         if not symbols:
             return []
         if bucket_minutes is None:
@@ -334,9 +354,8 @@ class ReadStorage:
               AND ts >= now() - make_interval(hours => %s)
             GROUP BY exchange, symbol, 3
             ORDER BY exchange, symbol, 3
-            LIMIT %s
             """,
-            (bucket, symbols, hours, limit),
+            (bucket, symbols, hours),
         )
 
     def volume_oi_ratio(
@@ -482,20 +501,34 @@ class ReadStorage:
 
     # -- health (the internal soak-monitoring page) -----------------------------
 
-    def freshness(self) -> list[Row]:
-        """Age of the newest bar per series — the leading is-it-alive signal.
-        stale_factor = age / interval length; > ~3 means the series has stopped."""
+    def freshness(self, series: Sequence[tuple[str, str, str, str]]) -> list[Row]:
+        """Age of the newest bar of each (exchange, market_type, symbol,
+        interval) series — the leading is-it-alive signal. stale_factor = age
+        / interval length; > ~3 means the series has stopped, and None means
+        it has no bar at all. One newest-first primary-key probe per series,
+        so the cost does not grow with history."""
+        if not series:
+            return []
+        exchanges, market_types, symbols, intervals = (list(column) for column in zip(*series))
         return self._fetch(
             """
-            SELECT exchange, market_type, symbol, interval,
-                   max(ts)                                   AS last_ts,
-                   now() - max(ts)                           AS age,
-                   EXTRACT(EPOCH FROM (now() - max(ts)))
-                     / EXTRACT(EPOCH FROM interval::interval) AS stale_factor
-            FROM ohlcv
-            GROUP BY 1, 2, 3, 4
-            ORDER BY stale_factor DESC
-            """
+            SELECT s.exchange, s.market_type, s.symbol, s.interval,
+                   newest.ts                                    AS last_ts,
+                   now() - newest.ts                            AS age,
+                   EXTRACT(EPOCH FROM (now() - newest.ts))
+                     / EXTRACT(EPOCH FROM s.interval::interval) AS stale_factor
+            FROM unnest(%s::text[], %s::text[], %s::text[], %s::text[])
+                 AS s(exchange, market_type, symbol, interval)
+            LEFT JOIN LATERAL (
+                SELECT o.ts FROM ohlcv o
+                WHERE o.exchange = s.exchange AND o.market_type = s.market_type
+                  AND o.symbol = s.symbol AND o.interval = s.interval
+                ORDER BY o.ts DESC
+                LIMIT 1
+            ) newest ON TRUE
+            ORDER BY stale_factor DESC NULLS FIRST
+            """,
+            (exchanges, market_types, symbols, intervals),
         )
 
     def ingest_freshness(self) -> Row | None:

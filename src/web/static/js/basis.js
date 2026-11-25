@@ -85,9 +85,10 @@
     const hoursSelect = document.getElementById('hours');
     const hours = hoursSelect.value;
     const windowLabel = hoursSelect.selectedOptions[0].textContent;
+    // One row per minute of the window, plus an hour of slack (the server caps a week).
     const qs = new URLSearchParams({
       spot_exchange: se, spot_symbol: ss, perp_exchange: pe, perp_symbol: ps,
-      interval: '1m', hours, limit: 10000,
+      interval: '1m', hours, limit: Number(hours) * 60 + 60,
     });
     const fqs = new URLSearchParams({ exchange: pe, symbol: ps, hours });
     document.getElementById('basis-pair').textContent = `${labelFor(se)} ${ss} vs ${labelFor(pe)} ${ps}`;

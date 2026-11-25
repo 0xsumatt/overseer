@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from enum import StrEnum
 from typing import ClassVar
@@ -43,6 +43,9 @@ class BaseExchangeScraper(ABC):
     market_type: ClassVar[MarketType]         
     capabilities: ClassVar[frozenset[Capability]] = frozenset()
     quote_currency: ClassVar[QuoteCurrency]
+    # How long after a settlement the venue's funding history is final; the
+    # hourly funding job waits this long past the hour (QFEX: 5 minutes).
+    SETTLED_AFTER: ClassVar[timedelta] = timedelta(0)
 
     def __init__(self, http: HttpClient | None = None) -> None:
    
@@ -158,3 +161,13 @@ class BaseExchangeScraper(ABC):
         """Parse a venue number to Decimal. Always go via str so float noise
         ('0.1' + '0.2' style) never enters price/size data."""
         return Decimal(str(value))
+
+    @staticmethod
+    def _bars_since(since: datetime, interval: Timeframe, cap: int) -> int:
+        """Bars from `since` through the current one, plus one for clock skew,
+        at most `cap`: asking for a venue's maximum on every poll downloads
+        hundreds of bars to keep two."""
+        if since.tzinfo is None:
+            since = since.replace(tzinfo=timezone.utc)
+        elapsed = (datetime.now(timezone.utc) - since).total_seconds()
+        return max(1, min(cap, int(elapsed // interval.seconds) + 2))

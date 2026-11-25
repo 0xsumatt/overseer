@@ -14,6 +14,8 @@ User accounts are CLI-only (no self-registration):
 
 from __future__ import annotations
 
+import functools
+import hashlib
 import os
 import secrets
 import tomllib
@@ -55,6 +57,25 @@ def _proxy_hops() -> int:
     return hops
 
 
+@functools.lru_cache(maxsize=512)
+def _file_digest(path: str, mtime_ns: int) -> str:
+    with open(path, "rb") as file:
+        return hashlib.blake2b(file.read(), digest_size=5).hexdigest()
+
+
+def _static_version(static_folder: str, filename: str) -> str | None:
+    """A hash of the file's content, so a changed file gets a new URL and the
+    year-long cache on versioned static URLs (deploy/nginx) never serves a
+    stale copy. Keyed by modification time too, so a development server sees
+    edits at once."""
+    path = os.path.join(static_folder, filename)
+    try:
+        return _file_digest(path, os.stat(path).st_mtime_ns)
+    except OSError:
+        return None
+
+
+
 def create_app(database_url: str | None = None) -> Flask:
     app = Flask(__name__, template_folder="templates")
     proxy_hops = _proxy_hops()
@@ -69,6 +90,13 @@ def create_app(database_url: str | None = None) -> Flask:
         SESSION_COOKIE_SAMESITE="Lax",
         SESSION_COOKIE_SECURE=_env_bool("OVERSEER_SECURE_COOKIES"),
     )
+
+    @app.url_defaults
+    def _version_static_urls(endpoint: str, values: dict) -> None:
+        if endpoint == "static" and "filename" in values and app.static_folder:
+            version = _static_version(app.static_folder, values["filename"])
+            if version:
+                values["v"] = version
 
     secret = getattr(settings, "flask_secret_key", "") or os.getenv("FLASK_SECRET_KEY", "")
     if not secret:

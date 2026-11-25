@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import csv
 import io
+import math
 from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, Response, current_app, jsonify, request
 from core.depth import HEATMAP_WINDOWS, WINDOW_BPS
 from core.enums import Exchange, MarketType
-from core.execution_fees import FEE_SCHEDULES, execution_listings, selected_tiers
+from core.execution_fees import FEE_SCHEDULES, execution_listings, selected_tiers, taker_bps
 from core.execution_history import (
     HISTORY_ASSETS, HISTORY_INTERVAL_SECONDS, HISTORY_SIDES, HISTORY_WINDOWS_DAYS, ROUND_TRIP, summarise,
 )
@@ -88,6 +89,27 @@ def _maybe_csv(rows: list[dict], filename: str) -> Response | None:
     )
 
 
+# Bar sizes a long window is merged into when it holds more bars than the
+# caller asked for: 7 days of 1-minute bars is 10,080, so a 5,000-bar chart
+# gets 5-minute bars for the whole week instead of its newest 3.5 days.
+_CANDLE_BUCKETS = ((300, "5m"), (900, "15m"), (3600, "1h"), (4 * 3600, "4h"), (86400, "1d"))
+_BAR_UNITS = {"m": 60, "h": 3600, "d": 86400}
+
+
+def _candle_bucket(interval: str, hours: float, limit: int) -> tuple[int, str] | None:
+    """The smallest bucket that fits the window in `limit` bars, or None when
+    the interval's own bars already fit. Raises ValueError for an interval
+    that is not a count of minutes, hours or days."""
+    bar = int(interval[:-1]) * _BAR_UNITS[interval[-1]] if interval[-1:] in _BAR_UNITS else None
+    if not bar:
+        raise ValueError(interval)
+    window = hours * 3600
+    if window / bar <= limit:
+        return None
+    larger = [bucket for bucket in _CANDLE_BUCKETS if bucket[0] > bar]
+    return next((bucket for bucket in larger if window / bucket[0] <= limit), larger[-1] if larger else None)
+
+
 @bp.get("/candles")
 def candles():
     q = request.args
@@ -101,9 +123,13 @@ def candles():
     limit = min(int(q.get("limit", 1000)), 5000)
     hours = float(q.get("hours", 48))
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
+    try:
+        bucket = _candle_bucket(interval, hours, limit)
+    except ValueError:
+        return jsonify(error="interval must be a number of minutes, hours or days, e.g. 1m"), 400
 
-    rows = _store().candles(exchange, market_type, symbol, interval,
-                            since=since, limit=limit)
+    rows = _store().candles(exchange, market_type, symbol, interval, since=since, limit=limit,
+                            bucket_seconds=bucket[0] if bucket else None)
     payload = [
         {
             "time": int(r["ts"].timestamp()),
@@ -113,7 +139,7 @@ def candles():
         }
         for r in rows
     ]
-    return _maybe_csv(payload, f"candles_{exchange}_{symbol}_{interval}") \
+    return _maybe_csv(payload, f"candles_{exchange}_{symbol}_{bucket[1] if bucket else interval}") \
         or jsonify(payload)
 
 
@@ -208,7 +234,8 @@ def basis():
     except KeyError as missing:
         return jsonify(error=f"missing query param: {missing}"), 400
     interval = q.get("interval", "1m")
-    limit = min(int(q.get("limit", 2000)), 10000)
+    # Up to a week of 1-minute rows plus an hour, so the 7d basis is whole.
+    limit = min(int(q.get("limit", 2000)), 7 * 24 * 60 + 60)
     hours = float(q.get("hours", 48))
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
 
@@ -347,6 +374,12 @@ def funding_history_multi():
     return jsonify(out)
 
 
+# About this many OI bars per venue at most (30 days of 15-minute bars): finer
+# widths over long windows are widened to fit, as funding.js offers them,
+# rather than cut off. A row limit across venues dropped whole venues.
+MAX_OI_BARS = 2880
+
+
 @bp.get("/liquidity-history-multi")
 def liquidity_history_multi():
     """OI-notional history for one aggregated base asset, grouped by its
@@ -354,7 +387,8 @@ def liquidity_history_multi():
     requested_asset = request.args.get("asset", "")
     hours = min(int(request.args.get("hours", 48)), 24 * 30)
     bucket_arg = request.args.get("bucket")
-    bucket_minutes = min(max(int(bucket_arg), 1), 1440) if bucket_arg else None
+    bucket_minutes = (max(min(max(int(bucket_arg), 1), 1440), math.ceil(hours * 60 / MAX_OI_BARS))
+                      if bucket_arg else None)
     registry = current_app.extensions["symbols"]
     store = _store()
     native_symbols = _funding_symbols_for_asset(store, registry, requested_asset)
@@ -549,11 +583,12 @@ def execution_history():
         tiers = selected_tiers(requested)
     except ValueError as error:
         return jsonify(error=str(error)), 400
-    fees = {venue: float(tier["taker_bps"]) if tier["taker_bps"] is not None else None
-            for venue, tier in tiers.items()}
+    registry = current_app.extensions["symbols"]
+    asset_class = registry.metadata(asset).asset_class
+    rates = {venue: taker_bps(tier, asset_class) for venue, tier in tiers.items()}
+    fees = {venue: float(rate) if rate is not None else None for venue, rate in rates.items()}
     since = datetime.now(timezone.utc) - timedelta(days=days)
     rows = _store().execution_samples(asset, ["buy", "sell"] if side == ROUND_TRIP else [side], since)
-    registry = current_app.extensions["symbols"]
     listings = execution_listings(registry, asset)
     sizes = summarise(rows, side, fees)
     for size in sizes:

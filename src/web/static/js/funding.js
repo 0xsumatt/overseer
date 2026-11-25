@@ -1133,6 +1133,19 @@ function ewma(points, alpha = 0.35) {
 // directly; this only fires when #hhours itself changes, so a manual choice
 // sticks until they pick a different window.
 const DEFAULT_BUCKET = { 24: 5, 48: 5, 168: 60, 720: 240 };
+// The API keeps each venue to at most this many OI bars (MAX_OI_BARS in
+// views/api.py) by widening finer bars, so widths that would exceed it over
+// the chosen window are not offered: 5m bars over 30 days would be 8,640.
+const MAX_OI_BARS = 2880;
+function syncBucketOptions() {
+  const hours = Number(document.getElementById('hhours').value);
+  const select = document.getElementById('hbucket');
+  for (const option of select.options) option.disabled = hours * 60 / Number(option.value) > MAX_OI_BARS;
+  if (select.selectedOptions[0]?.disabled) {
+    select.value = [...select.options].find(option => !option.disabled)?.value ?? select.value;
+    fundingFilters.set('hbucket', select.value);
+  }
+}
 
 async function loadHistory({ forceRefresh = false } = {}) {
   const asset = document.getElementById('hcoin').value;
@@ -1348,6 +1361,7 @@ document.getElementById('smooth-ewma').addEventListener('click', () => setSmooth
 for (const id of ['hhours', 'hbucket']) {
   fundingFilters.restoreSelect(document.getElementById(id));
 }
+syncBucketOptions();
 document.getElementById('hcoin').addEventListener('change', event => {
   fundingFilters.set('asset', event.target.value);
   loadHistory();
@@ -1359,6 +1373,7 @@ document.getElementById('hhours').addEventListener('change', event => {
     document.getElementById('hbucket').value = suggested;
     fundingFilters.set('hbucket', suggested);
   }
+  syncBucketOptions();
   loadHistory();
 });
 document.getElementById('hbucket').addEventListener('change', event => {

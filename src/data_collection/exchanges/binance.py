@@ -33,7 +33,6 @@ class BinanceSpotScraper(BaseExchangeScraper):
         {Capability.OHLCV, Capability.VENUE_VOLUME, Capability.BBO}
     )
     _klines_path: ClassVar[str] = "/api/v3/klines"
-    _klines_weight: ClassVar[int] = 2
     _ticker24h_path: ClassVar[str] = "/api/v3/ticker/24hr"
     _ticker24h_weight: ClassVar[int] = 80       
     _book_ticker_path: ClassVar[str] = "/api/v3/ticker/bookTicker"
@@ -68,9 +67,14 @@ class BinanceSpotScraper(BaseExchangeScraper):
         )
 
 
+    @staticmethod
+    def _klines_weight(limit: int) -> int:
+        return 2
+
     async def fetch_ohlcv(
         self, symbol: str, interval: Timeframe, since: datetime, *, limit: int = 1000
     ) -> Sequence[OHLCV]:
+        limit = self._bars_since(since, interval, limit)
         rows = await self.http.get_json(
             f"{self.base_url}{self._klines_path}",
             params={
@@ -79,7 +83,7 @@ class BinanceSpotScraper(BaseExchangeScraper):
                 "startTime": str(self._to_ms(since)),
                 "limit": str(limit),
             },
-            weight=self._klines_weight,
+            weight=self._klines_weight(limit),
         )
         canonical = self.to_symbol(self.to_native(symbol))
         out: list[OHLCV] = []
@@ -114,7 +118,6 @@ class BinanceFuturesScraper(BinanceSpotScraper):
     base_url: ClassVar[str] = "https://fapi.binance.com"
     market_type: ClassVar[MarketType] = MarketType.PERP
     _klines_path: ClassVar[str] = "/fapi/v1/klines"
-    _klines_weight: ClassVar[int] = 5            
     _ticker24h_path: ClassVar[str] = "/fapi/v1/ticker/24hr"
     _ticker24h_weight: ClassVar[int] = 40         
     _book_ticker_path: ClassVar[str] = "/fapi/v1/ticker/bookTicker"
@@ -124,6 +127,11 @@ class BinanceFuturesScraper(BinanceSpotScraper):
             limiter=RateLimiter.per_minute(2400, burst=60),    
             default_headers={"User-Agent": "overseer/0.1"},
         )
+
+    @staticmethod
+    def _klines_weight(limit: int) -> int:
+        # Futures klines are charged by the limit asked for, not the bars returned.
+        return 1 if limit < 100 else 2 if limit < 500 else 5 if limit <= 1000 else 10
 
 
     capabilities = frozenset(

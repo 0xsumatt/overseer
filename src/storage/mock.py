@@ -8,6 +8,10 @@ from typing import Any
 
 from werkzeug.security import generate_password_hash
 
+from core.config import settings
+from core.execution_fees import execution_listings
+from core.symbols import SymbolRegistry
+
 Row = dict[str, Any]
 UTC = timezone.utc
 
@@ -180,35 +184,45 @@ def _px(seed: str, base: float, i: int) -> float:
 
 # Execution-history venue profiles: half-spread bps, size impact in bps per $1m,
 # share of captures with an old book timestamp, smallest size whose captured
-# depth often falls short, and share of captures with no book at all.
+# depth often falls short, and share of captures with no book at all. Each
+# asset's samples cover the venues symbols.toml compares it on.
 _EXEC_PROFILES = (
     ("binance_perp", 0.25, 0.6, 0.0, None, 0.003),
     ("bybit_perp", 0.35, 0.7, 0.18, None, 0.004),
     ("hyperliquid", 0.45, 1.8, 0.0, 1_000_000, 0.004),
+    ("hyperliquid_xyz", 0.4, 2.0, 0.0, 1_000_000, 0.004),
     ("lighter", 2.6, 1.4, 0.0, None, 0.006),
     ("extended", 0.3, 1.1, 0.0, None, 0.008),
     ("rise", 0.9, 4.0, 0.0, 1_000_000, 0.01),
     ("bullet", 0.8, 5.0, 0.0, 1_000_000, 0.01),
     ("bulk", 0.9, 3.5, 0.0, 1_000_000, 0.01),
+    ("phoenix", 1.2, 6.0, 0.0, 1_000_000, 0.01),
+    ("qfex", 0.6, 3.0, 0.0, 1_000_000, 0.01),
 )
+# History prices: the crypto bases, plus the traditional history assets.
+_HISTORY_BASES = {**_BASES, "XAU": 3_870.0, "NVDA": 154.0}
 
-# Depth-heatmap profiles from one live capture: how far each venue's REST book
-# reached either side of the mid for BTC, ETH and SOL, USD resting in the
-# 1-bp bucket next to the mid for BTC, the quote currency and levels per side.
+# Depth-heatmap profiles from live captures: how far each venue's REST book
+# reached either side of the mid for BTC, ETH, SOL, XAU and NVDA, USD resting
+# in the 1-bp bucket next to the mid for BTC, the quote currency and levels per
+# side. Reaches for assets a venue does not list are never read.
 _DEPTH_PROFILES = {
-    "binance_perp": ((16, 46, 960), 2_300_000, "USDT", 1000),
-    "bybit_perp": ((25, 60, 960), 2_900_000, "USDT", 1000),
-    "hyperliquid": ((2.4, 8, 19), 2_000_000, "USD", 20),
-    "lighter": ((19, 60, 400), 1_000_000, "USD", 220),
-    "extended": ((3400, 5800, 6600), 400_000, "USD", 900),
-    "rise": ((860, 3700, 2000), 50_000, "USDC", 130),
-    "bullet": ((500, 500, 500), 35_000, "USD", 35),
-    "bulk": ((2000, 2900, 2000), 100_000, "USD", 60),
+    "binance_perp": ((16, 46, 960, 60, 80), 2_300_000, "USDT", 1000),
+    "bybit_perp": ((25, 60, 960, 320, 810), 2_900_000, "USDT", 1000),
+    "hyperliquid": ((2.4, 8, 19, 5, 13), 2_000_000, "USD", 20),
+    "hyperliquid_xyz": ((2.4, 8, 19, 5.4, 12.7), 2_000_000, "USDC", 20),
+    "lighter": ((19, 60, 400, 530, 360), 1_000_000, "USD", 220),
+    "extended": ((3400, 5800, 6600, 2000, 4300), 400_000, "USD", 900),
+    "rise": ((860, 3700, 2000, 5000, 5000), 50_000, "USDC", 130),
+    "bullet": ((500, 500, 500, 320, 1600), 35_000, "USD", 35),
+    "bulk": ((2000, 2900, 2000, 2000, 1600), 100_000, "USD", 60),
+    "phoenix": ((9900, 9900, 9900, 1700, 2700), 25_000, "USDC", 200),
+    "qfex": ((25, 25, 25, 46, 23), 300_000, "USD", 20),
 }
-_DEPTH_COINS = ("BTC", "ETH", "SOL")
-_DEPTH_COIN_SCALE = {"BTC": 1.0, "ETH": 0.4, "SOL": 0.12}
+_DEPTH_COINS = ("BTC", "ETH", "SOL", "XAU", "NVDA")
+_DEPTH_COIN_SCALE = {"BTC": 1.0, "ETH": 0.4, "SOL": 0.12, "XAU": 0.1, "NVDA": 0.05}
 # Round-number price steps where mock walls rest.
-_DEPTH_WALL_STEP = {"BTC": 250.0, "ETH": 10.0, "SOL": 0.5}
+_DEPTH_WALL_STEP = {"BTC": 250.0, "ETH": 10.0, "SOL": 0.5, "XAU": 10.0, "NVDA": 1.0}
 _DEPTH_QUOTE_RATES = {"USD": 1.0, "USDT": 0.9998, "USDC": 0.9999}
 
 
@@ -235,6 +249,8 @@ class MockStorage:
 
     def __init__(self, *args, **kwargs) -> None:
         self._pwhash = generate_password_hash(MOCK_PASSWORD)
+        # History mocks cover the venues each asset is compared on, as configured.
+        self._registry = SymbolRegistry.load(settings.symbols_file)
 
     def close(self) -> None:
         pass
@@ -271,11 +287,14 @@ class MockStorage:
         return out
 
     def candles(self, exchange, market_type, symbol, interval,
-                since=None, until=None, limit: int = 1000) -> list[Row]:
+                since=None, until=None, limit: int = 1000,
+                bucket_seconds: int | None = None) -> list[Row]:
         now = datetime.now(UTC).replace(second=0, microsecond=0)
         until = min(until or now, now)
         since = since or (until - timedelta(minutes=limit))
-        n = min(limit, max(2, int((until - since).total_seconds() // 60)))
+        minutes = max(2, int((until - since).total_seconds() // 60))
+        # Merged windows need every minute in them; raw ones only the newest `limit`.
+        n = minutes if bucket_seconds else min(limit, minutes)
         base = next((b for *_x, sym, _a, b, _f in
                      ((v, e, m, s, a, bb, f) for v, e, m, s, a, bb, f in self._series())
                      if sym == symbol), 100.0)
@@ -294,7 +313,18 @@ class MockStorage:
                 "low": Decimal(f"{lo:.6f}"), "close": Decimal(f"{c:.6f}"),
                 "volume": Decimal(f"{abs(vol):.4f}"),
             })
-        return rows
+        if not bucket_seconds:
+            return rows
+        merged: dict[int, Row] = {}
+        for row in rows:
+            start = int(row["ts"].timestamp()) // bucket_seconds * bucket_seconds
+            bar = merged.get(start)
+            if bar is None:
+                merged[start] = dict(row, ts=datetime.fromtimestamp(start, tz=UTC))
+            else:
+                bar.update(high=max(bar["high"], row["high"]), low=min(bar["low"], row["low"]),
+                           close=row["close"], volume=bar["volume"] + row["volume"])
+        return list(merged.values())[-limit:]
 
     def orderbook_spreads(
         self, market_type, symbols, exchanges, since, bucket_minutes
@@ -445,16 +475,16 @@ class MockStorage:
 
     # -- health ---------------------------------------------------------------------
 
-    def freshness(self) -> list[Row]:
+    def freshness(self, series) -> list[Row]:
         now = datetime.now(UTC)
         out: list[Row] = []
-        for _v, exchange, mt, symbol, asset, _b, _f in self._series():
+        for exchange, mt, symbol, interval in series:
             stale = 182.4 if (exchange, symbol) == ("extended", "AAVE-USD") else \
                     abs(_u(f"fresh:{exchange}:{symbol}", 1)) * 1.4 + 0.2
             age = timedelta(seconds=int(stale * 60))
             out.append({
                 "exchange": exchange, "market_type": mt, "symbol": symbol,
-                "interval": "1m", "last_ts": now - age, "age": age,
+                "interval": interval, "last_ts": now - age, "age": age,
                 "stale_factor": stale,
             })
         out.sort(key=lambda r: -r["stale_factor"])
@@ -538,9 +568,7 @@ class MockStorage:
                         "apr_pct": Decimal(f"{apr:.4f}")})
         return out
 
-    def funding_series_multi(
-        self, symbols: list[str], hours: int = 48, limit: int = 5000
-    ) -> list[Row]:
+    def funding_series_multi(self, symbols: list[str], hours: int = 48) -> list[Row]:
         wanted = set(symbols)
         out: list[Row] = []
         seen: set[tuple[str, str]] = set()
@@ -554,7 +582,6 @@ class MockStorage:
                 current["exchange"],
                 symbol,
                 hours=hours,
-                limit=limit,
                 interval_hours=current["interval_hours"],
             ):
                 out.append({"exchange": current["exchange"], "symbol": symbol, **row})
@@ -597,8 +624,7 @@ class MockStorage:
         return rows
 
     def liquidity_series_multi(
-        self, symbols: list[str], hours: int = 48,
-        bucket_minutes: int | None = None, limit: int = 20_000,
+        self, symbols: list[str], hours: int = 48, bucket_minutes: int | None = None,
     ) -> list[Row]:
         wanted = set(symbols)
         bucket_min = bucket_minutes or (5 if hours <= 48 else 30 if hours <= 168 else 120)
@@ -613,7 +639,7 @@ class MockStorage:
                 continue
             seen.add(key)
             seed = f"oi:{current['exchange']}:{symbol}"
-            n = min(limit, (hours * 60) // bucket_min)
+            n = (hours * 60) // bucket_min
             for k in range(n, 0, -1):
                 ts = now - timedelta(minutes=k * bucket_min)
                 i = int(ts.timestamp() // 60)
@@ -819,12 +845,14 @@ class MockStorage:
         now -= timedelta(minutes=now.minute % 5)
         start = max(since, now - timedelta(days=9)).replace(second=0, microsecond=0)
         start += timedelta(minutes=(5 - start.minute % 5) % 5)
-        base = _BASES.get(asset, 100.0)
+        base = _HISTORY_BASES.get(asset, 100.0)
+        compared = execution_listings(self._registry, asset)
+        profiles = [profile for profile in _EXEC_PROFILES if profile[0] in compared]
         rows: list[Row] = []
         while start <= now:
             minute = int(start.timestamp() // 60)
             mid = _px(asset, base, minute)
-            for venue, spread, impact, stale, shallow_from, missing in _EXEC_PROFILES:
+            for venue, spread, impact, stale, shallow_from, missing in profiles:
                 draw = (_u(f"exec:{asset}:{venue}", minute) + 1) / 2
                 book = "unavailable" if draw < missing else "stale" if draw < missing + stale else "ok"
                 for side in sides:
@@ -859,7 +887,7 @@ class MockStorage:
         rows: list[Row] = []
         while slot <= now:
             minute = int(slot.timestamp() // 60)
-            mid = _px(asset, _BASES[asset], minute)
+            mid = _px(asset, _HISTORY_BASES[asset], minute)
             ask_reach = round(reach * (0.85 + 0.15 * (_u(f"depth-reach:{venue}:{asset}", minute) + 1)), 3)
             rows.append({
                 "slot": slot, "ts": slot, "source": "rest", "bucket_bps": 1.0, "mid": mid,

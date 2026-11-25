@@ -63,6 +63,20 @@
     return supplied(fraction) && Number.isFinite(numeric) ? `${numeric.toLocaleString('en-US', {maximumFractionDigits: 3})}%` : Fmt.DASH;
   }
   const feeText = takerBps => (supplied(takerBps) ? Fmt.feeBps(takerBps) : 'unknown, not zero');
+  // A venue can charge each asset class its own rate (QFEX by class, Binance
+  // and others a separate traditional-asset schedule).
+  const assetClasses = Object.fromEntries((config.assets || []).map(item => [item.id, item.asset_class]));
+  function tierRate(tier, assetClass) {
+    const rates = tier?.class_taker_bps || {};
+    return assetClass in rates ? rates[assetClass] : tier?.taker_bps;
+  }
+  // A tier's rate for the chosen positions: one, or each where they differ.
+  function tierRateText(tier) {
+    const chosen = [inputs.asset.value, pairActive() ? inputs.pairAsset.value : null].filter(Boolean);
+    const rates = [...new Set(chosen.map(asset => tierRate(tier, assetClasses[asset])))];
+    return rates.length ? rates.map(feeText).join(' / ') : feeText(tier.taker_bps);
+  }
+  const feeSelects = [];
   const statusLabels = {
     fee_unknown: 'Fee unknown', funding_unknown: 'Funding unknown', insufficient_depth: 'Snapshot too shallow',
     order_limit: 'Above venue limit', margin_unavailable: 'Margin rules unavailable',
@@ -89,6 +103,13 @@
       if (feeChoices[venue] && feeChoices[venue] !== schedule.default_tier) custom++;
     }
     $('margin-fee-summary').textContent = custom ? `${custom} modified ${custom === 1 ? 'tier' : 'tiers'}` : 'Base tiers';
+    // Tier menus show the rates for the positions chosen.
+    for (const [select, schedule] of feeSelects) {
+      for (const option of select.options) {
+        const tier = schedule.tiers.find(item => item.id === option.value);
+        if (tier) option.textContent = `${tier.label} · ${tierRateText(tier)}`;
+      }
+    }
     syncFilters();
   }
   function buildFeeControls() {
@@ -100,10 +121,11 @@
       const select = node('select', null, 'select select-polished');
       select.setAttribute('aria-label', `${schedule.label} fee tier`);
       for (const tier of schedule.tiers || []) {
-        const option = node('option', `${tier.label} · ${feeText(tier.taker_bps)}`);
+        const option = node('option', `${tier.label} · ${tierRateText(tier)}`);
         option.value = tier.id;
         select.append(option);
       }
+      feeSelects.push([select, schedule]);
       feeChoices[venue] = schedule.default_tier;
       select.value = schedule.default_tier;
       select.addEventListener('change', () => {
@@ -237,9 +259,12 @@
       line(labelText('trading cost'), leg.estimate ? `${usd(leg.estimate.trading_cost_usd, 2)} · ${Fmt.bps(leg.estimate.trading_cost_bps)}` : Fmt.DASH);
       if (leg.funding) {
         const amount = flow(leg.estimate?.funding_usd);
+        // Hundredths of a percent, so 0.05 reads 5, not 5.000000000000001.
+        const spread = Math.round(Number(leg.funding.spread) * 10000) / 100;
+        const kept = spread > 0 ? ` · after the venue's ${spread}% share of each payment` : '';
         line(labelText('funding'), leg.funding.unavailable ? `${leg.funding.unavailable}, not ranked`
           : amount.zero ? amount.text
-            : `${amount.text} ${amount.received ? 'received' : 'paid'} · ${Fmt.bps(Math.abs(Number(leg.funding.cost_bps)))}`);
+            : `${amount.text} ${amount.received ? 'received' : 'paid'} · ${Fmt.bps(Math.abs(Number(leg.funding.cost_bps)))}${kept}`);
       }
     }
     const combined = row.combined;
@@ -261,7 +286,11 @@
           : 'None: a fully funded long');
       }
     }
-    line('Fee tier', `${row.fee.tier_label} · ${feeText(row.fee.taker_bps)}`);
+    // Each position's rate, where its asset class pays a different one.
+    const legRates = new Set(row.legs.map(leg => leg.taker_bps));
+    line('Fee tier', `${row.fee.tier_label} · ${legRates.size > 1
+      ? row.legs.map(leg => `${leg.asset} ${feeText(leg.taker_bps)}`).join(' · ')
+      : feeText(row.legs[0]?.taker_bps)}`);
     if (row.margin) line('Margin rules', row.margin.source);
     const body = node('div', null, 'margin-detail-body');
     body.append(list);
@@ -438,6 +467,6 @@
   if (inputs.asset.options.length) calculate();
   else {
     refresh.disabled = true;
-    pageState.empty('No crypto perpetual assets are configured. Add an asset to the symbol list to compare margin.');
+    pageState.empty('No perpetual assets are configured. Add an asset to the symbol list to compare margin.');
   }
 })();

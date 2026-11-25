@@ -100,49 +100,48 @@ async def scrape_fills(
 
 # -- monitoring: heartbeat + edge-triggered alerts ----------------------------
 
-async def _handle_transition(
+def _handle_transition(
     outcome: JobOutcome, state: dict[str, str], notifier: DiscordNotifier
 ) -> None:
     prev = state.get(outcome.job_id)
     state[outcome.job_id] = outcome.status
     if outcome.status == "fail" and prev != "fail":
-        await notifier.failure(outcome.job_id, outcome.error)
+        notifier.failure(outcome.job_id, outcome.error)
     elif outcome.status == "ok" and prev == "fail":
-        await notifier.recovery(outcome.job_id, outcome.fetched, outcome.new_rows)
+        notifier.recovery(outcome.job_id, outcome.fetched, outcome.new_rows)
 
 
-async def _record_and_alert(
+def _record_and_alert(
     outcome: JobOutcome, storage: Storage, notifier: DiscordNotifier, state: dict[str, str]
 ) -> None:
-    try:
-        await storage.record_job_run(
-            outcome.job_id, outcome.status, outcome.fetched,
-            outcome.new_rows, outcome.error, outcome.ran_at,
-        )
-    except Exception:
-        log.exception("heartbeat write failed: %s", outcome.job_id)
-    await _handle_transition(outcome, state, notifier)
+    """Hold the heartbeat and any change of state: Storage writes heartbeats and
+    the notifier posts alerts in batches (run_job_runs, DiscordNotifier.run)."""
+    storage.record_job_run(
+        outcome.job_id, outcome.status, outcome.fetched,
+        outcome.new_rows, outcome.error, outcome.ran_at,
+    )
+    _handle_transition(outcome, state, notifier)
     if outcome.status == "ok":
-        log.info("%s  fetched=%d new=%d", outcome.job_id, outcome.fetched, outcome.new_rows)
+        log.debug("%s  fetched=%d new=%d", outcome.job_id, outcome.fetched, outcome.new_rows)
 
 
 # -- registered jobs (thin wrappers; explicit so no function is passed as a job arg)
 
 async def run_ohlcv(scraper, storage, notifier, state, target: ScrapeTarget) -> None:
     outcome = await scrape_ohlcv(scraper, storage, target)
-    await _record_and_alert(outcome, storage, notifier, state)
+    _record_and_alert(outcome, storage, notifier, state)
 
 
 async def run_orderbook(
     scraper, storage, notifier, state, target: OrderBookTarget
 ) -> None:
     outcome = await scrape_orderbook(scraper, storage, target)
-    await _record_and_alert(outcome, storage, notifier, state)
+    _record_and_alert(outcome, storage, notifier, state)
 
 
 async def run_fills(scraper, storage, notifier, state, target: FillsTarget) -> None:
     outcome = await scrape_fills(scraper, storage, target)
-    await _record_and_alert(outcome, storage, notifier, state)
+    _record_and_alert(outcome, storage, notifier, state)
 
 
 
@@ -177,15 +176,15 @@ async def scrape_liquidity(
 
 async def run_funding(scraper, storage, notifier, state, target: FundingTarget) -> None:
     outcome = await scrape_funding(scraper, storage, target)
-    await _record_and_alert(outcome, storage, notifier, state)
+    _record_and_alert(outcome, storage, notifier, state)
 
 
 async def run_liquidity(scraper, storage, notifier, state, target: LiquidityTarget) -> None:
     outcome = await scrape_liquidity(scraper, storage, target)
-    await _record_and_alert(outcome, storage, notifier, state)
+    _record_and_alert(outcome, storage, notifier, state)
 
 
-async def _alert_venue_errors(
+def _alert_venue_errors(
     prefix: str, venues: list[str], errors: dict[str, str],
     notifier: DiscordNotifier, state: dict[str, str],
 ) -> None:
@@ -200,10 +199,10 @@ async def _alert_venue_errors(
         prev = state.get(key, "ok")
         if venue in errors and prev != "fail":
             state[key] = "fail"
-            await notifier.failure(key, errors[venue])
+            notifier.failure(key, errors[venue])
         elif venue not in errors and prev == "fail":
             state[key] = "ok"
-            await notifier.recovery(key, 1, 0)
+            notifier.recovery(key, 1, 0)
 
 
 async def scrape_venue_volume(
@@ -233,7 +232,7 @@ async def scrape_venue_volume(
             if v is not None:
                 agg[side] = (agg[side] or 0) + v
 
-    await _alert_venue_errors(
+    _alert_venue_errors(
         "venue_volume",
         [v for v, s in scrapers.items() if Capability.VENUE_VOLUME in s.capabilities],
         errors, notifier, state,
@@ -263,7 +262,7 @@ async def scrape_venue_volume(
 
 async def run_venue_volume(scrapers: dict, storage, notifier, state) -> None:
     outcome = await scrape_venue_volume(scrapers, storage, notifier, state)
-    await _record_and_alert(outcome, storage, notifier, state)
+    _record_and_alert(outcome, storage, notifier, state)
 
 
 async def scrape_tvl(
@@ -287,7 +286,7 @@ async def scrape_tvl(
         records.append(VenueTvl(exchange, ran_at, tvl))
     # Every venue failing together is DefiLlama itself: the job's alert covers it.
     if records:
-        await _alert_venue_errors("tvl", [e.value for e in exchanges], errors, notifier, state)
+        _alert_venue_errors("tvl", [e.value for e in exchanges], errors, notifier, state)
     try:
         new_rows = await storage.write_venue_tvl(records) if records else 0
     except Exception as exc:
@@ -341,7 +340,7 @@ async def run_tvl(
     drop_pct: float, window_hours: float,
 ) -> None:
     outcome = await scrape_tvl(client, exchanges, storage, notifier, state)
-    await _record_and_alert(outcome, storage, notifier, state)
+    _record_and_alert(outcome, storage, notifier, state)
     await check_tvl_drops(storage, notifier, state, drop_pct, window_hours)
 
 
@@ -377,7 +376,7 @@ async def run_execution_history(
     # Sequential: one reader slot at a time, and the venues' rate limits are shared.
     for asset in assets:
         outcome = await capture_execution_history(reader, storage, registry, asset)
-        await _record_and_alert(outcome, storage, notifier, state)
+        _record_and_alert(outcome, storage, notifier, state)
 
 
 def _fmt_px(value: Decimal) -> str:

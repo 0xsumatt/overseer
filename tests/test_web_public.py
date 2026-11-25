@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import os
+import re
+from datetime import datetime, timedelta, timezone
+
 import pytest
-from flask import Response, request
+from flask import Response, request, url_for
 
 from web import create_app
 from web.cache import ResponseCache
+from web.views.api import _candle_bucket
 
 
 @pytest.fixture
@@ -44,6 +49,44 @@ def test_authorized_user_sees_health_navigation(client) -> None:
     assert response.status_code == 200
     assert b'href="/health"' in response.data
     assert b"internal" not in response.data.lower()
+
+
+def test_health_probes_every_configured_series_and_flags_ones_never_stored(client, monkeypatch) -> None:
+    probed = []
+
+    def freshness(series):
+        probed.extend(series)
+        live = {"exchange": "binance", "market_type": "perp", "symbol": "BTC/USDT", "interval": "1m",
+                "last_ts": datetime.now(timezone.utc), "age": timedelta(seconds=30), "stale_factor": 0.5}
+        return [{**live, "exchange": "phoenix", "symbol": "BTC", "last_ts": None, "age": None,
+                 "stale_factor": None}, live]
+
+    monkeypatch.setattr(client.application.extensions["read_storage"], "freshness", freshness)
+    client.post("/login", data={"email": "mock@overseer.local", "password": "mock"})
+    page = client.get("/health")
+    assert page.status_code == 200
+    # Keyed as the scheduler stores bars, HIP-3 markets under the hyperliquid exchange.
+    assert {("binance", "perp", "BTC/USDT", "1m"), ("hyperliquid", "perp", "xyz:GOLD", "1m")} <= set(probed)
+    assert b"None stored" in page.data and b"1 / 2 series stale" in page.data
+
+
+def test_long_candle_windows_are_merged_into_larger_bars_not_cut_short() -> None:
+    # A week of 1-minute bars is 10,080: at the charts' 5,000 they become 5-minute bars.
+    assert _candle_bucket("1m", 48, 5000) is None
+    assert _candle_bucket("1m", 168, 5000) == (300, "5m")
+    assert _candle_bucket("1m", 720, 5000) == (900, "15m")
+    assert _candle_bucket("1h", 720, 5000) is None
+    with pytest.raises(ValueError):
+        _candle_bucket("minute", 48, 5000)
+
+
+def test_oi_history_widens_bars_too_fine_for_the_window_instead_of_dropping_venues(client) -> None:
+    month = client.get("/api/liquidity-history-multi?asset=BTC&hours=720&bucket=5").get_json()
+    week = client.get("/api/liquidity-history-multi?asset=BTC&hours=168&bucket=5").get_json()
+    assert len(month) == len(week) > 3
+    # 5-minute bars over 30 days would be 8,640 a venue; they widen to 15 minutes.
+    assert {len(points) for points in month.values()} == {30 * 24 * 4}
+    assert {len(points) for points in week.values()} == {7 * 24 * 12}
 
 
 def test_public_api_responses_are_cached_by_full_query(client) -> None:
@@ -227,3 +270,30 @@ def test_response_cache_is_size_bounded_and_never_replays_cookies() -> None:
     cached = cache.get("public")
     assert cached is not None
     assert "Set-Cookie" not in cached.headers
+
+
+def test_static_urls_change_when_their_file_does(tmp_path, monkeypatch) -> None:
+    # Static URLs are cached for a year, so a changed file must get a new URL:
+    # a reused tag kept browsers on stale funding page code once.
+    monkeypatch.setenv("OVERSEER_MOCK", "1")
+    monkeypatch.setenv("FLASK_SECRET_KEY", "test-secret")
+    app = create_app()
+    app.static_folder = str(tmp_path)
+    asset = tmp_path / "app.css"
+    asset.write_text("a{}")
+    with app.test_request_context():
+        first = url_for("static", filename="app.css")
+        assert url_for("static", filename="app.css") == first
+        asset.write_text("a{color:red}")
+        stat = asset.stat()
+        os.utime(asset, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+        changed = url_for("static", filename="app.css")
+    assert "?v=" in first
+    assert changed != first
+
+
+def test_every_page_asset_url_carries_a_version(client) -> None:
+    html = client.get("/funding").get_data(as_text=True)
+    assets = re.findall(r'(?:src|href)="(/static/[^"]+)"', html)
+    assert assets
+    assert all("?v=" in url for url in assets), assets

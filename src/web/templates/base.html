@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}overseer{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='funding-summary') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
   <link rel="icon" href="{{ url_for('static', filename='img/favicon.svg') }}" type="image/svg+xml">
   <link rel="icon" href="{{ url_for('static', filename='img/favicon-32.png') }}" sizes="32x32" type="image/png">
   <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/apple-touch-icon.png') }}">
@@ -150,9 +150,9 @@
       </div>
     </div>
   </footer>
-  <script src="{{ url_for('static', filename='js/format.js', v='risex-sort') }}"></script>
-  <script src="{{ url_for('static', filename='js/reliability.js', v='ui-consistency') }}"></script>
-  <script src="{{ url_for('static', filename='js/nav.js', v='ui-consistency') }}"></script>
+  <script src="{{ url_for('static', filename='js/format.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/reliability.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/nav.js') }}"></script>
   <script>Overseer.startFreshness();</script>
   <script>const VENUE_LABELS = {{ venue_labels | tojson }};</script>
   {% block scripts %}{% endblock %}

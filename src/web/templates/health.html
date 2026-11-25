@@ -3,7 +3,7 @@
 {% block title %}health · overseer{% endblock %}
 {% block content %}
 {% set failing = jobs | selectattr('last_status', 'equalto', 'fail') | list %}
-{% set stale = freshness | selectattr('stale_factor', 'gt', 3) | list %}
+{% set stale = freshness | selectattr('stale') | list %}
 
 {% call ui.page_header('Health', 'Monitor collection jobs and data freshness.') %}
   <span class="badge" {% if failing %}data-tone="error"{% endif %}>
@@ -58,7 +58,7 @@
 </div>
 
 <h2 class="section-label">Series freshness</h2>
-<p class="caption mb-3">A series is stale when its newest bar is more than three bar intervals old.</p>
+<p class="caption mb-3">A series is stale when its newest bar is more than three bar intervals old, or it has none.</p>
 <div class="table-card scroll-thin max-h-[32rem] overflow-auto sm:max-h-none">
   <table class="data-table min-w-[40rem]">
     <caption class="sr-only">Age of the newest bar per series, as a multiple of the bar interval</caption>
@@ -72,17 +72,17 @@
     </thead>
     <tbody class="font-mono">
       {% for f in freshness %}
-      <tr {% if f.stale_factor > 3 %}class="bg-loss/5"{% endif %}>
+      <tr {% if f.stale %}class="bg-loss/5"{% endif %}>
         <td class="whitespace-nowrap text-body">
           {{ venue_labels.get(f.exchange, f.exchange) }} · {{ f.market_type }} · {{ f.symbol }} · {{ f.interval }}</td>
         <td class="whitespace-nowrap tabular-nums text-dim">
-          <time datetime="{{ f.last_ts.isoformat() }}">{{ f.last_ts | utc_time }}</time></td>
-        <td class="num text-dim">{{ f.age | age }}</td>
-        <td class="num {{ 'text-loss' if f.stale_factor > 3 else 'text-gain' }}">
-          {{ '%.1f' % f.stale_factor }}</td>
+          {% if f.last_ts %}<time datetime="{{ f.last_ts.isoformat() }}">{{ f.last_ts | utc_time }}</time>{% else %}None stored{% endif %}</td>
+        <td class="num text-dim">{{ f.age | age if f.age is not none else '—' }}</td>
+        <td class="num {{ 'text-loss' if f.stale else 'text-gain' }}">
+          {{ '%.1f' % f.stale_factor if f.stale_factor is not none else '—' }}</td>
       </tr>
       {% else %}
-      <tr><td colspan="4" class="empty-cell">No bars have been collected yet.</td></tr>
+      <tr><td colspan="4" class="empty-cell">No series are configured for collection.</td></tr>
       {% endfor %}
     </tbody>
   </table>

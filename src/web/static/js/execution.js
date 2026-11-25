@@ -20,6 +20,15 @@
   const tooltip = $('execution-price-tooltip');
   const schedules = config.fee_schedules || {};
   const holdLabels = Object.fromEntries((config.holds || []).map(([hours, text]) => [String(hours), text]));
+  // A venue can charge each asset class its own rate (QFEX by class, Binance
+  // and others a separate traditional-asset schedule), so a tier's rate
+  // follows the chosen asset's class.
+  const assetClasses = Object.fromEntries((config.assets || []).map(item => [item.id, item.asset_class]));
+  const CLASS_NAMES = {crypto: 'crypto', commodity: 'commodities', index: 'indices', equity: 'equities'};
+  function tierRate(tier, assetClass = assetClasses[asset.value]) {
+    const rates = tier?.class_taker_bps || {};
+    return assetClass in rates ? rates[assetClass] : tier?.taker_bps;
+  }
   // Trade-size labels come from the template's notional_label macro, the one source.
   const sizeLabels = Object.fromEntries([...document.querySelectorAll('[data-execution-notional]')]
     .map(header => [header.dataset.executionNotional, header.querySelector('.execution-notional').textContent.trim()]));
@@ -130,12 +139,21 @@
     const hours = Number(funding.interval_hours);
     return `${Fmt.signedPercent(numeric, 4)} per ${Fmt.number(hours, Number.isInteger(hours) ? 0 : 1)}h`;
   }
+  // A venue that keeps a share of each payment (Bullet, 5%) charges the payer
+  // more and pays the receiver less than the published gross rate.
+  function fundingSpreadText(funding) {
+    // Hundredths of a percent, so 0.05 reads 5, not 5.000000000000001.
+    const share = Math.round(Number(funding?.spread) * 10000) / 100;
+    if (!Number.isFinite(share) || share <= 0) return '';
+    const percent = value => Fmt.number(value, Number.isInteger(share) ? 0 : 1);
+    return ` · venue keeps ${percent(share)}% of each payment: payer pays ${percent(100 + share)}%, receiver gets ${percent(100 - share)}%`;
+  }
   function fundingBasisText(funding) {
     if (!funding) return 'No hold';
     const source = funding.basis === 'current'
       ? 'current rate, pro rata over the hold'
       : 'previous 24 hours of settled funding, repeated over the hold';
-    return `${funding.unavailable ? `${funding.unavailable} — not ranked` : fundingRateText(funding)} · ${source}`;
+    return `${funding.unavailable ? `${funding.unavailable} — not ranked` : fundingRateText(funding)} · ${source}${fundingSpreadText(funding)}`;
   }
   // One precision per comparison: about five significant figures at the asset's
   // price magnitude (2 dp for BTC or ETH, more for low-priced assets).
@@ -457,8 +475,42 @@
   function selectedFeeText(venueId, responseFee) {
     const schedule = schedules[venueId];
     const tier = schedule?.tiers?.find(item => item.id === feeChoices[venueId]);
-    const rate = tier ? tier.taker_bps : responseFee?.taker_bps;
+    const rate = tier ? tierRate(tier) : responseFee?.taker_bps;
     return supplied(rate) && Number.isFinite(Number(rate)) ? `${feeRate(rate)} fee` : 'Fee unknown';
+  }
+  function tierOptionText(tier) {
+    const rate = tierRate(tier);
+    return `${tier.label} · ${supplied(rate) ? Fmt.feeBps(rate) : 'Fee unknown'}`;
+  }
+  // Tier menus and fee lines show the chosen asset's rates.
+  function syncFeeRates() {
+    for (const [venueId, row] of rows) {
+      const schedule = schedules[venueId];
+      for (const option of row.select.options) {
+        const tier = schedule?.tiers?.find(item => item.id === option.value);
+        if (tier) option.textContent = tierOptionText(tier);
+      }
+      row.select.title = row.select.selectedOptions[0]?.textContent || '';
+      row.feeRate.textContent = selectedFeeText(venueId);
+      row.venueFee.textContent = selectedFeeText(venueId);
+    }
+  }
+  // Every rate a tier publishes: one for all markets, or one per asset class,
+  // e.g. "crypto 5.0 bps · commodities, indices, equities 4.0 bps".
+  function tierRatesText(tier) {
+    const classes = tier.class_taker_bps || {};
+    if (!Object.keys(classes).length) return supplied(tier.taker_bps) ? `${Fmt.feeBps(tier.taker_bps)} taker` : UNKNOWN;
+    const groups = new Map();
+    const add = (rate, name) => {
+      const key = supplied(rate) ? Fmt.feeBps(rate) : UNKNOWN;
+      groups.set(key, [...(groups.get(key) || []), name]);
+    };
+    if (supplied(tier.taker_bps)) add(tier.taker_bps, CLASS_NAMES.crypto);
+    // Class order, not key order: the page config arrives with sorted keys.
+    for (const assetClass of Object.keys(CLASS_NAMES)) {
+      if (assetClass in classes) add(classes[assetClass], CLASS_NAMES[assetClass]);
+    }
+    return `${[...groups].map(([rate, names]) => `${names.join(', ')} ${rate}`).join(' · ')} taker`;
   }
   // Line 1: the venue's dot and display name, its product name the tooltip.
   // Line 2: fee and quote age, with [details] on the right. A hold's funding
@@ -504,7 +556,7 @@
     select.dataset.feeVenue = venueId;
     select.setAttribute('aria-label', `${schedule?.label || venueId} native VIP or account type`);
     for (const tier of schedule?.tiers || []) {
-      const option = node('option', `${tier.label} · ${supplied(tier.taker_bps) ? Fmt.feeBps(tier.taker_bps) : 'Fee unknown'}`);
+      const option = node('option', tierOptionText(tier));
       option.value = tier.id;
       select.append(option);
     }
@@ -552,7 +604,7 @@
       body.append(list);
       const tiers = node('ul', null, 'execution-fee-notes');
       for (const tier of schedule.tiers || []) {
-        tiers.append(node('li', `${tier.label}: ${supplied(tier.taker_bps) ? `${Fmt.feeBps(tier.taker_bps)} taker` : UNKNOWN}${tier.id === schedule.default_tier ? ' · default' : ''}`));
+        tiers.append(node('li', `${tier.label}: ${tierRatesText(tier)}${tier.id === schedule.default_tier ? ' · default' : ''}`));
       }
       body.append(tiers);
       details.append(body);
@@ -1391,6 +1443,8 @@
     (trade.selectedOptions[0]?.textContent || trade.value).toLowerCase(),
     Number(hold.value) ? `hold ${holdLabels[hold.value] || `${hold.value}h`}` : null,
   ].filter(Boolean).join(' · '));
+  // Fee labels first, so the capture they trigger is shown at the new rates.
+  asset.addEventListener('change', syncFeeRates);
   for (const control of [asset, trade, hold]) {
     control.addEventListener('change', () => { syncFilters(); capture(); loadHistory(); });
   }
@@ -1439,7 +1493,7 @@
     asset.disabled = true;
     setStatus('empty', 'No assets configured');
     for (const row of rows.values()) row.tr.hidden = true;
-    pageState.empty('No crypto perpetual assets are configured for execution estimates. Add an asset to the symbol list to compare venues.');
+    pageState.empty('No perpetual assets are configured for execution estimates. Add an asset to the symbol list to compare venues.');
     renderBestSummary();
     updateRefreshCadence();
   }

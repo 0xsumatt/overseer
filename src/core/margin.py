@@ -19,7 +19,12 @@ move plus maintenance margin at the moved prices, and never less than the
 venue's minimum, notional / maximum leverage.
 
 Notional and margin are in the venue's own quote currency. A tier is chosen by
-the whole position's notional, inclusive of its cap.
+the whole position's notional, inclusive of its cap, except where a venue caps
+tiers by position size in coins (Phoenix): there a position keeps its tier
+however its price moves.
+
+Positions on one venue share a cross-margin account, except in markets a venue
+margins in isolation only, which cannot lend their collateral to the other.
 """
 from __future__ import annotations
 
@@ -30,7 +35,7 @@ from typing import Mapping, Sequence
 
 @dataclass(frozen=True, slots=True)
 class MarginTier:
-    cap: Decimal | None              # largest notional in this tier; None means unbounded
+    cap: Decimal | None              # largest notional (or coins, see quantity_caps) in this tier; None means unbounded
     max_leverage: Decimal
     maintenance_rate: Decimal        # fraction of notional
     maintenance_deduction: Decimal = Decimal(0)
@@ -66,6 +71,8 @@ class MarginSchedule:
     source_url: str | None = None
     notes: tuple[str, ...] = ()
     bulk: BulkRisk | None = None
+    quantity_caps: bool = False      # tier caps are position sizes in coins, not notionals
+    isolated: bool = False           # isolated margin only: no collateral shared with other positions
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,10 +166,17 @@ def bulk_rate(risk: BulkRisk, long: bool, notional: Decimal, leverage: Decimal) 
     return near * (1 - wn) + far * wn
 
 
-def max_leverage(schedule: MarginSchedule, notional: Decimal) -> Decimal | None:
-    if schedule.bulk is not None:
-        return bulk_max_leverage(schedule.bulk, notional)
-    tier = tier_for(schedule, notional)
+def position_tier(position: Position, price: Decimal) -> MarginTier | None:
+    """The tier holding a position at `price`: by its notional there, or by its
+    size where the venue caps tiers in coins. None above the largest tier."""
+    size = position.quantity if position.schedule.quantity_caps else position.quantity * price
+    return tier_for(position.schedule, size)
+
+
+def max_leverage(position: Position) -> Decimal | None:
+    if position.schedule.bulk is not None:
+        return bulk_max_leverage(position.schedule.bulk, position.notional)
+    tier = position_tier(position, position.entry)
     return tier.max_leverage if tier is not None else None
 
 
@@ -231,10 +245,10 @@ def _combine(values: Sequence[Decimal], bases: Sequence[str], correlations: Mapp
 
 
 def _tier_maintenance(position: Position, price: Decimal) -> tuple[Decimal, Decimal]:
-    """(maintenance margin, rate) at `price`, in the tier of the position's
-    value there; beyond the largest tier its rate continues."""
+    """(maintenance margin, rate) at `price`, in the position's tier there;
+    beyond the largest tier its rate continues."""
     notional = position.quantity * price
-    tier = tier_for(position.schedule, notional) or position.schedule.tiers[-1]
+    tier = position_tier(position, price) or position.schedule.tiers[-1]
     return notional * tier.maintenance_rate - tier.maintenance_deduction, tier.maintenance_rate
 
 
@@ -245,7 +259,8 @@ def _tiered_need(position: Position, move: Decimal) -> Decimal:
     that floor, where the higher bracket still applies."""
     start = position.notional
     need = start * move + _tier_maintenance(position, position.moved(move))[0]
-    if position.long:
+    # A position sized in coins keeps its tier through the move.
+    if position.long and not position.schedule.quantity_caps:
         tiers = position.schedule.tiers
         for lower, upper in zip(tiers, tiers[1:]):
             if start * (1 - move) < lower.cap < start:
@@ -301,7 +316,7 @@ def _bulk_safety(positions: Sequence[Position], move: Decimal, loss: Decimal, mi
 def _requirement(positions: Sequence[Position], move: Decimal):
     """The unrounded capital and its parts, or None when a position is larger
     than the venue's largest tier."""
-    caps = [max_leverage(p.schedule, p.notional) for p in positions]
+    caps = [max_leverage(p) for p in positions]
     if any(cap is None for cap in caps):
         return None
     minimum = sum(p.notional / cap for p, cap in zip(positions, caps))
@@ -334,7 +349,9 @@ def same_safety(positions: Sequence[Position], move: Decimal) -> Safety | None:
     """The least capital that keeps these positions (one venue, one cross
     account) above maintenance margin while each moves `move` (a fraction of
     entry) against you, and never less than the venue's minimum at its maximum
-    leverage. None when a position is larger than the venue's largest tier.
+    leverage. None when a position is larger than the venue's largest tier. A
+    pair with a position in an isolated-only market posts each position's own
+    capital: neither can lend collateral to the other.
 
     A single position also gets its isolated liquidation price with that
     capital posted, before fees and funding: at the move, or further when the
@@ -349,19 +366,31 @@ def same_safety(positions: Sequence[Position], move: Decimal) -> Safety | None:
          maintenance, moved_maintenance) = found
         # Legs are summed before rounding, so where they simply add up (every
         # venue but BULK, unless a leverage cap binds) the pair matches them.
-        alone = [capital] if len(positions) == 1 else [_requirement([p], move)[0] for p in positions]
+        singles = [found] if len(positions) == 1 else [_requirement([p], move) for p in positions]
+        alone = [single[0] for single in singles]
+        capped = minimum >= need
+        if len(positions) > 1 and any(p.schedule.isolated for p in positions):
+            capital = sum(alone)
+            capped = any(single[2] >= single[1] for single in singles)
         capital = _round_up(capital)
         price = liquidation_move = None
         if len(positions) == 1:
             p = positions[0]
-            tiers = (MarginTier(None, caps[0], entry_rates[0]),) if p.schedule.bulk is not None else p.schedule.tiers
+            if p.schedule.bulk is not None:
+                tiers = (MarginTier(None, caps[0], entry_rates[0]),)
+            elif p.schedule.quantity_caps:
+                # Its size sets the tier, which then holds at every price.
+                tier = position_tier(p, p.entry)
+                tiers = (MarginTier(None, tier.max_leverage, tier.maintenance_rate, tier.maintenance_deduction),)
+            else:
+                tiers = p.schedule.tiers
             price = liquidation_price(tiers, p.long, p.quantity, p.entry, capital)
             if price is not None:
                 liquidation_move = (p.entry - price) / p.entry if p.long else (price - p.entry) / p.entry
         legs = tuple(LegSafety(p.notional, cap, leg_loss, entry_value, rate, moved_value, _round_up(own))
                      for p, cap, leg_loss, entry_value, rate, moved_value, own
                      in zip(positions, caps, losses, entry_each, entry_rates, moved_each, alone))
-        return Safety(legs, capital, minimum, minimum >= need, sum(p.notional for p in positions) / capital,
+        return Safety(legs, capital, minimum, capped, sum(p.notional for p in positions) / capital,
                       sum(losses), moved_maintenance, maintenance, _round_up(sum(alone)), price, liquidation_move)
 
 

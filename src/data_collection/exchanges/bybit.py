@@ -36,11 +36,13 @@ def _window_ms(since: datetime, max_lookback_days: int = 60) -> tuple[int, int]:
     return start_ms, end_ms
 
 
-_RATE_LIMIT_CODES = {10006, 10018}    
-_RATE_LIMIT_BACKOFF = 30.0             
-
-
-
+# Bybit answers a request over its per-second API limit with HTTP 200 and
+# retCode 10006 (10018 for its IP variant). That throttle clears within a
+# second or two, unlike the ten-minute ban for passing 600 requests in 5 s
+# (HTTP 403 "access too frequent"), so a throttled request waits and retries.
+_THROTTLED = frozenset({10006, 10018})
+_THROTTLE_RETRIES = 2
+_THROTTLE_WAIT_SECONDS = 1.0
 
 
 def to_canonical(native: str) -> str:
@@ -68,13 +70,20 @@ class BybitSpotScraper(BaseExchangeScraper):
         )
 
 
-    def _unwrap(self, payload: Any) -> Any:
-        code = payload.get("retCode")
-        if code == 0:
-            return payload["result"]
-        if code in _RATE_LIMIT_CODES:
-            self.http.pause(_RATE_LIMIT_BACKOFF)
-        raise RuntimeError(f"bybit error {code}: {payload.get('retMsg')}")
+    async def _get(self, path: str, params: dict[str, str]) -> Any:
+        """`result` of a public GET. While a throttled request waits to retry,
+        the client's other Bybit requests wait too."""
+        for attempt in range(_THROTTLE_RETRIES + 1):
+            payload = await self.http.get_json(f"{self.base_url}{path}", params=params)
+            code = payload.get("retCode")
+            if code == 0:
+                return payload["result"]
+            if code not in _THROTTLED:
+                raise RuntimeError(f"bybit error {code}: {payload.get('retMsg')}")
+            if attempt < _THROTTLE_RETRIES:
+                self.http.pause(_THROTTLE_WAIT_SECONDS * (attempt + 1))
+        raise RuntimeError(f"bybit error {code}: {payload.get('retMsg')} "
+                           f"(still throttled after {_THROTTLE_RETRIES} retries)")
 
     def to_symbol(self, native: str) -> str:
         return to_canonical(native)
@@ -84,11 +93,9 @@ class BybitSpotScraper(BaseExchangeScraper):
 
     async def fetch_bbo(self, symbol: str) -> TopOfBook:
         native = self.to_native(symbol)
-        payload = await self.http.get_json(
-            f"{self.base_url}/v5/market/tickers",
-            params={"category": self.category, "symbol": native},
-        )
-        rows = self._unwrap(payload)["list"]
+        rows = (await self._get(
+            "/v5/market/tickers", {"category": self.category, "symbol": native}
+        ))["list"]
         if not rows:
             raise RuntimeError(f"bybit returned no BBO for {native}")
         row = rows[0]
@@ -108,9 +115,9 @@ class BybitSpotScraper(BaseExchangeScraper):
         self, symbol: str, interval: Timeframe, since: datetime, *, limit: int = 1000
     ) -> Sequence[OHLCV]:
         start_ms, end_ms = _window_ms(since)
-        payload = await self.http.get_json(
-            f"{self.base_url}/v5/market/kline",
-            params={
+        rows = (await self._get(
+            "/v5/market/kline",
+            {
                 "category": self.category,
                 "symbol": self.to_native(symbol),
                 "interval": _INTERVALS[interval],
@@ -118,8 +125,7 @@ class BybitSpotScraper(BaseExchangeScraper):
                 "end": str(end_ms),
                 "limit": str(limit),
             },
-        )
-        rows = self._unwrap(payload)["list"]
+        ))["list"]
         canonical = self.to_symbol(self.to_native(symbol))
         out = [
             OHLCV(
@@ -139,10 +145,7 @@ class BybitSpotScraper(BaseExchangeScraper):
 
 
     async def fetch_venue_volume(self) -> dict:
-        payload = await self.http.get_json(
-            f"{self.base_url}/v5/market/tickers", params={"category": self.category}
-        )
-        items = self._unwrap(payload)["list"]
+        items = (await self._get("/v5/market/tickers", {"category": self.category}))["list"]
         total = sum(self._dec(t["turnover24h"]) for t in items) if items else None
         return {"spot": total, "perp": None} if self.market_type is MarketType.SPOT \
             else {"spot": None, "perp": total}
@@ -169,11 +172,9 @@ class BybitPerpScraper(BybitSpotScraper):
         if self._funding_intervals is None:
             self._funding_intervals = {}
         if native not in self._funding_intervals:
-            payload = await self.http.get_json(
-                f"{self.base_url}/v5/market/instruments-info",
-                params={"category": "linear", "symbol": native},
-            )
-            items = self._unwrap(payload)["list"]
+            items = (await self._get(
+                "/v5/market/instruments-info", {"category": "linear", "symbol": native}
+            ))["list"]
             minutes = int(items[0]["fundingInterval"]) if items else 480
             self._funding_intervals[native] = max(1, minutes // 60)
         return self._funding_intervals[native]
@@ -183,17 +184,16 @@ class BybitPerpScraper(BybitSpotScraper):
     ) -> Sequence[FundingRate]:
         native = self.to_native(symbol)
         start_ms, end_ms = _window_ms(since)
-        payload = await self.http.get_json(
-            f"{self.base_url}/v5/market/funding/history",
-            params={
+        rows = (await self._get(
+            "/v5/market/funding/history",
+            {
                 "category": "linear",
                 "symbol": native,
                 "startTime": str(start_ms),
-                "endTime": str(end_ms),            
-                "limit": str(limit),               
+                "endTime": str(end_ms),
+                "limit": str(limit),
             },
-        )
-        rows = self._unwrap(payload)["list"]
+        ))["list"]
         hours = await self._funding_interval(native)
         canonical = self.to_symbol(native)
         out = [
@@ -215,11 +215,9 @@ class BybitPerpScraper(BybitSpotScraper):
         now = datetime.now(timezone.utc)
         out: list[LiquiditySnapshot] = []
         for symbol in symbols:
-            payload = await self.http.get_json(
-                f"{self.base_url}/v5/market/tickers",
-                params={"category": "linear", "symbol": self.to_native(symbol)},
-            )
-            items = self._unwrap(payload)["list"]
+            items = (await self._get(
+                "/v5/market/tickers", {"category": "linear", "symbol": self.to_native(symbol)}
+            ))["list"]
             if not items:
                 continue
             t = items[0]

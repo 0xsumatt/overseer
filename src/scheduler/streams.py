@@ -103,7 +103,7 @@ async def run_stream(
             seen_written, seen_dropped = total_written, buffer.dropped
 
             status, error = _status(health, dropped_delta, silence_seconds)
-            await _record_and_alert(
+            _record_and_alert(
                 JobOutcome(
                     job_id=stream.stream_id,
                     status=status,

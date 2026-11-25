@@ -55,3 +55,8 @@ class Timeframe(StrEnum):
     H8 = "8h"
     H12 = "12h"
     D1 = "1d"
+
+    @property
+    def seconds(self) -> int:
+        """Length of one bar."""
+        return int(self[:-1]) * {"m": 60, "h": 3600, "d": 86_400}[self[-1]]

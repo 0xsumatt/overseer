@@ -22,11 +22,7 @@
   <div class="toolbar" role="group" aria-label="Trade to compare">
     <label class="field" for="execution-asset">
       <span class="field-label">Asset</span>
-      <span class="select-shell"><select id="execution-asset" class="select select-polished">
-        {% for asset in execution_config.assets %}
-        <option value="{{ asset.id }}"{% if asset.id == 'BTC' %} selected{% endif %}>{{ asset.id }}{% if asset.label != asset.id %} · {{ asset.label }}{% endif %}</option>
-        {% endfor %}
-      </select></span>
+      <span class="select-shell"><select id="execution-asset" class="select select-polished">{{ ui.asset_options(execution_config.assets, 'BTC') }}</select></span>
     </label>
     <label class="field" for="execution-trade">
       <span class="field-label">Trade</span>
@@ -75,7 +71,7 @@
   <details id="execution-fee-settings" class="disclosure mb-6">
     <summary>Fees &amp; VIP tiers <span id="execution-fee-summary" class="section-count">Base tiers</span></summary>
     <div class="disclosure-body">
-      <p>Prices include each venue's base taker fee. Choose your tier to compare after-fee prices; eligibility is not verified and choices are not saved. Schedules are public, static estimates checked on the dates shown, not a live account lookup.</p>
+      <p>Prices include each venue's base taker fee. Choose your tier to compare after-fee prices; eligibility is not verified and choices are not saved. Some venues charge commodities, indices or equities their own rates, and each menu shows the rate for the chosen asset. Schedules are public, static estimates checked on the dates shown, not a live account lookup.</p>
       <div id="execution-fee-controls" class="execution-fee-controls"></div>
       <div id="execution-fee-disclosure" class="execution-fee-sources">
         <h3 class="field-label">Official schedules</h3>
@@ -141,9 +137,9 @@
       <p>Each column uses one common base quantity, sized from a fresh median of venue USD midpoints. Buys walk the visible asks and sells walk the bids; the effective USD price adds the selected taker fee to a buy or deducts it from a sell. Best compares these fee-adjusted USD prices, and rows run best first at the size marked ↓ (cheapest to buy, highest to sell, cheapest round trip); venues that can't be ranked at that size follow in name order. Select another size's header to reorder; the choice is remembered.</p>
       <p>The line beneath each price is the one-way taker fee plus book slippage, in bps. Buy slippage is (average fill / best ask − 1) × 10,000; sell slippage is (1 − average fill / best bid) × 10,000, so a 6 bps fee plus 4 bps slippage shows 10.00 bps total. Slippage is measured against each venue's own best price, not the common USD midpoint, so spread and cross-venue price differences are not included. Zero is valid; tiny costs that round to zero show as &lt;0.01 bps. Hover or focus a value for book, fee and funding detail; select it, or a best price above, for the exact breakdown.</p>
       <p>A round trip buys and sells the same quantity against the same capture. Its cost is the fee-adjusted buy minus the fee-adjusted sell for the whole quantity, so the spread, slippage on both sides and both taker fees count, while a venue's price level cancels out. It assumes the book you close into looks like today's. The lowest total wins.</p>
-      <p>A hold adds funding on the opening leg: a buy holds a long and a sell a short, and positive funding means longs pay shorts. Holds of up to a day use each venue's current rate, pro rata. Longer holds repeat the previous 24 hours of settled funding instead, so one live rate is not stretched over a week or a month. Neither predicts future rates. A venue without a current rate from the last 15 minutes, or with settled funding covering under 12 of the last 24 hours, is not ranked. BULK's collector records its predicted hourly rate every 15 minutes, so its previous day is the average of those readings.</p>
+      <p>A hold adds funding on the opening leg: a buy holds a long and a sell a short, and positive funding means longs pay shorts. Holds of up to a day use each venue's current rate, pro rata. Longer holds repeat the previous 24 hours of settled funding instead, so one live rate is not stretched over a week or a month. Neither predicts future rates. A venue without a current rate from the last 15 minutes, or with settled funding covering under 12 of the last 24 hours, is not ranked. BULK's collector records its predicted hourly rate every 15 minutes, so its previous day is the average of those readings. Bullet keeps 5% of every funding payment from each side, so its holds charge a payer 105% and credit a receiver 95% of the published rate.</p>
       <p>Unknown fees mean unknown total cost, never zero: those prices are shown before fees and are not ranked. Without a USD conversion, prices stay in native units and are not ranked. No stablecoin peg is assumed, and the USD reference FX is not an executed conversion.</p>
-      <p>“Snapshot too shallow” means the captured slice of the book cannot fill that size, not that the venue is illiquid: only the share captured is shown and no full-size price is extrapolated. Hyperliquid's <a class="execution-source-link" href="https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint#l2-book-snapshot" target="_blank" rel="noopener noreferrer">public full-precision book</a> returns at most 20 price levels per side; price-grouped snapshots reach deeper but add rounding uncertainty. “Above venue limit” marks sizes over a published maximum market order.</p>
+      <p>“Snapshot too shallow” means the captured slice of the book cannot fill that size, not that the venue is illiquid: only the share captured is shown and no full-size price is extrapolated. Hyperliquid's <a class="execution-source-link" href="https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint#l2-book-snapshot" target="_blank" rel="noopener noreferrer">public full-precision book</a> returns at most 20 price levels per side, as QFEX's REST book does; Hyperliquid's price-grouped snapshots reach deeper but add rounding uncertainty. “Above venue limit” marks sizes over a published maximum market order.</p>
       <p>Quotes expire {{ max_age }} seconds after capture, well before the next automatic refresh a minute later, so refresh before trading. Expired quotes stay on screen, marked, until a new capture replaces them. Automatic refresh pauses while this page is hidden. A capture is not a promise of execution.</p>
       <p>Cheapest venue history comes from a separate capture every five minutes for {{ history.assets | join(', ') }}, ranked by the same rules as this table. <em>Cheapest</em> is the share of comparisons in which a venue had the best fee-adjusted price, or for round trips the lowest round-trip cost, with ties split; a comparison needs at least two venues with complete, fresh quotes and known fees. <em>Gap</em> is the median extra cost, in bps, when the venue was not cheapest. <em>Quoted</em> is the share of captures with a complete, fresh quote at that size, on both sides for round trips. Funding is not included in the history. Base taker fees apply unless you choose tiers under Fees &amp; VIP tiers. {{ notional_label('10000000') }} is omitted: Hyperliquid's 20-level public book is too shallow to compare at that size.</p>
       <p>One-way prices exclude the spread; round trips include it. Funding counts only when you choose a hold, from the rates Overseer stores. Never included: settlement, gas, latency, lot rounding, quanto settlement economics, rebates, staking, referral or promotional discounts, builder or integrator charges, account-specific fee overrides, margin and order acceptance. Quote currency is not necessarily the collateral or settlement currency. No account access or credentials are used, and the live comparison never uses stored order books.</p>
@@ -155,6 +151,6 @@
 <script id="execution-config" type="application/json">{{ execution_config | tojson }}</script>
 {% endblock %}
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/venues.js', v='phoenix') }}"></script>
-<script src="{{ url_for('static', filename='js/execution.js', v='risex-sort') }}" defer></script>
+<script src="{{ url_for('static', filename='js/venues.js') }}"></script>
+<script src="{{ url_for('static', filename='js/execution.js') }}" defer></script>
 {% endblock %}

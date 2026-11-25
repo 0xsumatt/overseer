@@ -8,11 +8,7 @@
 <div class="toolbar">
   <label class="field" for="depth-asset">
     <span class="field-label">Asset</span>
-    <span class="select-shell"><select id="depth-asset" class="select select-polished">
-      {% for asset in depth_config.assets %}
-      <option value="{{ asset.id }}">{{ asset.id }}</option>
-      {% endfor %}
-    </select></span>
+    <span class="select-shell"><select id="depth-asset" class="select select-polished">{{ ui.asset_options(depth_config.assets) }}</select></span>
   </label>
   <label class="field" for="depth-venue">
     <span class="field-label">Venue</span>
@@ -35,7 +31,7 @@
 {% if not depth_config.assets %}
   <div class="summary-card empty-state">
     <p class="empty-state-title">No assets are configured for depth capture.</p>
-    <p class="empty-state-hint">Depth is stored for BTC, ETH and SOL when the symbol list includes their perpetual venues.</p>
+    <p class="empty-state-hint">Depth is stored for {{ depth_config.history_assets | join(', ') }} when the symbol list includes their perpetual venues.</p>
   </div>
 {% else %}
   <section class="chart-card" aria-labelledby="depth-title">
@@ -77,7 +73,7 @@
 {% block scripts %}
 {% if depth_config.assets %}
 <script src="{{ url_for('static', filename='js/lightweight-charts.standalone.js') }}"></script>
-<script src="{{ url_for('static', filename='js/venues.js', v='phoenix') }}"></script>
-<script src="{{ url_for('static', filename='js/depth.js', v='ui-consistency') }}" defer></script>
+<script src="{{ url_for('static', filename='js/venues.js') }}"></script>
+<script src="{{ url_for('static', filename='js/depth.js') }}" defer></script>
 {% endif %}
 {% endblock %}

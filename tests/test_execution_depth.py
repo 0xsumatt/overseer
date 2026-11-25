@@ -36,6 +36,7 @@ class HTTP:
 def provider(http):
     return ExecutionDepth({venue: http for venue in (
         "binance_perp", "bybit_perp", "hyperliquid", "lighter", "extended", "rise", "bullet", "bulk",
+        "phoenix", "qfex",
     )})
 
 
@@ -121,6 +122,44 @@ async def test_bulk_rejects_wrong_book_identity_and_suspended_metadata():
     metadata["status"] = "TRADING"
     with pytest.raises(DepthUnavailable, match="identity"):
         await provider(http).fetch("bulk", "BTC-USD")
+
+
+@pytest.mark.asyncio
+async def test_qfex_skips_levels_listed_at_zero_size_and_quotes_refdata_usd():
+    market = {"symbol": "GOLD-USD", "base_asset": "GOLD", "quote_asset": "USD", "margin_asset": "USDC",
+              "status": "ACTIVE", "order_types": ["LIMIT", "MARKET"], "max_quantity": "10000000"}
+    http = HTTP({
+        "/refdata": {"data": [market]},
+        "/md/orderbook/GOLD-USD": {"ticker_id": "GOLD-USD", "timestamp": 1_794_923_001_875,
+                                   "bids": [["3849.4", "0.2362"], ["3849.3", "0"], ["3849.2", "1"]],
+                                   "asks": [["3850.2", "0"], ["3850.6", "57.6734"]]},
+    })
+    depth = await provider(http).fetch("qfex", "GOLD-USD")
+    assert depth.bids == (BookLevel(Decimal("3849.4"), Decimal("0.2362")), BookLevel(Decimal("3849.2"), Decimal("1")))
+    assert depth.asks == (BookLevel(Decimal("3850.6"), Decimal("57.6734")),)
+    assert (depth.quote_currency, depth.max_quantity) == ("USD", Decimal("10000000"))
+    assert depth.venue_at == datetime.fromtimestamp(1_794_923_001.875, timezone.utc)
+    market["status"] = "HALTED"
+    with pytest.raises(DepthUnavailable, match="not active"):
+        await provider(http).fetch("qfex", "GOLD-USD")
+
+
+@pytest.mark.asyncio
+async def test_phoenix_books_are_usdc_receipt_timed_and_need_an_active_market():
+    market = {"symbol": "GOLD", "marketStatus": "active",
+              "commodityMetadata": {"isCommodity": True, "isAfterHours": True, "status": "afterHours"}}
+    http = HTTP({
+        "/v1/view/exchange/markets": [market],
+        "/v1/view/orderbook/GOLD": {"symbol": "GOLD", "slot": 470554747,
+                                    "bids": [[Decimal("3848.5"), Decimal("0.078")]],
+                                    "asks": [[Decimal("3850.1"), Decimal("0.078")]]},
+    })
+    depth = await provider(http).fetch("phoenix", "GOLD")
+    assert (depth.quote_currency, depth.venue_at) == ("USDC", None)
+    assert any("Closed period now" in note for note in depth.notes)
+    market["marketStatus"] = "postOnly"
+    with pytest.raises(DepthUnavailable, match="not active"):
+        await provider(http).fetch("phoenix", "GOLD")
 
 
 def extended_http(*, rfq=False, status="ACTIVE"):

@@ -54,9 +54,9 @@ def _decimal(value, low: Decimal, high: Decimal, message: str) -> Decimal:
 
 def _leg(body, offered: set[str], label: str) -> tuple[str, bool, Decimal]:
     if not isinstance(body, dict) or body.keys() != {"asset", "direction", "size"}:
-        raise ValueError(f"The {label} needs a coin, a direction and a size.")
+        raise ValueError(f"The {label} needs an asset, a direction and a size.")
     if body["asset"] not in offered:
-        raise ValueError("Choose a configured crypto coin with perpetual listings.")
+        raise ValueError("Choose a configured asset with perpetual listings.")
     if body["direction"] not in ("long", "short"):
         raise ValueError("Direction must be long or short.")
     size = _decimal(body["size"], MIN_SIZE, MAX_SIZE,
@@ -78,7 +78,7 @@ def _parameters(registry):
     if body.get("pair") is not None:
         legs.append(_leg(body["pair"], offered, "second position"))
         if legs[1][0] == legs[0][0]:
-            raise ValueError("A pair needs two different coins.")
+            raise ValueError("A pair needs two different assets.")
     move = _decimal(body.get("move", DEFAULT_MOVE), MIN_MOVE, MAX_MOVE,
                     f"The move to survive must be between {MIN_MOVE}% and {MAX_MOVE}%.")
     hold = body.get("hold_hours", 0)
@@ -133,7 +133,7 @@ def calculate():
     reader: ExecutionReader = current_app.extensions["execution_reader"]
     snapshots = []
     try:
-        # One capture per coin, one after another, so a request holds one reader slot.
+        # One capture per asset, one after another, so a request holds one reader slot.
         for leg_listings in listings:
             snapshots.append(reader.capture({venue: leg_listings[venue] for venue in venues}, margin=True))
     except ReaderBusy:
@@ -141,18 +141,20 @@ def calculate():
     except ReaderFailure:
         return jsonify(error="Public execution snapshots are unavailable. Try again shortly."), 502
     now = datetime.now(timezone.utc)
-    fees = {venue: Decimal(tier["taker_bps"]) if tier["taker_bps"] is not None else None
-            for venue, tier in selected.items()}
     notional = sum(size for _asset, _long, size in legs)
     priced = []
-    for (_asset, long, size), leg_listings, snapshot in zip(legs, listings, snapshots):
+    for (asset, long, size), leg_listings, snapshot in zip(legs, listings, snapshots):
+        # Venues can charge each asset class its own rate, so fees are per leg.
+        taker = {venue: execution_fees.taker_bps(tier, registry.metadata(asset).asset_class)
+                 for venue, tier in selected.items()}
+        fees = {venue: Decimal(rate) if rate is not None else None for venue, rate in taker.items()}
         funding = holding_funding_for({venue: leg_listings[venue] for venue in venues}, hold, long, now)
         funding_bps = None if funding is None else {
             venue: Decimal(info["cost_bps"]) if info["cost_bps"] is not None else None for venue, info in funding.items()}
         fx = {currency: Decimal(value) for currency, value in snapshot["fx"]["rates"].items()}
         estimates = round_trip_estimates(snapshot["books"], Side.BUY if long else Side.SELL, fees, fx, now,
                                          funding_bps, notionals=(size,))
-        priced.append((estimates, funding or {}, fx, {book.venue: book for book in snapshot["books"]}))
+        priced.append((estimates, funding or {}, fx, {book.venue: book for book in snapshot["books"]}, taker))
 
     rows = []
     with localcontext() as context:
@@ -160,7 +162,7 @@ def calculate():
         for venue in venues:
             fee_schedule = execution_fees.FEE_SCHEDULES[venue]
             leg_rows, positions, rates, reasons = [], [], [], []
-            for (asset, long, _size), snapshot, (estimates, funding, fx, books) in zip(legs, snapshots, priced):
+            for (asset, long, _size), snapshot, (estimates, funding, fx, books, taker) in zip(legs, snapshots, priced):
                 cell = (estimates["venues"].get(venue) or {}).get("estimates", [None])[0]
                 schedule = snapshot["margins"].get(venue)
                 book = books.get(venue)
@@ -169,6 +171,7 @@ def calculate():
                 leg_rows.append({
                     "asset": asset, "direction": "long" if long else "short",
                     "symbol": book.symbol if book else None, "quote_currency": book.quote_currency if book else None,
+                    "taker_bps": taker[venue],
                     "estimate": cell, "funding": funding.get(venue), "max_leverage": None, "maintenance_usd": None,
                     "maintenance_rate": None, "moved_maintenance_usd": None, "loss_usd": None, "alone_usd": None,
                 })
@@ -200,17 +203,21 @@ def calculate():
                 total = trading + funding_usd + capital
                 costs = {"trading_usd": str(trading), "funding_usd": str(funding_usd), "capital_usd": str(capital),
                          "total_usd": str(total), "total_bps": str(total / notional * 10000)}
-            first_schedule = snapshots[0]["margins"].get(venue)
+            leg_schedules = [snapshot["margins"].get(venue) for snapshot in snapshots]
+            first_schedule = leg_schedules[0]
             errors = [snapshot["errors"].get(venue) or snapshot["margin_errors"].get(venue) for snapshot in snapshots]
             rows.append({
                 "venue": venue, "label": fee_schedule["label"],
                 "identity": registry.venue_identity(REGISTRY[venue].exchange, listings[0][venue]).key,
                 "status": "ok" if costs is not None else (reasons[0] if reasons else "unavailable"),
                 "error": next((error for error in errors if error), None),
-                "fee": {"tier_label": selected[venue]["label"], "taker_bps": selected[venue]["taker_bps"]},
+                "fee": {"tier_label": selected[venue]["label"]},
                 "margin": {
                     "source": first_schedule.source, "source_url": first_schedule.source_url,
-                    "notes": list(first_schedule.notes), "portfolio": first_schedule.bulk is not None,
+                    # Each leg's market can carry its own caveat, such as isolated-only margin.
+                    "notes": list(dict.fromkeys(note for schedule in leg_schedules if schedule
+                                                for note in schedule.notes)),
+                    "portfolio": first_schedule.bulk is not None,
                 } if first_schedule else None,
                 "legs": leg_rows, "combined": combined, "costs": costs, "best": False,
             })
@@ -226,6 +233,6 @@ def calculate():
               for asset, long, size in legs],
         move=format(move_percent, "f"), hold_hours=hold, rate=str(annual_rate * 100), rank=rank,
         requested_at=requested_at.isoformat(), completed_at=now.isoformat(),
-        reference_prices=[estimates["reference_price_usd"] for estimates, _f, _x, _b in priced],
+        reference_prices=[estimates["reference_price_usd"] for estimates, *_ in priced],
         venues=rows,
     )

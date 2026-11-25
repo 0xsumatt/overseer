@@ -131,6 +131,19 @@ def test_round_trip_ranks_the_whole_trade_and_follows_fee_tiers(setup):
     assert rows(vip)["bybit_perp"]["estimates"][0]["best"]
 
 
+def test_traditional_assets_are_priced_at_each_venues_rate_for_their_class(setup, monkeypatch):
+    client, _ = setup
+    # Bybit's own equity schedule undercuts its crypto rate, and Binance's.
+    bybit = schedule("5.5", "3")
+    bybit["tiers"][0]["class_taker_bps"] = {"equity": "1"}
+    monkeypatch.setitem(execution_fees.FEE_SCHEDULES, "bybit_perp", bybit)
+    crypto = rows(client.post("/api/execution", json={"asset": "BTC", "side": "buy"}).get_json())
+    equity = rows(client.post("/api/execution", json={"asset": "NVDA", "side": "buy"}).get_json())
+    assert crypto["bybit_perp"]["fee"]["taker_bps"] == "5.5" and crypto["binance_perp"]["estimates"][0]["best"]
+    assert equity["bybit_perp"]["fee"]["taker_bps"] == "1" and equity["bybit_perp"]["estimates"][0]["best"]
+    assert D(equity["bybit_perp"]["estimates"][0]["effective_price_usd"]) == D("100.01") * D("1.0001")
+
+
 @pytest.mark.parametrize("hold,method,basis,steps", [
     (24, "current_funding_rates", "current", 1),
     (168, "settled_funding_rates", "previous_24h", 3),

@@ -173,6 +173,30 @@ def test_bulk_capital_covers_the_maintenance_its_own_leverage_implies():
     assert not short(capital) and short(capital - 1)
 
 
+def test_coin_capped_tiers_follow_the_position_size_not_its_moved_value():
+    # Phoenix caps tiers in coins: up to 10 coins at 20x, then 1x to 11 coins.
+    coins = MarginSchedule("phoenix", "TEST", (MarginTier(D(10), D(20), D("0.025")),
+                                                MarginTier(D(11), D(1), D("0.5"))), "test", quantity_caps=True)
+    # 9.5 coins short at 100 are worth 1,045 after a 10% rise, past 1,000, yet keep the 20x tier.
+    short = same_safety([Position(coins, False, D("9.5"), D(100))], D("0.1"))
+    assert short.legs[0].max_leverage == 20 and short.capital == D("121.13")
+    assert move_to(short.liquidation_price, False) >= D("0.1")
+    assert same_safety([Position(coins, True, D("10.5"), D(100))], D("0.1")).legs[0].max_leverage == 1
+    assert same_safety([Position(coins, True, D("11.5"), D(100))], D("0.1")) is None
+
+
+def test_a_pair_with_an_isolated_only_market_posts_each_positions_own_capital():
+    # The long's 2x cap posts $500 where its move needs $145; in one cross
+    # account that spare collateral covers the short, but isolation lends none.
+    capped, open_ended = MarginTier(None, D(2), D("0.05")), MarginTier(None, D(100), D("0.005"))
+    short = Position(schedule("x", open_ended), False, D(10), D(100))
+    shared = same_safety([Position(schedule("x", capped), True, D(10), D(100)), short], D("0.1"))
+    assert shared.capital == 510 and shared.alone == D("605.50")
+    isolated = MarginSchedule("x", "GOLD", (capped,), "test", isolated=True)
+    apart = same_safety([Position(isolated, True, D(10), D(100)), short], D("0.1"))
+    assert apart.capital == apart.alone == D("605.50") and apart.capped
+
+
 # ---- each venue's published rules, as parsed --------------------------------------
 
 class HTTP:
@@ -192,7 +216,14 @@ class HTTP:
 def provider(responses):
     http = HTTP(responses)
     return ExecutionDepth({venue: http for venue in (
-        "binance_perp", "bybit_perp", "hyperliquid", "lighter", "extended", "rise", "bullet", "bulk")})
+        "binance_perp", "bybit_perp", "hyperliquid", "lighter", "extended", "rise", "bullet", "bulk",
+        "phoenix", "qfex")})
+
+
+PHOENIX_MARKETS = {"/v1/view/exchange/markets": [{
+    "symbol": "BTC", "baseLotsDecimals": 4, "isolatedOnly": False, "riskFactors": {"maintenanceBps": 5000},
+    "leverageTiers": [{"maxLeverage": D("1.0"), "maxSizeBaseLots": 7350673},
+                      {"maxLeverage": D("40.0"), "maxSizeBaseLots": 7350672}]}]}
 
 
 HYPERLIQUID_META = {"metaAndAssetCtxs": [{
@@ -240,6 +271,14 @@ HYPERLIQUID_META = {"metaAndAssetCtxs": [{
     ("hyperliquid", "BTC", HYPERLIQUID_META, 100_000, 40, 1_250),
     # Table ids below 50 are one tier at that leverage.
     ("hyperliquid", "SOL", HYPERLIQUID_META, 100_000, 20, 2_500),
+    # Maintenance is half of initial margin, size / 40x, up to 735.0672 coins
+    # (base lots of 10^-4); one lot more is a 1x tier, and past it no position.
+    ("phoenix", "BTC", PHOENIX_MARKETS, 50_000, 40, 625),
+    ("phoenix", "BTC", PHOENIX_MARKETS, "73506.725", 1, D("36753.3625")),
+    ("phoenix", "BTC", PHOENIX_MARKETS, 100_000, None, None),
+    # Maintenance is two-thirds of initial margin at the maximum leverage.
+    ("qfex", "GOLD-USD", {"/refdata": {"data": [{"symbol": "GOLD-USD", "default_max_leverage": 20, "isolated_only": False}]}},
+     100_000, 20, D(100_000) / 30),
 ])
 async def test_public_margin_rules_parse_into_leverage_caps_and_maintenance(
         venue, symbol, responses, notional, max_leverage, maintenance):

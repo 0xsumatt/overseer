@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import logging
 from collections.abc import Callable, Sequence
 from datetime import datetime
-from typing import Any
+from typing import Any, NamedTuple
 
 import asyncpg
 
@@ -11,6 +14,8 @@ from core.enums import Exchange, MarketType, Timeframe
 from core.execution_history import ExecutionSample
 from core.models import (OHLCV, FundingRate, LeverageStats, LiquiditySnapshot,
                          OrderBookSnapshot, Trade, TradeFlow, VenueTvl, VenueVolume)
+
+log = logging.getLogger("overseer.storage")
 
 # (db column, postgres array cast, value extractor)
 _Col = tuple[str, str, Callable[[Any], Any]]
@@ -162,12 +167,43 @@ _DEPTH_COLS: tuple[_Col, ...] = (
 )
 
 
+class _JobRun(NamedTuple):
+    """A job's latest outcome, held for the next heartbeat flush. Fields are in
+    the upsert's column order."""
+    ran_at: datetime
+    status: str                      # 'ok' | 'fail'
+    fetched: int
+    new_rows: int
+    error: str | None
+    success_at: datetime | None      # newest success since the last flush
+
+
+# last_success_at advances only on success and survives failures, so the health
+# view can show both 'currently failing' and 'last worked at …'.
+_JOB_RUNS_UPSERT = """
+    INSERT INTO job_runs (job_id, last_run_at, last_status, fetched, new_rows,
+                          last_error, last_success_at, updated_at)
+    SELECT r.*, now()
+    FROM unnest($1::text[], $2::timestamptz[], $3::text[], $4::int[], $5::int[],
+                $6::text[], $7::timestamptz[]) AS r
+    ON CONFLICT (job_id) DO UPDATE SET
+        last_run_at     = EXCLUDED.last_run_at,
+        last_status     = EXCLUDED.last_status,
+        fetched         = EXCLUDED.fetched,
+        new_rows        = EXCLUDED.new_rows,
+        last_error      = EXCLUDED.last_error,
+        last_success_at = COALESCE(EXCLUDED.last_success_at, job_runs.last_success_at),
+        updated_at      = now()
+"""
+
+
 class Storage:
     """Async write access to the Timescale tables. One per process."""
 
     def __init__(self, dsn: str) -> None:
         self._dsn = dsn
         self._pool: asyncpg.Pool | None = None
+        self._job_runs: dict[str, _JobRun] = {}
 
     async def connect(self) -> None:
         self._pool = await asyncpg.create_pool(
@@ -217,12 +253,17 @@ class Storage:
         unnest = ", ".join(f"${i + 1}::{c[1]}[]" for i, c in enumerate(cols))
         on_conflict = ", ".join(conflict)
         if update:
-            sets = ", ".join(
-                f"{c[0]} = EXCLUDED.{c[0]}" for c in cols if c[0] not in conflict
+            changing = [c[0] for c in cols if c[0] not in conflict]
+            sets = ", ".join(f"{c} = EXCLUDED.{c}" for c in changing)
+            # A row that would not change is left alone (no dead row version
+            # for vacuum). xmax = 0 only on freshly inserted rows, so "new"
+            # still means new.
+            action = (
+                f"DO UPDATE SET {sets} "
+                f"WHERE ({', '.join(f'{table}.{c}' for c in changing)}) "
+                f"IS DISTINCT FROM ({', '.join(f'EXCLUDED.{c}' for c in changing)}) "
+                "RETURNING (xmax = 0) AS is_new"
             )
-            # xmax = 0 only on freshly inserted rows, so "new" still means new
-            # even though conflicting rows are rewritten.
-            action = f"DO UPDATE SET {sets} RETURNING (xmax = 0) AS is_new"
         else:
             action = "DO NOTHING RETURNING TRUE AS is_new"
         sql = (
@@ -391,7 +432,7 @@ class Storage:
 
     # -- heartbeat (job health) ---------------------------------------------------
 
-    async def record_job_run(
+    def record_job_run(
         self,
         job_id: str,
         status: str,            # 'ok' | 'fail'
@@ -400,29 +441,42 @@ class Storage:
         error: str | None,
         ran_at: datetime,
     ) -> None:
-        """Upsert the current state of a job. last_success_at is advanced only on
-        success and preserved through failures, so the health view can show both
-        'currently failing' and 'last worked at …'."""
-        await self.pool.execute(
-            """
-            INSERT INTO job_runs (job_id, last_run_at, last_status, fetched,
-                                  new_rows, last_error, last_success_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6,
-                    CASE WHEN $3 = 'ok' THEN $2::timestamptz
-                         ELSE NULL::timestamptz END, now())
-            ON CONFLICT (job_id) DO UPDATE SET
-                last_run_at     = EXCLUDED.last_run_at,
-                last_status     = EXCLUDED.last_status,
-                fetched         = EXCLUDED.fetched,
-                new_rows        = EXCLUDED.new_rows,
-                last_error      = EXCLUDED.last_error,
-                last_success_at = CASE WHEN EXCLUDED.last_status = 'ok'
-                                       THEN EXCLUDED.last_run_at
-                                       ELSE job_runs.last_success_at END,
-                updated_at      = now()
-            """,
-            job_id, ran_at, status, fetched, new_rows, error,
-        )
+        """Hold a job's latest outcome for the next flush_job_runs(): one upsert
+        per job run was hundreds of statements a minute."""
+        held = self._job_runs.get(job_id)
+        success_at = ran_at if status == "ok" else held.success_at if held else None
+        self._job_runs[job_id] = _JobRun(ran_at, status, fetched, new_rows, error, success_at)
+
+    async def flush_job_runs(self) -> int:
+        """Write every held heartbeat in one upsert. If it fails they stay held
+        for the next flush, behind any newer outcome."""
+        if not self._job_runs:
+            return 0
+        held, self._job_runs = self._job_runs, {}
+        try:
+            await self.pool.execute(
+                _JOB_RUNS_UPSERT, list(held), *map(list, zip(*held.values()))
+            )
+        except BaseException:
+            for job_id, run in held.items():
+                newer = self._job_runs.setdefault(job_id, run)
+                if newer.success_at is None and run.success_at is not None:
+                    self._job_runs[job_id] = newer._replace(success_at=run.success_at)
+            raise
+        return len(held)
+
+    async def run_job_runs(self, stop: asyncio.Event, every: float = 30.0) -> None:
+        """Flush held heartbeats every `every` seconds until `stop`, then once more."""
+        while True:
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(stop.wait(), timeout=every)
+            try:
+                await self.flush_job_runs()
+            except Exception:
+                log.exception("heartbeat flush failed; %d job(s) held for the next",
+                              len(self._job_runs))
+            if stop.is_set():
+                return
 
     async def all_job_runs(self) -> list[asyncpg.Record]:
         return await self.pool.fetch(

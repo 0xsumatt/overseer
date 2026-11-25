@@ -60,3 +60,16 @@ def test_the_previous_day_ignores_older_settlements_and_needs_half_a_day():
     }, 720, False, NOW)
     assert cost(result, "a") == D("-72")
     assert cost(result, "b") is None and "11 of the previous 24 hours" in result["b"]["unavailable"]
+
+
+def test_a_venue_keeping_a_funding_spread_charges_payers_more_and_pays_receivers_less():
+    # Bullet keeps 5% of every payment from each side.
+    spread = {"a": D("0.05")}
+    long = holding_funding(["a"], {"a": current("0.0001")}, {}, 24, True, NOW, spread)
+    short = holding_funding(["a"], {"a": current("0.0001")}, {}, 24, False, NOW, spread)
+    assert cost(long) == D("3.15") and cost(short) == D("-2.85")
+    assert long["a"]["spread"] == "0.05" and long["a"]["rate"] == "0.0001"
+    # Settlement by settlement: a day that nets to zero still costs the spread.
+    netted = settled(["0.00001", "-0.00001"] * 12, 1)
+    assert cost(holding_funding(["a"], {}, {"a": netted}, 168, True, NOW)) == 0
+    assert cost(holding_funding(["a"], {}, {"a": netted}, 168, True, NOW, spread)) == D("0.84")

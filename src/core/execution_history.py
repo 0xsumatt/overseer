@@ -19,7 +19,9 @@ from typing import Any, Iterable, Mapping
 from core.enums import Side
 from core.execution import NOTIONALS, execution_estimates
 
-HISTORY_ASSETS = ("BTC", "ETH", "SOL")
+# Three crypto coins, plus gold and NVIDIA so that venues listing only
+# traditional assets (QFEX) have a history and depth heatmap too.
+HISTORY_ASSETS = ("BTC", "ETH", "SOL", "XAU", "NVDA")
 HISTORY_INTERVAL_SECONDS = 300
 HISTORY_WINDOWS_DAYS = (7, 30)
 # $10m is left out: Hyperliquid's public book shows at most 20 price levels a

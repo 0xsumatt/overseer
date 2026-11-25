@@ -23,6 +23,8 @@ from data_collection.exchanges.bybit import BybitPerpScraper
 from data_collection.exchanges.extended import ExtendedScraper, _unwrap
 from data_collection.exchanges.hyperliquid import HyperliquidScraper
 from data_collection.exchanges.lighter import LighterScraper
+from data_collection.exchanges.phoenix import PhoenixScraper
+from data_collection.exchanges.qfex import QfexScraper
 from data_collection.exchanges.risex import RiseScraper
 from data_collection.http import HttpClient
 
@@ -99,6 +101,22 @@ def levels(rows, price_key, quantity_key, *, bids: bool) -> tuple[BookLevel, ...
             price, quantity = number(row[price_key]), number(row[quantity_key])
             combined[price] = combined.get(price, Decimal(0)) + quantity
     return tuple(BookLevel(price, combined[price]) for price in sorted(combined, reverse=bids))
+
+def without_empty(rows, quantity_key):
+    """Rows without levels listed at zero size, as QFEX lists emptied levels;
+    every other row, valid or not, is left for levels() to judge."""
+    if not isinstance(rows, list):
+        raise DepthUnavailable("Invalid public depth structure.")
+
+    def empty(row):
+        value = row[quantity_key]
+        if isinstance(value, bool) or not isinstance(value, (str, int, Decimal)):
+            return False
+        try:
+            return Decimal(value) == 0
+        except InvalidOperation:
+            return False
+    return [row for row in rows if not empty(row)]
 
 
 def source_time(value, unit: str) -> datetime | None:
@@ -191,6 +209,7 @@ class ExecutionDepth:
             "binance_perp": self._binance, "bybit_perp": self._bybit,
             "lighter": self._lighter, "extended": self._extended,
             "rise": self._rise, "bullet": self._bullet, "bulk": self._bulk,
+            "phoenix": self._phoenix, "qfex": self._qfex,
         }.get(venue)
         if handler is None:
             raise DepthUnavailable("Public perpetual depth is unsupported for this venue.")
@@ -203,6 +222,7 @@ class ExecutionDepth:
             "hyperliquid": self._hyperliquid_margin, "lighter": self._lighter_margin,
             "extended": self._extended_margin, "rise": self._rise_margin,
             "bullet": self._bullet_margin, "bulk": self._bulk_margin,
+            "phoenix": self._phoenix_margin, "qfex": self._qfex_margin,
         }.get(venue)
         if handler is None:
             raise DepthUnavailable("Public margin rules are unsupported for this venue.")
@@ -244,13 +264,25 @@ class ExecutionDepth:
             return await self.rise._market_map(refresh=True)
         return await self._cached(venue, load)
 
+    async def _phoenix_markets(self, venue):
+        async def load():
+            return await self.clients[venue].get_json(f"{PhoenixScraper.base_url}/v1/view/exchange/markets")
+        return await self._cached(venue, load)
+
+    async def _qfex_refdata(self, venue):
+        async def load():
+            payload = await self.clients[venue].get_json(f"{QfexScraper.base_url}/refdata",
+                                                         params={"api_version": QfexScraper.API_VERSION})
+            return payload["data"]
+        return await self._cached(venue, load)
+
     # ---- margin tables --------------------------------------------------------
 
     @staticmethod
-    def _schedule(venue, symbol, tiers, source, source_url=None, notes=()):
+    def _schedule(venue, symbol, tiers, source, source_url=None, notes=(), **options):
         if not tiers:
             raise DepthUnavailable("Public margin tiers are empty.")
-        return MarginSchedule(venue, symbol, tuple(tiers), source, source_url, tuple(notes))
+        return MarginSchedule(venue, symbol, tuple(tiers), source, source_url, tuple(notes), **options)
 
     async def _binance_margin(self, venue, symbol):
         native = self.binance.to_native(symbol)
@@ -267,9 +299,8 @@ class ExecutionDepth:
     async def _bybit_margin(self, venue, symbol):
         native = self.bybit.to_native(symbol)
         async def load():
-            payload = await self.clients[venue].get_json(f"{self.bybit.base_url}/v5/market/risk-limit",
-                                                         params={"category": "linear", "symbol": native})
-            return self.bybit._unwrap(payload)["list"]
+            return (await self.bybit._get("/v5/market/risk-limit",
+                                          {"category": "linear", "symbol": native}))["list"]
         rows = sorted((row for row in await self._cached((venue, "risk-limit", native), load, self.margin_ttl)
                        if row.get("symbol") == native), key=lambda row: margin_number(row["riskLimitValue"]))
         tiers = [MarginTier(margin_number(row["riskLimitValue"]), margin_number(row["maxLeverage"]),
@@ -391,6 +422,36 @@ class ExecutionDepth:
                                "Computed like BULK's published calculator; its engine's correlation discount is undocumented and not applied."),
                               bulk=risk)
 
+    async def _phoenix_margin(self, venue, symbol):
+        market = one_market(await self._phoenix_markets(venue), "symbol", symbol)
+        # Tiers cap the position in base lots, 10^baseLotsDecimals to a coin.
+        lots = Decimal(10) ** int(market["baseLotsDecimals"])
+        # Maintenance is this share of initial margin, size / the tier's maximum leverage.
+        share = margin_number(str(market["riskFactors"]["maintenanceBps"])) / 10000
+        tiers = []
+        for row in sorted(market["leverageTiers"], key=lambda row: margin_number(str(row["maxSizeBaseLots"]))):
+            leverage = margin_number(str(row["maxLeverage"]))
+            tiers.append(MarginTier(margin_number(str(row["maxSizeBaseLots"])) / lots, leverage, share / leverage))
+        isolated = market.get("isolatedOnly") is True
+        notes = [f"Tiers cap position size in coins, not value; maintenance is {share:.0%} of initial margin (size ÷ the tier's maximum leverage)."]
+        if isolated:
+            notes.append("Isolated margin only: this market's collateral backs no other position.")
+        return self._schedule(venue, symbol, tiers, "Phoenix public market parameters",
+                              "https://docs.phoenix.trade/phoenix/margin-and-risk/margin-math", notes,
+                              quantity_caps=True, isolated=isolated)
+
+    async def _qfex_margin(self, venue, symbol):
+        market = one_market(await self._qfex_refdata(venue), "symbol", symbol)
+        leverage = margin_number(str(market["default_max_leverage"]))
+        # Initial margin is 1 / the chosen leverage and maintenance two-thirds
+        # of it, so the maximum leverage asks the least of both.
+        tier = MarginTier(None, leverage, 2 / (3 * leverage))
+        return self._schedule(venue, symbol, [tier], "QFEX public reference data",
+                              "https://docs.qfex.com/qfex/definitions",
+                              ("Maintenance margin is two-thirds of initial margin at the leverage you choose; the maximum leverage is assumed.",
+                               "Per-symbol position limits, cut to 50% overnight and 10% at weekends while the reference market is closed, are not modelled."),
+                              isolated=market.get("isolated_only") is True)
+
     @staticmethod
     def _book(venue, symbol, quote_currency, payload, bid_key, ask_key,
               price_key, quantity_key, *, venue_at=None, notes=(),
@@ -413,7 +474,8 @@ class ExecutionDepth:
         async def load():
             return await http.get_json(f"{self.binance.base_url}/fapi/v1/exchangeInfo")
         market = one_market((await self._cached(venue, load))["symbols"], "symbol", native)
-        if market.get("status") != "TRADING" or market.get("contractType") != "PERPETUAL":
+        # TradFi perpetuals (gold, equities) carry Binance's own contract type.
+        if market.get("status") != "TRADING" or market.get("contractType") not in ("PERPETUAL", "TRADIFI_PERPETUAL"):
             raise DepthUnavailable("Market is not an active perpetual.")
         quote_currency = currency(market["quoteAsset"])
         identity(native, market["baseAsset"] + quote_currency)
@@ -429,19 +491,17 @@ class ExecutionDepth:
                           notes=("Up to 1000 visible price levels per side; request weight 20. RPI orders excluded.",))
 
     async def _bybit(self, venue, symbol):
-        http = self.clients[venue]
         native = self.bybit.to_native(symbol)
         async def load():
-            payload = await http.get_json(f"{self.bybit.base_url}/v5/market/instruments-info",
-                                          params={"category": "linear", "symbol": native})
-            return self.bybit._unwrap(payload)["list"]
+            return (await self.bybit._get("/v5/market/instruments-info",
+                                          {"category": "linear", "symbol": native}))["list"]
         market = one_market(await self._cached((venue, native), load), "symbol", native)
         if market.get("status") != "Trading" or market.get("contractType") != "LinearPerpetual":
             raise DepthUnavailable("Market is not an active linear perpetual.")
         quote_currency = currency(market["quoteCoin"])
         identity(native, market["baseCoin"] + quote_currency)
-        payload = self.bybit._unwrap(await http.get_json(f"{self.bybit.base_url}/v5/market/orderbook",
-                                      params={"category": "linear", "symbol": native, "limit": "1000"}))
+        payload = await self.bybit._get("/v5/market/orderbook",
+                                        {"category": "linear", "symbol": native, "limit": "1000"})
         identity(payload["s"], native)
         return self._book(venue, symbol, quote_currency, payload, "b", "a", 0, 1,
                           venue_at=source_time(payload.get("cts", payload.get("ts")), "ms"),
@@ -608,3 +668,42 @@ class ExecutionDepth:
                                  "Requested 1000 price levels per side, not a documented server maximum. Human REST sizes are not multiplied/divided by 10^4.",
                                  (f"Source timestamp {stamp} interpreted as {unit}; observed ns epochs differ from the documentation's ms description."
                                   if stamp is not None else "No source snapshot timestamp; receipt time only.")))
+
+    async def _phoenix(self, venue, symbol):
+        market = one_market(await self._phoenix_markets(venue), "symbol", symbol)
+        if market.get("marketStatus") != "active":
+            raise DepthUnavailable("Market is not active for market orders.")
+        # include_splines folds market makers' spline liquidity into the levels,
+        # as Phoenix's engine matches against both.
+        payload = await self.clients[venue].get_json(
+            f"{PhoenixScraper.base_url}/v1/view/orderbook/{quote(symbol, safe='')}",
+            params={"include_splines": "true"})
+        identity(payload.get("symbol"), symbol)
+        notes = ["Full visible book, resting orders and spline liquidity combined; USDC prices, PnL and fees. "
+                 "The book carries a Solana slot, not a time: receipt time only."]
+        session = market.get("commodityMetadata") or {}
+        if session.get("isCommodity"):
+            notes.append("Outside its reference market's hours Phoenix prices this market internally and fills only "
+                         "within 1 ÷ its maximum leverage of the last external price.")
+            if session.get("isAfterHours"):
+                notes.append("Closed period now: the book shows only the levels inside that price band.")
+        return self._book(venue, symbol, "USDC", payload, "bids", "asks", 0, 1, notes=notes)
+
+    async def _qfex(self, venue, symbol):
+        market = one_market(await self._qfex_refdata(venue), "symbol", symbol)
+        if market.get("status") != "ACTIVE" or "MARKET" not in market.get("order_types", ()):
+            raise DepthUnavailable("Market is not active for market orders.")
+        accounting = currency(market["quote_asset"])
+        identity(symbol, f"{market['base_asset']}-{accounting}")
+        payload = await self.clients[venue].get_json(
+            f"{QfexScraper.base_url}/md/orderbook/{quote(symbol, safe='')}",
+            params={"api_version": QfexScraper.API_VERSION})
+        identity(payload.get("ticker_id"), symbol)
+        book = {side: without_empty(payload[side], 1) for side in ("bids", "asks")}
+        return self._book(venue, symbol, accounting, book, "bids", "asks", 0, 1,
+                          venue_at=source_time(payload.get("timestamp"), "ms"),
+                          max_quantity=optional_limit(market.get("max_quantity")),
+                          notes=("REST snapshots show at most 20 resting price levels per side (observed; the depth is undocumented), "
+                                 "plus emptied levels listed at zero size, which are skipped.",
+                                 f"{accounting} prices, {market.get('margin_asset', 'unspecified')} margin and settlement.",
+                                 "Orders priced beyond QFEX's dynamic price band are rejected; the band is not applied to this walk."))

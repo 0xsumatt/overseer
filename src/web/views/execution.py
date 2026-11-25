@@ -27,13 +27,20 @@ ROUND_TRIPS = ("buy_sell", "sell_buy")
 bp = Blueprint("execution_api", __name__, url_prefix="/api/execution")
 
 
+# Picker order: crypto first, then traditional assets by class.
+ASSET_CLASSES = ("crypto", "commodity", "index", "equity")
+
+
 def execution_assets(registry) -> list[dict[str, str]]:
-    return [
-        {"id": asset, "label": registry.metadata(asset).label}
+    """Every configured asset some compared venue lists, crypto and
+    traditional alike, in picker order."""
+    assets = [
+        {"id": asset, "label": metadata.label, "asset_class": metadata.asset_class}
         for asset in registry.assets()
-        if registry.metadata(asset).family == "crypto"
-        and execution_fees.FEE_SCHEDULES.keys() & registry.listings(asset).keys()
+        if execution_fees.FEE_SCHEDULES.keys() & registry.listings(asset).keys()
+        for metadata in (registry.metadata(asset),)
     ]
+    return sorted(assets, key=lambda choice: ASSET_CLASSES.index(choice["asset_class"]))
 
 
 @bp.after_request
@@ -58,10 +65,10 @@ def _request_parameters(registry):
     if (request.args or not isinstance(body, dict)
             or body.keys() - {"asset", "side", "fees", "hold_hours"}
             or not {"asset", "side"} <= body.keys()):
-        raise ValueError("Supply a coin, a trade, an optional hold and optional venue fee tiers.")
+        raise ValueError("Supply an asset, a trade, an optional hold and optional venue fee tiers.")
     asset = body["asset"]
     if not isinstance(asset, str) or asset not in {choice["id"] for choice in execution_assets(registry)}:
-        raise ValueError("Choose a configured crypto coin with perpetual listings.")
+        raise ValueError("Choose a configured asset with perpetual listings.")
     trade = body["side"]
     if not isinstance(trade, str) or trade not in TRADES:
         raise ValueError("Trade must be buy, sell, buy_sell or sell_buy.")
@@ -101,6 +108,7 @@ def holding_funding_for(listings, hold: int, long: bool, now: datetime) -> dict[
         {venue: current.get(pair) for venue, pair in pairs.items()},
         {venue: settled.get(pair, []) for venue, pair in pairs.items()},
         hold, long, now,
+        {venue: Decimal(execution_fees.funding_spread(venue)) for venue in listings},
     )
 
 
@@ -142,10 +150,9 @@ def quote():
     except ReaderFailure:
         return jsonify(error="Public execution snapshots are unavailable. Refresh again shortly."), 502
     now = datetime.now(timezone.utc)
-    fees = {
-        venue: Decimal(tier["taker_bps"]) if tier["taker_bps"] is not None else None
-        for venue, tier in selected.items()
-    }
+    asset_class = registry.metadata(asset).asset_class
+    rates = {venue: execution_fees.taker_bps(tier, asset_class) for venue, tier in selected.items()}
+    fees = {venue: Decimal(rate) if rate is not None else None for venue, rate in rates.items()}
     first = TRADES[trade]
     funding = holding_funding_for(listings, hold, first == Side.BUY, now)
     funding_bps = None if funding is None else {
@@ -178,7 +185,7 @@ def quote():
                 "max_quote_notional": str(book.max_quote_notional) if book and book.max_quote_notional is not None else None,
             },
             depth={"bid_levels": len(book.bids) if book else 0, "ask_levels": len(book.asks) if book else 0},
-            fee={"tier": tier["id"], "tier_label": tier["label"], "taker_bps": tier["taker_bps"],
+            fee={"tier": tier["id"], "tier_label": tier["label"], "taker_bps": rates[venue],
                  "source_url": schedule["source_url"], "checked_at": schedule["checked_at"],
                  "notes": schedule["notes"]},
             funding=funding.get(venue) if funding is not None else None,

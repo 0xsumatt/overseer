@@ -107,11 +107,14 @@ class ExecutionReader:
             "binance_perp": (RateLimiter.per_minute(1200, burst=80)),
             "bybit_perp": RateLimiter.per_second(5, burst=10),
             "hyperliquid": RateLimiter.per_minute(600, burst=60),
-            "lighter": RateLimiter.per_minute(300, burst=20),
+            # Lighter's 60/min per IP is mostly the scheduler's polling (lighter.py).
+            "lighter": RateLimiter.per_minute(12, burst=6),
             "extended": RateLimiter.per_second(5, burst=10),
             "rise": RateLimiter.per_minute(300, burst=20),
             "bullet": RateLimiter.per_second(5, burst=10),
             "bulk": RateLimiter.per_minute(300, burst=20),
+            "phoenix": RateLimiter.per_minute(300, burst=20),
+            "qfex": RateLimiter.per_minute(120, burst=10),
             "fx": RateLimiter.per_minute(60, burst=2),
         }
         for venue, limiter in limits.items():

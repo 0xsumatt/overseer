@@ -46,6 +46,24 @@
 </details>
 {%- endmacro %}
 
+{#- An asset picker's <option>s, grouped by class under crypto, commodities,
+    indices and equities headings, each group in the order given. Assets
+    carry id, label and asset_class.
+
+      <select id="execution-asset">{{ ui.asset_options(assets, 'BTC') }}</select> -#}
+{% macro asset_options(assets, selected=None) -%}
+{%- for asset_class, heading in (('crypto', 'Crypto'), ('commodity', 'Commodities'), ('index', 'Indices'), ('equity', 'Equities')) %}
+{%- set members = assets | selectattr('asset_class', 'equalto', asset_class) | list %}
+{%- if members %}
+<optgroup label="{{ heading }}">
+{%- for asset in members %}
+<option value="{{ asset.id }}"{% if asset.id == selected %} selected{% endif %}>{{ asset.id }}{% if asset.label != asset.id %} · {{ asset.label }}{% endif %}</option>
+{%- endfor %}
+</optgroup>
+{%- endif %}
+{%- endfor %}
+{%- endmacro %}
+
 {#- The strip under the navigation saying how current this page's data is.
     Every page except login renders exactly one, so the frame never moves:
     the base template's default is the market feed; a tool overrides

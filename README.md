@@ -1,13 +1,14 @@
 # overseer
 
 Market-data collection + dashboard for crypto venues (Binance, Bybit,
-Hyperliquid, Lighter, Extended, BULK, RISEx, Bullet) and QFEX, which lists
-traditional assets only. Two independent processes sharing one
+Hyperliquid, Lighter, Extended, BULK, RISEx, Bullet, Phoenix) and QFEX, which
+lists traditional assets only. Two independent processes sharing one
 TimescaleDB:
 
 * **scheduler** — async ingest: OHLCV bars, settled funding, OI/volume and
   top-of-book snapshots, plus tracked-address fills, per `symbols.toml`, and
-  five-minute execution samples and order-book depth for BTC, ETH and SOL.
+  five-minute execution samples and order-book depth for BTC, ETH, SOL, gold
+  (XAU) and NVIDIA (NVDA).
 * **web** — Flask public analytics dashboard (price, bid–ask spread, and
   reported-volume/open-interest ratio charts; spot-perp basis; funding; flow;
   wallets; order-book depth heatmaps), execution-cost and margin calculators,
@@ -56,7 +57,7 @@ registry; historical chart series become available as collection writes data.
 labels. `[hyperliquid_deployers.*]` labels HIP-3 namespaces such as TradeXYZ
 without treating them as separate physical exchanges. Every venue has one
 display name, used on every page: `VENUE_NAMES` in `src/core/symbols.py`
-(Binance, Bybit, Hyperliquid, Lighter, Extended, BULK, RISEx, Bullet, QFEX), plus
+(Binance, Bybit, Hyperliquid, Lighter, Extended, BULK, RISEx, Bullet, QFEX, Phoenix), plus
 the `hip3:` prefix and configured deployer name for HIP-3 markets, e.g.
 `hip3:tradexyz` and `hip3:entropy`. Pages receive the map as `VENUE_LABELS`
 (`labelFor()` in `venues.js`). A fee schedule's product name, such as
@@ -81,6 +82,24 @@ fade marks the bottom edge while more rows remain.
 Set `orderbook = true` on a venue to retain one best-bid/ask snapshot per
 configured market every 60 seconds. Override that cadence with
 `orderbook_poll_seconds`.
+
+Each polling job first runs at a fixed point within its period, derived from
+its job id, so a restart spreads the minute jobs across the first minute rather
+than firing all of them together. Candle polls ask only for the bars since the
+last stored one, and a re-read bar is rewritten only when the venue revised it.
+Lighter's client stays at 48 requests a minute, under the 60 per rolling minute
+per IP its standard tier allows
+(<https://docs.lighter.xyz/developers/reference/rate-limits>); past that, Lighter
+blocks the IP for 60 seconds. Bybit's per-second throttle (retCode 10006 in a
+normal response) clears within a second or two, unlike its ten-minute ban
+for passing 600 requests in 5 seconds (HTTP 403), so a throttled request waits
+one, then two seconds and retries before its run fails.
+
+Settled funding is read once an hour, between 30 seconds and two and a half
+minutes past (QFEX five minutes later, once its settlements are final), since
+settlements land on the hour, 8-hourly venues included. The live rate, with
+index price and premium where published, comes with each 5-minute liquidity
+snapshot.
 
 Funding rates are stored as what one settlement charges, with that settlement's
 interval, so APR = rate × 8760 ÷ interval hours. Venues that quote an 8-hour
@@ -122,6 +141,12 @@ only the best bid and ask are stored; `orderbook_poll_seconds` cuts the traffic.
 Venue volume is the last complete
 UTC day from its DefiLlama metrics endpoint.
 
+Execution, Margin, the cheapest-venue history and the depth heatmap read QFEX's
+`/md/orderbook` and `/refdata` (status, USD quote, USDC margin, largest order,
+maximum leverage). That REST book shows at most 20 resting price levels a side
+(observed; the depth is undocumented) among emptied levels listed at zero size,
+which are skipped.
+
 Phoenix (`phoenix`, <https://docs.phoenix.trade/api>) lists crypto, equities,
 ETFs, commodities and pre-IPO names, and is mapped to the nineteen assets above
 that it lists (gold, silver and WTI as `GOLD`, `SILVER` and `WTIOIL`). Its SPY
@@ -136,8 +161,17 @@ price, 24-hour volume and the current rate come from one read of the WebSocket
 live rate just before a settlement matched the payment it recorded (NVDA
 0.003483% against 0.003476%), and markets silent for 15 seconds are skipped
 that poll. Candles (paged, 2,500 a
-request), settled funding and books come from REST. Phoenix has no fee
-schedule here, so it is not on the Execution or Margin pages.
+request), settled funding and books come from REST.
+
+On Execution, Margin, the cheapest-venue history and the depth heatmap, Phoenix's
+book is its whole REST book with market makers' spline liquidity folded in
+(`include_splines=true`), priced in USDC, with receipt time only (it carries a
+Solana slot). In a traditional market's closed period Phoenix fills only within
+1 ÷ its maximum leverage of the last external price, and the book shows only
+the levels inside that band. Its fee is the published 3.5 bps taker on every
+market but FX. Margin follows its leverage tiers, which cap position size in
+coins rather than value, with maintenance half of initial margin; gold, silver
+and WTI are isolated-margin only.
 
 The Funding page fetches rates when it opens and every five minutes. Its asset
 filters, search, watchlist and rate mode re-render those rates without asking
@@ -148,7 +182,10 @@ from the hour before the 24-hour mark, and is unknown without one. Both bounds
 keep its query to the newest data rather than every snapshot ever stored. For
 the same reason the dashboard and Basis pickers list series with a bar in the
 last day, and the Wallets page's asset list and fill history count the last
-seven days of fills, its longest chart window.
+seven days of fills, its longest chart window. The funding history shows every
+venue for the whole window, up to 30 days. Open-interest bars finer than a
+window allows are not offered (5-minute bars over 30 days would be 8,640 a
+venue); the API widens any finer request to keep each venue to about 2,880 bars.
 
 Above the market pulse, the Venues chips narrow the Markets view: a click shows
 one venue, Ctrl-click (⌘-click on a Mac) adds or removes another, and All
@@ -370,12 +407,19 @@ schema. Without `TEST_DATABASE_URL`, that database case is skipped.
 
 ## Execution estimator
 
-Open **Tools → Execution estimates** (`/execution`) without signing in. Choose a
-crypto coin, a trade (**Buy**, **Sell**, or a round trip: **Buy, then sell** or
-**Sell, then buy**) and an optional **Hold**; the table compares configured
-perpetual venues at **$10k, $100k, $1m and $10m**. Spot and traditional-asset
-markets are not mixed into this comparison. This is a read-only estimator, not
-an order router.
+Open **Tools → Execution estimates** (`/execution`) without signing in. Choose an
+asset (crypto, commodities, indices and equities, grouped in the picker), a
+trade (**Buy**, **Sell**, or a round trip: **Buy, then sell** or **Sell, then
+buy**) and an optional **Hold**; the table compares configured perpetual venues
+at **$10k, $100k, $1m and $10m**. Spot markets are not mixed into this
+comparison. This is a read-only estimator, not an order router.
+
+Traditional assets compare whichever venues list them, QFEX included, at each
+venue's own sessions: Extended reports its equity markets unavailable out of
+hours, Phoenix fills only within its closed-period price band, and QFEX trades
+through the weekend under tighter bands and position limits. Every venue
+quotes these markets in the same units (gold per ounce, shares one for one),
+checked against each other on 2026-11-17 within 0.15%.
 
 The four **Best venue by trade size** cards lead with the best captured venue
 and its fee-adjusted **USD price per one coin**, not the total trade cost.
@@ -462,7 +506,17 @@ in the fee disclosure. RISEx's tiers come from its published fee page (rolling
 14-day volume, 3.00 down to 1.50 bps taker), since its account fee lookup needs
 a JWT. A venue whose fee is unknown shows its estimates **before fees** and is
 never ranked as free; HIP-3 market-specific fees likewise must not inherit
-native Hyperliquid rates.
+native Hyperliquid rates, so TradeXYZ's traditional markets stay unranked.
+
+A venue that charges an asset class its own rate is priced at that rate, and
+tier menus show the chosen asset's: Binance's and Bybit's TradFi schedules
+(4.0 and 2.75 bps at base), Extended's RWA rate (1.0 bps), BULK's flat TradFi
+1.5 bps and QFEX's commodity, index and single-stock columns (5, 5 and 10 bps at
+Tier 5). QFEX accounts that had deposited by 24 August 2026 pay its lowest tier
+for life on listed products such as NVDA and US100: choose Tier 1 for those.
+Phoenix charges 3.5 bps on every market but FX, with no tiers. Bullet charges no
+trading fees on any market (checked 2026-11-17) but keeps 5% of every funding
+payment from each side, which holds include (below).
 
 **Buy, then sell** and **Sell, then buy** price a round trip: the same base
 quantity bought and sold against one capture. Cells and winner cards then show
@@ -484,8 +538,12 @@ current (next-settlement) rate pro rata, which must be no older than 15
 minutes. Longer holds repeat the previous 24 hours of settled funding instead,
 so one live rate is not stretched over a week or a month; that day is averaged
 per hour and needs settlements covering at least 12 of its 24 hours. Averaging
-also keeps BULK, whose collector stores its predicted hourly rate every 15
-minutes, from counting four times over. One-way prices then include funding
+also keeps BULK, whose collector stores the predicted hourly rate rather than a
+settlement (four times an hour until collection became hourly), from counting
+more than once. Bullet keeps 5% of every hourly funding
+payment from each side, so its holds charge a payer 105% and credit a receiver
+95% of the published rate, settlement by settlement; the venue row's funding
+tooltip says so. One-way prices then include funding
 (paying it raises a buy's price and lowers a sell's; receiving it does the
 opposite), the cost line adds it to fee and slippage, and each venue row shows
 the hold's funding in bps. A venue without usable funding shows **Funding
@@ -543,6 +601,7 @@ price-grouped depth, but bucket prices introduce rounding uncertainty.
 This estimator currently uses full-precision books only; grouped prices are not
 silently substituted or ranked as exact fills. See the
 [official L2 snapshot contract](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint#l2-book-snapshot).
+QFEX's REST book likewise shows at most 20 resting levels a side.
 
 USD valuation uses timestamped Coinbase reference FX, cached for at most thirty
 seconds; stablecoins are never silently pegged to USD. This is not an executed
@@ -561,10 +620,12 @@ are honored when available.
 ### Cheapest venue history
 
 Below the live comparison, **Cheapest venue history** shows which venue is
-usually cheapest for BTC, ETH and SOL. The scheduler captures every compared
-venue's public book for each coin every **5 minutes** on its own clock, so a
-share means "of the scheduled captures", not "of the times someone had the page
-open". Each capture stores, per venue, side and size (**$10k, $100k and $1m**),
+usually cheapest for BTC, ETH, SOL, gold (XAU) and NVIDIA (NVDA); gold and
+NVIDIA give QFEX, which lists no crypto, a history too. The scheduler captures
+every compared venue's public book for each coin every **5 minutes** on its own
+clock, so a share means "of the scheduled captures", not "of the times someone
+had the page open". Each capture stores, per venue, side and size (**$10k,
+$100k and $1m**),
 the pre-fee average USD fill, or why the venue could not be compared, in
 `execution_samples` (migration 012). Eligibility is exactly the live
 estimator's: ten-second freshness, captured depth, published order limits and
@@ -600,9 +661,9 @@ at least two compared venues in `symbols.toml` to be scheduled. Coins are
 captured one after another, each recorded in `job_runs` as `execution:<coin>`,
 under the same reader limits as the page. A capture in which no venue returned
 a book is recorded as a failure and stores nothing: our network is a likelier
-cause than every exchange at once. With eight venues that is roughly 24 book
-requests every five minutes and about 41,500 rows a day, compressed after seven
-days.
+cause than every exchange at once. With nine or ten venues a coin that is
+roughly 46 book requests every five minutes and about 79,500 rows a day,
+compressed after seven days.
 
 `GET /api/execution-history?asset=BTC&side=buy&days=7` serves the statistics;
 `side` is buy, sell or round_trip, `days` is 7 or 30, and
@@ -629,8 +690,10 @@ table.
 Reach is the main limit of REST snapshots. On one live capture, Binance and
 Bybit BTC books reached only about ±16–28 bps despite 1,000 levels a side, and
 Hyperliquid's 20 levels about ±2.4 bps, while SOL on Binance and Bybit filled
-the whole ±100 bps window. Beyond a side's reach the book showed nothing, which
-the page draws differently from "nothing resting".
+the whole ±100 bps window. On one capture QFEX's 20 levels reached about ±23–53
+bps on gold and NVIDIA (2026-11-17); Phoenix sends its whole book. Beyond a
+side's reach the book showed nothing, which the page draws differently from
+"nothing resting".
 
 Each stored book is a column: blue bids below the mid, purple asks above,
 brighter for more size in that 1 bps band (square-root scale, full colour at
@@ -649,16 +712,17 @@ columns; `hours` is 6, 24, 168 or 720. Sizes are base units to four
 significant figures, and each side's array stops at its last non-empty bucket.
 Responses are cached for 30 seconds like the other public analytics.
 
-Storage is about 6 MB a day before compression for three coins on eight venues
-(two 100-value `real` arrays per book, 24 books every five minutes), compressed
-after seven days. Apply migration 013 before restarting the scheduler: without
+Storage is about 11.5 MB a day before compression for five coins on nine or ten
+venues (two 100-value `real` arrays per book, 46 books every five minutes),
+compressed after seven days. Apply migration 013 before restarting the
+scheduler: without
 the table each execution capture reports a failure, although its samples are
 still written.
 
 ## Margin calculator
 
-Open **Tools → Margin calculator** (`/margin`) without signing in. Choose a
-coin, **Long** or **Short**, a size in USD (`100000`, `100k` and `1m` all
+Open **Tools → Margin calculator** (`/margin`) without signing in. Choose an
+asset, **Long** or **Short**, a size in USD (`100000`, `100k` and `1m` all
 work), the price move the position must **Survive** (10% by default) and a
 **Hold**, and optionally a yearly return on idle capital. A **Second position**
 in another coin turns it into a pair trade held on the same venue. Each
@@ -718,6 +782,12 @@ where other venues need $104k–$124k, about $390 a week more at 5%.
 | RISEx | `/v1/markets` config | flat: maintenance = 1 ÷ maintenance factor |
 | Bullet | `GET /fapi/v1/leverageBracket` (public) | Binance-style brackets |
 | BULK | `GET /riskSurfaces` and `/ticker` | portfolio margin (below) |
+| Phoenix | `GET /v1/view/exchange/markets` leverage tiers and risk factors | tiers cap position size in coins, not value, so a position keeps its tier through the move; maintenance = half of size ÷ the tier's maximum leverage |
+| QFEX | `GET /refdata` maximum leverage | flat at the maximum: maintenance = two-thirds of 1 ÷ leverage; per-symbol position limits are not modelled |
+
+Binance's TradFi markets are not in the copied brackets (**Margin rules
+unavailable**), and Hyperliquid's HIP-3 markets have neither margin rules nor a
+known fee here; neither is ranked.
 
 Bybit and Bullet tables are cached for an hour and BULK's risk surfaces (about
 0.7 MB a market) for ten minutes; the other venues' rules come with the market
@@ -733,7 +803,9 @@ where the higher bracket still applies.
 
 **Pairs.** Both positions share one cross-margin account, and the test moves
 each against you at once (long down, short up): severe for a hedge, but the same
-test on every venue. Every venue except BULK adds the two maintenance margins:
+test on every venue. A market a venue margins only in isolation (Phoenix's gold,
+silver and WTI) cannot lend its collateral, so a pair with one posts each
+position's own capital. Every venue except BULK adds the two maintenance margins:
 Hyperliquid's portfolio margin, Bybit's per-coin risk units, Binance's portfolio
 margin and the multi-asset modes of Lighter and Extended change what counts as
 collateral or offset positions in the same coin, not a long BTC against a short
@@ -891,6 +963,11 @@ Charts offers Price, Spread, and Volatility metrics in both Overview and the
 multi-chart view. Volatility plots rolling realised volatility by venue; its
 saved 1h/6h/24h calculation window defaults to 24h. The Window selector
 (24h/48h/7d) controls the history displayed, independently of the rolling window.
+Price charts use 1-minute bars up to 48h. A week of them is 10,080, twice the
+5,000 a chart loads, so the 7d window merges them into 5-minute bars that cover
+the whole week. `/api/candles` merges any window longer than its `limit` into the
+smallest bar (5m, 15m, 1h, 4h, 1d) that fits, and a CSV export's filename names
+that bar. The Basis page's 7d window loads every minute of the week.
 `/api/realised-volatility` reads completed 1-minute candles plus the warm-up
 history and computes `100 * sqrt(sum(log(close / previous_close)^2))`, without
 annualisation. Plot points are sampled every 1/5/15 minutes for 24h/48h/7d views,
@@ -995,8 +1072,9 @@ Gunicorn listens only on `127.0.0.1:8000`.
    Gunicorn. Port 8000 stays private; only ports 80 and 443 belong in the
    public firewall. It gzips JSON, CSS, JavaScript and SVG (`/api/funding`
    shrinks from 86 KB to 11 KB) and lets browsers keep versioned static files
-   (`?v=…`) for a year and unversioned ones for an hour: change a file's `v=`
-   tag in its template whenever the file changes.
+   (`?v=…`) for a year and unversioned ones for an hour. Every static URL a
+   template builds carries a hash of its file's content (`web/__init__.py`), so a
+   changed file always gets a new URL and no browser keeps a stale copy.
 
 5. Before exposing login, replace `server_name _;` in the installed Nginx file
    with the real hostname and install TLS:
@@ -1056,9 +1134,16 @@ Notes:
 
 ## Monitoring a soak
 
-* Discord: job alerts fire on ok→fail and fail→ok transitions. A current-funding
-  spread must remain above the threshold across at least three fresh snapshots
-  for the configured confirmation window. Both legs must have known next
+* Discord: job alerts fire on ok→fail and fail→ok transitions, grouped by venue
+  (or by job kind, such as `execution`, for jobs not tied to a venue). The first
+  change for a venue is held for 90 seconds so the rest of its jobs join it: an
+  outage posts once with failing counts by kind (`ohlcv 21, orderbook 21`) and
+  its most common errors, and once more when the venue is back. A failure that
+  recovers within the window is not posted; a lone job keeps its own message,
+  and venues due together share a post. Held alerts are posted on shutdown.
+  A current-funding spread must remain above the threshold across at least
+  three fresh snapshots for the configured confirmation window. Both legs must
+  have known next
   settlements within one minute of each other; only then are live BBOs fetched
   and an alert sent. Both markets must also hold at least
   `OVERSEER_SPREAD_ALERT_MIN_OI` of open interest ($1M by default), so a wide
@@ -1088,6 +1173,15 @@ Notes:
   (RISEx) are not judged (`core/funding_units.py`).
 * `job_runs` table: per-job heartbeat (`last_status`, `last_error`,
   `last_success_at`) — `SELECT * FROM job_runs WHERE last_status='fail'`.
+  Outcomes are held and written together every 30 seconds (one statement, not one
+  per job run), so rows trail the jobs by up to 30 seconds; a failed write keeps
+  them for the next.
+* Logs (`docker compose logs scheduler`): failures, and APScheduler warnings
+  such as missed or skipped runs. Successful runs are not logged; `job_runs`
+  and `/health` show them. Docker keeps at most five 50 MB log files.
 * Freshness (catches jobs that "succeed" while a venue quietly returns
   nothing): the `/health` page on the web app, or directly in SQL —
-  age of the newest bar per series should stay near the bar interval.
+  age of the newest bar per series should stay near the bar interval. The page
+  looks up the newest bar of each series `symbols.toml` collects, one index probe
+  each, so it costs the same however much history is stored, and lists a
+  configured series with no bars at all as stale.

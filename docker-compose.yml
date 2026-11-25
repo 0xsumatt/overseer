@@ -33,6 +33,11 @@ services:
       OVERSEER_SPREAD_ALERT_APR: ${OVERSEER_SPREAD_ALERT_APR:-25}
       OVERSEER_SPREAD_CONFIRM_MINUTES: ${OVERSEER_SPREAD_CONFIRM_MINUTES:-10}
     restart: unless-stopped       # the supervision the scheduler needs for a multi-day soak
+    logging:                      # Docker keeps json logs forever unless told otherwise
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
 
 volumes:
   tsdata:

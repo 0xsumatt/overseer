@@ -10,12 +10,14 @@ from flask import (Blueprint, current_app, flash, redirect, render_template,
 from flask_login import login_required, login_user, logout_user
 
 from web.auth import role_required, verify_credentials
+from core.config import settings
 from core.depth import HEATMAP_WINDOWS, WINDOW_BPS
 from core.execution import MAX_BOOK_AGE_SECONDS, NOTIONALS
 from core.execution_fees import FEE_SCHEDULES, execution_listings
 from core.execution_funding import HOLDS
 from core.execution_history import HISTORY_ASSETS, HISTORY_NOTIONALS, HISTORY_WINDOWS_DAYS
 from data_collection.exchanges.registry import REGISTRY
+from scheduler.targets import load_targets
 from web.views.execution import execution_assets
 
 bp = Blueprint("pages", __name__)
@@ -172,16 +174,17 @@ def margin():
 @bp.get("/depth")
 def depth():
     registry = current_app.extensions["symbols"]
-    offered = {asset["id"] for asset in execution_assets(registry)}
+    offered = {asset["id"]: asset for asset in execution_assets(registry)}
     config = {
         "assets": [
-            {"id": asset, "venues": [
+            {**offered[asset], "venues": [
                 {"id": venue, "label": FEE_SCHEDULES[venue]["label"],
                  "identity": registry.venue_identity(REGISTRY[venue].exchange, symbol).key}
                 for venue, symbol in execution_listings(registry, asset).items()
             ]}
             for asset in HISTORY_ASSETS if asset in offered
         ],
+        "history_assets": list(HISTORY_ASSETS),
         "windows": [[hours, label] for hours, _step, label in HEATMAP_WINDOWS],
         "window_bps": WINDOW_BPS,
         "endpoint": url_for("api.depth_heatmap"),
@@ -192,8 +195,15 @@ def depth():
 @bp.get("/health")
 @role_required("can_view_internal")
 def health():
-    return render_template(
-        "health.html",
-        freshness=_store().freshness(),
-        jobs=_store().job_health(),
-    )
+    # Every series the scheduler collects, keyed as its bars are stored, so a
+    # series that stopped long ago still shows (as stale) without the query
+    # reading all of history.
+    ohlcv_targets = load_targets(settings.symbols_file)[0]
+    series = sorted({
+        (REGISTRY[t.venue].exchange.value, REGISTRY[t.venue].market_type_for(t.symbol).value,
+         t.symbol, t.interval.value)
+        for t in ohlcv_targets
+    })
+    freshness = [dict(row, stale=row["last_ts"] is None or row["stale_factor"] > 3)
+                 for row in _store().freshness(series)]
+    return render_template("health.html", freshness=freshness, jobs=_store().job_health())

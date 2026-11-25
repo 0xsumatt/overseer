@@ -25,11 +25,11 @@ class ScrapeTarget:
 
 @dataclass(frozen=True)
 class FundingTarget:
-    """Settled funding history for one perp symbol. Resume-based, so polling
-    more often than settlements just returns nothing new — cheap."""
+    """Settled funding history for one perp symbol, collected once an hour just
+    after settlements land (8-hourly venues settle on the hour too). Resume-
+    based, so an hour without a settlement returns nothing new."""
     venue: str
     symbol: str
-    poll_seconds: int = 900
     backfill_days: int = 14
 
     @property

@@ -91,7 +91,7 @@ class ExtendedScraper(BaseExchangeScraper):
             f"{self.base_url}/api/v1/info/candles/{symbol}/trades",
             params={
                 "interval": _INTERVALS[interval],
-                "limit": str(limit),
+                "limit": str(self._bars_since(since, interval, limit)),
                 "endTime": str(self._to_ms(datetime.now(timezone.utc))),
             },
         )

@@ -12,9 +12,7 @@
 {% block content %}
 {% macro asset_options(selected, optional=False) -%}
 {% if optional %}<option value="">None</option>{% endif %}
-{% for asset in margin_config.assets %}
-<option value="{{ asset.id }}"{% if asset.id == selected %} selected{% endif %}>{{ asset.id }}{% if asset.label != asset.id %} · {{ asset.label }}{% endif %}</option>
-{% endfor %}
+{{ ui.asset_options(margin_config.assets, selected) }}
 {%- endmacro %}
 <section id="margin-app" aria-labelledby="margin-title">
   {{ ui.page_header('Margin calculator', 'Compare the capital each venue needs to keep a position open through a price move, and the full cost of holding it.', title_id='margin-title') }}
@@ -145,6 +143,6 @@
 <script id="margin-config" type="application/json">{{ margin_config | tojson }}</script>
 {% endblock %}
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/venues.js', v='phoenix') }}"></script>
-<script src="{{ url_for('static', filename='js/margin.js', v='risex-sort') }}" defer></script>
+<script src="{{ url_for('static', filename='js/venues.js') }}"></script>
+<script src="{{ url_for('static', filename='js/margin.js') }}" defer></script>
 {% endblock %}

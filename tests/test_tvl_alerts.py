@@ -35,7 +35,7 @@ class TvlStorage:
         return [{"exchange": r.exchange.value, "ts": r.ts, "tvl_usd": r.tvl_usd}
                 for r in sorted(rows, key=lambda r: (r.exchange.value, r.ts))]
 
-    async def record_job_run(self, *args: Any) -> None:
+    def record_job_run(self, *args: Any) -> None:
         pass
 
 
@@ -47,10 +47,10 @@ class Notifier:
     async def digest(self, text: str) -> None:
         self.messages.append(text)
 
-    async def failure(self, job_id: str, error: str | None) -> None:
+    def failure(self, job_id: str, error: str | None) -> None:
         self.failures.append(job_id)
 
-    async def recovery(self, job_id: str, fetched: int, new_rows: int) -> None:
+    def recovery(self, job_id: str, fetched: int, new_rows: int) -> None:
         self.messages.append(f"recovered {job_id}")
 
 

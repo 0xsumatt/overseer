@@ -45,8 +45,11 @@ class LighterScraper(BaseExchangeScraper):
         self._markets: dict[str, tuple[int, MarketType, dict]] | None = None
 
     def _build_http(self) -> HttpClient:
+        # Lighter allows 60 unweighted requests per rolling minute per IP, and
+        # trips a 60 s firewall cooldown past it. The scheduler needs ~43 a
+        # minute; the rest is left for the execution reader and the web.
         return HttpClient(
-            limiter=RateLimiter.per_minute(300, burst=20),    
+            limiter=RateLimiter.per_minute(48, burst=4),
             default_headers={"User-Agent": "overseer/0.1"},
         )
 

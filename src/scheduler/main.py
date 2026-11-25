@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
+import zlib
 from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -44,6 +45,18 @@ def _jitter(poll_seconds: int) -> int:
 
     return max(2, min(15, poll_seconds // 6))
 
+
+# Hourly funding jobs start over this many seconds rather than all at once.
+FUNDING_SPREAD_SECONDS = 120
+
+
+def _offset(job_id: str, window: int) -> int:
+    """A delay within `window` seconds, fixed per job. Without it every job of a
+    kind first runs one period after a start, all together (347 minute jobs
+    within 10 s), and they stay bunched for hours."""
+    return zlib.crc32(job_id.encode()) % window
+
+
 def build_scheduler(
     scrapers, storage, notifier, state,
     ohlcv_targets, fills_targets, funding_targets, liquidity_targets,
@@ -59,10 +72,10 @@ def build_scheduler(
         }
     )
     # all polling target kinds schedule identically: one interval job per target
+    now = datetime.now(timezone.utc)
     for run, targets in (
         (run_ohlcv, ohlcv_targets),
         (run_fills, fills_targets),
-        (run_funding, funding_targets),
         (run_liquidity, liquidity_targets),
         (run_orderbook, orderbook_targets),
     ):
@@ -70,11 +83,25 @@ def build_scheduler(
             sched.add_job(
                 run,
                 trigger=IntervalTrigger(
-                    seconds=t.poll_seconds, jitter=_jitter(t.poll_seconds)
+                    seconds=t.poll_seconds, jitter=_jitter(t.poll_seconds),
+                    start_date=now + timedelta(seconds=_offset(t.job_id, t.poll_seconds)),
                 ),
                 args=[scrapers[t.venue], storage, notifier, state, t],
                 id=t.job_id, name=t.job_id, replace_existing=True,
             )
+    # Settlements land on the hour (8-hourly venues too), so settled funding is
+    # read hourly: from 30 s past, giving venues time to publish, plus however
+    # long the venue takes to finalise, spread over two minutes. The live rate
+    # comes with the liquidity snapshots.
+    for t in funding_targets:
+        delay = (30 + int(scrapers[t.venue].SETTLED_AFTER.total_seconds())
+                 + _offset(t.job_id, FUNDING_SPREAD_SECONDS))
+        sched.add_job(
+            run_funding,
+            trigger=CronTrigger(minute=delay // 60, second=delay % 60, timezone="UTC"),
+            args=[scrapers[t.venue], storage, notifier, state, t],
+            id=t.job_id, name=t.job_id, replace_existing=True,
+        )
     # once-a-day heartbeat-to-Discord (no-op if no webhook configured)
     sched.add_job(
         post_digest, trigger=CronTrigger(hour=8, minute=0, timezone="UTC"),
@@ -158,6 +185,8 @@ async def main() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    # Two INFO lines per job run (~1M a day); missed and skipped runs still warn.
+    logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
     storage = Storage(settings.database_url)
     await storage.connect()
@@ -205,6 +234,12 @@ async def main() -> None:
         orderbook_targets, registry=registry, execution_reader=execution_reader,
         tvl=tvl,
     )
+    # Jobs hold heartbeats and alerts; these write and post them in batches.
+    flushers_stop = asyncio.Event()
+    flushers = [
+        asyncio.create_task(storage.run_job_runs(flushers_stop), name="heartbeats"),
+        asyncio.create_task(notifier.run(flushers_stop), name="alerts"),
+    ]
     sched.start()
     log.info("scheduler started with %d job(s)", len(sched.get_jobs()))
 
@@ -261,6 +296,14 @@ async def main() -> None:
                             task.get_name())
                 task.cancel()
             await asyncio.gather(*stream_tasks, return_exceptions=True)
+        # Flush before the scrapers close: jobs still running then fail because
+        # of the shutdown, not their venue, and must not be posted as outages.
+        flushers_stop.set()
+        done, pending = await asyncio.wait(flushers, timeout=15)
+        for task in pending:
+            log.warning("%s did not flush in time; cancelling", task.get_name())
+            task.cancel()
+        await asyncio.gather(*flushers, return_exceptions=True)
         for s in scrapers.values():
             await s.aclose()
         # Blocks while an in-flight capture finishes, so keep it off the loop.
