@@ -31,7 +31,10 @@ file; export the vars or use `uv run --env-file .env`):
 | var | purpose |
 |---|---|
 | `DATABASE_URL` | Timescale DSN, both processes |
-| `DISCORD_WEBHOOK_URL` | job health, current-funding dislocations with executable BBOs, venue TVL drops, and daily digest (optional) |
+| `DISCORD_WEBHOOK_URL` | default Discord webhook: every post without its own channel below, and venue TVL drops (optional) |
+| `DISCORD_ERRORS_WEBHOOK_URL` | job failures and recoveries, the daily heartbeat, funding-unit warnings (optional; default webhook if unset) |
+| `DISCORD_FUNDING_WEBHOOK_URL` | current-funding dislocations with executable BBOs, and cross-venue price gaps (optional; default webhook if unset) |
+| `DISCORD_LISTINGS_WEBHOOK_URL` | the daily listings check (optional; default webhook if unset) |
 | `FLASK_SECRET_KEY` | web session signing; set for any non-dev deploy |
 | `OVERSEER_SYMBOLS_FILE` | path to symbols.toml (default: ./symbols.toml, cwd-relative) |
 | `OVERSEER_SPREAD_ALERT_APR` | APR spread threshold that starts confirmation (default: 25) |
@@ -1149,6 +1152,21 @@ Notes:
   `OVERSEER_SPREAD_ALERT_MIN_OI` of open interest ($1M by default), so a wide
   rate on a thin book never alerts; if one falls below it while an alert
   stands, the closing message says so. A daily digest posts at 08:00 UTC.
+* Price gaps: every minute the scheduler compares each perpetual's newest
+  stored best bid and ask with the median mid of every venue quoting that
+  asset (three or more, within the last 150 seconds; `scheduler/price_gaps.py`).
+  Venues sit at steady offsets from each other, their indexes, quote currencies
+  and funding differing (a sample had Extended's BTC about 12 bps below
+  Hyperliquid's, Bullet's and Phoenix's), so each venue is judged against its
+  own median offset over the past day. One whose bid stays above that usual
+  place, or whose ask stays below it, by 25 bps for crypto or 50 for
+  traditional assets (more for a venue whose offset normally wanders: six
+  times its median absolute deviation) across 10 minutes of fresh quotes posts
+  once, and again once back within half that. Measuring from the bid or ask
+  means the venue's own spread is crossed. A venue whose quote has not moved
+  for those 10 minutes is flagged as possibly closed or stale, as stock and
+  commodity markets can be at weekends. Each venue needs two hours of quotes
+  first; a restart rebuilds the past day from `orderbook_snapshots`.
 * TVL: every 15 minutes the scheduler stores each venue's DefiLlama TVL
   (`data_collection/defillama.py`: Hyperliquid's and Lighter's bridges,
   Extended, BULK, RISEx and Phoenix collateral, Binance's and Bybit's reserves; Bullet

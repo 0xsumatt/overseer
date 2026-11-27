@@ -35,7 +35,8 @@ from scheduler.jobs import (
     run_venue_volume,
 )
 from scheduler.listings import run_listings
-from scheduler.notify import DiscordNotifier
+from scheduler.notify import Channel, DiscordNotifier
+from scheduler.price_gaps import PriceGapMonitor, check_price_gaps
 from scheduler.streams import run_stream
 from scheduler.targets import load_stream_targets, load_targets
 from storage.writers import Storage
@@ -161,6 +162,14 @@ def build_scheduler(
             id="alert:dislocations", name="alert:dislocations",
             replace_existing=True,
         )
+    # A perpetual leaving its usual place among the venues' prices for 10
+    # minutes, from the stored best bids and asks (scheduler/price_gaps.py).
+    if orderbook_targets and registry is not None:
+        sched.add_job(
+            check_price_gaps, trigger=IntervalTrigger(seconds=60),
+            args=[storage, notifier, PriceGapMonitor(registry)],
+            id="alert:price-gaps", name="alert:price-gaps", replace_existing=True,
+        )
     # A venue whose resting crypto funding rate sits a whole factor from the
     # other venues' has a unit error, not a market (core/funding_units.py).
     if funding_targets and registry is not None:
@@ -201,8 +210,13 @@ async def main() -> None:
     storage = Storage(settings.database_url)
     await storage.connect()
 
-    notifier = DiscordNotifier(settings.discord_webhook_url)
-    log.info("discord notifications: %s", "on" if notifier.enabled else "off")
+    notifier = DiscordNotifier(settings.discord_webhook_url, channels={
+        Channel.ERRORS: settings.discord_errors_webhook_url,
+        Channel.FUNDING: settings.discord_funding_webhook_url,
+        Channel.LISTINGS: settings.discord_listings_webhook_url,
+    })
+    log.info("discord notifications: default %s; %s", "on" if settings.discord_webhook_url else "off",
+             ", ".join(f"{c} {notifier.webhook_for(c)}" for c in Channel))
 
     # Load + validate the scrape config. Any error raises here and the process
     # exits loudly rather than starting up scraping nothing.

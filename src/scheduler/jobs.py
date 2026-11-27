@@ -16,7 +16,7 @@ from core.models import OrderBookSnapshot, TopOfBook, VenueTvl
 from core.symbols import VENUE_NAMES, SymbolRegistry
 from data_collection.base import BaseExchangeScraper, Capability
 from data_collection.defillama import DEFILLAMA_TVL, DefiLlamaTvl
-from scheduler.notify import DiscordNotifier, trade_link
+from scheduler.notify import Channel, DiscordNotifier, trade_link
 from scheduler.targets import (
     FillsTarget,
     FundingTarget,
@@ -739,7 +739,7 @@ async def check_dislocations(
                     else "next settlements no longer align"
                 )
                 await notifier.digest(
-                    f"↩️ **{asset}** funding opportunity ended: {reason}"
+                    f"↩️ **{asset}** funding opportunity ended: {reason}", Channel.FUNDING
                 )
             continue
         hi, lo, spread = aligned
@@ -757,7 +757,8 @@ async def check_dislocations(
                 f"📈 **{asset}** current funding spread {spread:.1f}% APR "
                 f"confirmed for {confirmation.minutes:g}m · "
                 f"settles {settlement:%d %b %H:%M UTC}"
-                + execution
+                + execution,
+                Channel.FUNDING,
             )
         else:
             confirmation.reset(asset)
@@ -765,7 +766,8 @@ async def check_dislocations(
                 state[key] = "ok"
                 await notifier.digest(
                     f"↩️ **{asset}** current funding spread narrowed to "
-                    f"{spread:.1f}% APR"
+                    f"{spread:.1f}% APR",
+                    Channel.FUNDING,
                 )
     confirmation.retain(pending_assets)
 
@@ -802,11 +804,15 @@ async def check_funding_units(
                 await notifier.digest(
                     f"⚠️ **{venue}** {kind} funding rests at {resting.apr_pct:.2f}% APR on "
                     f"{resting.markets} markets, {times:.1f}× {direction} the other venues' "
-                    f"{resting.reference_pct:.2f}%: check its units"
+                    f"{resting.reference_pct:.2f}%: check its units",
+                    Channel.ERRORS,
                 )
             elif not resting.suspect and state.get(key) == "suspect":
                 state[key] = "ok"
-                await notifier.digest(f"↩️ **{venue}** {kind} funding agrees with the other venues again")
+                await notifier.digest(
+                    f"↩️ **{venue}** {kind} funding agrees with the other venues again",
+                    Channel.ERRORS,
+                )
 
 
 async def post_digest(storage: Storage, notifier: DiscordNotifier) -> None:
@@ -818,7 +824,8 @@ async def post_digest(storage: Storage, notifier: DiscordNotifier) -> None:
         ingested = sum(r["new_rows"] for r in rows)
         await notifier.digest(
             f"🟢 daily heartbeat — all {total} jobs healthy "
-            f"({ingested} new rows on last run)"
+            f"({ingested} new rows on last run)",
+            Channel.ERRORS,
         )
     else:
         lines = "\n".join(
@@ -826,5 +833,6 @@ async def post_digest(storage: Storage, notifier: DiscordNotifier) -> None:
             for r in failing
         )
         await notifier.digest(
-            f"⚠️ daily heartbeat — {len(failing)}/{total} jobs failing:\n{lines}"
+            f"⚠️ daily heartbeat — {len(failing)}/{total} jobs failing:\n{lines}",
+            Channel.ERRORS,
         )

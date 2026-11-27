@@ -327,6 +327,15 @@ class Storage:
             records,
         )
 
+    async def perp_quotes_since(self, since: datetime) -> list[asyncpg.Record]:
+        """Every perpetual best bid and ask captured since `since`, oldest first:
+        the price-gap monitor's history (scheduler/price_gaps.py)."""
+        return await self.pool.fetch(
+            "SELECT exchange, symbol, ts, bid_price, ask_price FROM orderbook_snapshots "
+            "WHERE market_type = 'perp' AND ts >= $1 ORDER BY ts",
+            since,
+        )
+
     async def write_venue_volume(self, records: Sequence[VenueVolume]) -> int:
         return await self._bulk_upsert(
             "venue_volume", _VENUE_VOL_COLS, _VENUE_VOL_CONFLICT, records

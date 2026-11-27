@@ -25,7 +25,7 @@ from core.models import Listing
 from core.symbols import VENUE_NAMES, SymbolRegistry
 from data_collection.base import Capability
 from scheduler.jobs import JobOutcome, _alert_venue_errors, _record_and_alert
-from scheduler.notify import DiscordNotifier
+from scheduler.notify import Channel, DiscordNotifier
 from storage.writers import Storage
 
 log = logging.getLogger("scheduler")
@@ -216,7 +216,7 @@ async def run_listings(
                           storage, notifier, state)
         return
     for post in posts(found, {v: _label(v, scrapers[v]) for v in venues}):
-        await notifier.digest(post)
+        await notifier.digest(post, Channel.LISTINGS)
     detail = "; ".join(f"{venue}: {error}" for venue, error in errors.items())
     if errors and not markets:
         outcome = JobOutcome("listings:daily", "fail", 0, 0, detail, now)

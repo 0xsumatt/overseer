@@ -9,7 +9,7 @@ from uuid import uuid4
 import asyncpg
 import pytest
 
-from scheduler.notify import DiscordNotifier, alert_group
+from scheduler.notify import Channel, DiscordNotifier, alert_group
 from storage.writers import Storage
 
 T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -18,9 +18,11 @@ T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
 class Webhook:
     def __init__(self) -> None:
         self.posts: list[str] = []
+        self.urls: list[str] = []
 
     async def request(self, method: str, url: str, *, json: dict[str, Any]) -> None:
         self.posts.append(json["content"])
+        self.urls.append(url)
 
     async def aclose(self) -> None:
         pass
@@ -31,6 +33,28 @@ def _notifier(group_seconds: float) -> tuple[DiscordNotifier, Webhook]:
     notifier = DiscordNotifier("https://discord.test/hook", webhook,  # type: ignore[arg-type]
                                group_seconds=group_seconds)
     return notifier, webhook
+
+
+@pytest.mark.asyncio
+async def test_each_kind_of_post_goes_to_its_own_webhook_or_else_the_default() -> None:
+    webhook = Webhook()
+    notifier = DiscordNotifier("https://default", webhook, group_seconds=0,  # type: ignore[arg-type]
+                               channels={Channel.ERRORS: "https://errors",
+                                         Channel.FUNDING: "https://funding",
+                                         Channel.LISTINGS: None})
+    notifier.failure("ohlcv:bulk:BTC:1m", "boom")
+    await notifier.flush()
+    await notifier.digest("spread", Channel.FUNDING)
+    await notifier.digest("listings", Channel.LISTINGS)
+    await notifier.digest("tvl")
+    assert webhook.urls == ["https://errors", "https://funding", "https://default", "https://default"]
+
+    # Without a default, only channels with their own webhook post.
+    webhook = Webhook()
+    notifier = DiscordNotifier(None, webhook, channels={Channel.LISTINGS: "https://listings"})  # type: ignore[arg-type]
+    await notifier.digest("spread", Channel.FUNDING)
+    await notifier.digest("listings", Channel.LISTINGS)
+    assert (webhook.urls, notifier.enabled) == (["https://listings"], True)
 
 
 def test_jobs_group_by_their_venue_or_else_their_kind() -> None:

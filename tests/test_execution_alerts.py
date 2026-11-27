@@ -22,6 +22,7 @@ from scheduler.jobs import (
     UsdcUsdtQuoteCache,
     check_dislocations,
 )
+from scheduler.notify import Channel
 
 
 class RoutingHTTP:
@@ -195,9 +196,11 @@ class AlertStorage:
 class AlertNotifier:
     def __init__(self) -> None:
         self.messages: list[str] = []
+        self.channels: list[Channel | None] = []
 
-    async def digest(self, text: str) -> None:
+    async def digest(self, text: str, channel: Channel | None = None) -> None:
         self.messages.append(text)
+        self.channels.append(channel)
 
 
 class FixedFxCache:
@@ -350,6 +353,7 @@ async def test_dislocation_requires_sustained_rates_before_fetching_books() -> N
     await run_check()
     assert len(notifier.messages) == 2
     assert "current funding spread narrowed" in notifier.messages[1]
+    assert notifier.channels == [Channel.FUNDING, Channel.FUNDING]
     assert state == {"dislocation:BTC": "ok"}
 
 

@@ -5,8 +5,9 @@ import contextlib
 import logging
 import time
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from enum import StrEnum
 
 from data_collection.http import HttpClient
 
@@ -26,6 +27,15 @@ _VENUE_JOBS = frozenset({"ohlcv", "orderbook", "funding", "liquidity", "fills", 
 
 # A post names up to this many of a group's jobs; more are counted by kind.
 _NAMED_JOBS = 3
+
+
+class Channel(StrEnum):
+    """A kind of post. Each may have its own webhook; without one it goes to
+    the default webhook, as does anything not in a channel (TVL drops)."""
+
+    ERRORS = "errors"        # job failures and recoveries, daily heartbeat, funding units
+    FUNDING = "funding"      # current-funding dislocations
+    LISTINGS = "listings"    # the daily listings check
 
 
 _TRADE_URLS: dict[str, Callable[[str], str]] = {
@@ -108,14 +118,16 @@ def _pack(blocks: list[str]) -> list[str]:
 
 
 class DiscordNotifier:
-    """Posts to a Discord webhook. Job failures and recoveries are held per
+    """Posts to Discord webhooks. Job failures and recoveries are held per
     venue for `group_seconds` and posted together by run(); digests post at once."""
 
     def __init__(
         self, webhook_url: str | None, http: HttpClient | None = None,
-        *, group_seconds: float = GROUP_SECONDS,
+        *, channels: Mapping[Channel, str | None] | None = None,
+        group_seconds: float = GROUP_SECONDS,
     ) -> None:
         self._url = webhook_url
+        self._urls = {channel: url for channel, url in (channels or {}).items() if url}
         self._http = http or HttpClient(limiter=None, max_retries=2)
         self._group_seconds = group_seconds
         self._held: dict[str, _Held] = {}       # alert group -> changes to post
@@ -123,16 +135,22 @@ class DiscordNotifier:
 
     @property
     def enabled(self) -> bool:
-        return bool(self._url)
+        return bool(self._url or self._urls)
 
-    async def _send(self, content: str) -> None:
-        if not self._url:
+    def webhook_for(self, channel: Channel) -> str:
+        """'own', 'default' or 'off': where the channel's posts go."""
+        return "own" if channel in self._urls else "default" if self._url else "off"
+
+    async def _send(self, content: str, channel: Channel | None = None) -> None:
+        url = self._urls.get(channel) if channel else None
+        url = url or self._url
+        if not url:
             return
         if len(content) > _DISCORD_LIMIT:
             content = content[:_TRUNCATE] + "\n… (truncated)"
         try:
             await self._http.request(
-                "post", self._url, json={"content": content, "flags": 4}
+                "post", url, json={"content": content, "flags": 4}
             )
         except Exception:
 
@@ -181,7 +199,7 @@ class DiscordNotifier:
         due = sorted(g for g, held in self._held.items() if everything or held.since <= cutoff)
         blocks = [self._describe(group, self._held.pop(group).changes) for group in due]
         for post in _pack([block for block in blocks if block]):
-            await self._send(post)
+            await self._send(post, Channel.ERRORS)
 
     async def run(self, stop: asyncio.Event, tick: float = 5.0) -> None:
         """Post groups as they come due until `stop`, then everything held."""
@@ -192,8 +210,8 @@ class DiscordNotifier:
             if stop.is_set():
                 return
 
-    async def digest(self, text: str) -> None:
-        await self._send(text)
+    async def digest(self, text: str, channel: Channel | None = None) -> None:
+        await self._send(text, channel)
 
     async def aclose(self) -> None:
         await self._http.aclose()

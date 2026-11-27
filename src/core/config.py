@@ -15,6 +15,17 @@ class Settings:
     discord_webhook_url: str | None = field(
         default_factory=lambda: os.getenv("DISCORD_WEBHOOK_URL") or None
     )
+    # Optional webhooks per kind of post (scheduler/notify.py Channel); each
+    # falls back to DISCORD_WEBHOOK_URL.
+    discord_errors_webhook_url: str | None = field(
+        default_factory=lambda: os.getenv("DISCORD_ERRORS_WEBHOOK_URL") or None
+    )
+    discord_funding_webhook_url: str | None = field(
+        default_factory=lambda: os.getenv("DISCORD_FUNDING_WEBHOOK_URL") or None
+    )
+    discord_listings_webhook_url: str | None = field(
+        default_factory=lambda: os.getenv("DISCORD_LISTINGS_WEBHOOK_URL") or None
+    )
   
     symbols_file: str = field(
         default_factory=lambda: os.getenv("OVERSEER_SYMBOLS_FILE", "symbols.toml")

@@ -9,6 +9,7 @@ import pytest
 from core.funding_units import resting_rates
 from core.symbols import AssetMetadata
 from scheduler.jobs import check_funding_units
+from scheduler.notify import Channel
 
 HOURLY_FLOOR = D("0.0000125")  # 0.01% per eight hours, settled hourly: 10.95% a year
 EIGHT_HOUR_FLOOR = D("0.0001")
@@ -72,9 +73,11 @@ class UnitStorage:
 class Notifier:
     def __init__(self) -> None:
         self.messages: list[str] = []
+        self.channels: list[Channel | None] = []
 
-    async def digest(self, text: str) -> None:
+    async def digest(self, text: str, channel: Channel | None = None) -> None:
         self.messages.append(text)
+        self.channels.append(channel)
 
 
 class Registry:
@@ -110,6 +113,8 @@ async def test_a_unit_error_alerts_once_and_recovery_once_per_rate_kind():
     await check_funding_units(storage, notifier, state, Registry())
     await check_funding_units(storage, notifier, state, Registry())
     assert len(notifier.messages) == 2 and "Bullet" in notifier.messages[1]
+    # A unit error is a data problem, so it goes with the error alerts.
+    assert notifier.channels == [Channel.ERRORS, Channel.ERRORS]
     assert state == {"units:current:bullet": "ok"}
 
 
